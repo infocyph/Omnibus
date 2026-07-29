@@ -1,0 +1,68 @@
+{
+    "name": "infocyph/omnibus",
+    "description": "A unified, framework-agnostic event bus and reliable message queue for PHP.",
+    "license": "MIT",
+    "type": "library",
+    "keywords": [
+        "event-bus",
+        "events",
+        "message-bus",
+        "queue",
+        "worker"
+    ],
+    "authors": [
+        {
+            "name": "Infocyph",
+            "email": "infocyph@gmail.com"
+        },
+        {
+            "name": "abmmhasan",
+            "email": "abmmhasan@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "infocyph/uid": "^4.3",
+        "psr/clock": "^1.0",
+        "psr/event-dispatcher": "^1.0"
+    },
+    "require-dev": {
+        "infocyph/cachelayer": "^2.0",
+        "infocyph/dblayer": "^3.0",
+        "infocyph/phpforge": "dev-main@dev"
+    },
+    "suggest": {
+        "ext-redis": "Required by the native Redis/Valkey transport.",
+        "infocyph/cachelayer": "Required by unique-message, overlap, rate-limit, circuit-breaker, and distributed coordination adapters.",
+        "infocyph/console": "Recommended for supervising multiple Omnibus consumer processes.",
+        "infocyph/dblayer": "Required by database queue, batch, and failure-store adapters."
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "autoload": {
+        "psr-4": {
+            "Infocyph\\Omnibus\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Infocyph\\Omnibus\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "ergebnis/composer-normalize": true,
+            "infocyph/phpforge": true,
+            "pestphp/pest-plugin": true,
+            "pestphp/pest-plugin-drift": true
+        },
+        "classmap-authoritative": true,
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "scripts": {
+        "benchmark": "@php benchmarks/run.php",
+        "soak:consumer": "@php benchmarks/consumer-soak.php",
+        "test": "@php vendor/bin/pest --configuration vendor/infocyph/phpforge/resources/pest.xml --bootstrap vendor/autoload.php tests --compact"
+    }
+}
