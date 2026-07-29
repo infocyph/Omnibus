@@ -47,8 +47,7 @@ final readonly class ExponentialRetryStrategy implements RetryStrategy
 
     public function shouldRetry(\Throwable $failure, int $attempt): bool
     {
-        unset($failure);
-
-        return $attempt < $this->maximumAttempts;
+        return !$failure instanceof NonRetryableFailure
+            && $attempt < $this->maximumAttempts;
     }
 }

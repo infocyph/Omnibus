@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace Infocyph\Omnibus\Serialization;
 
 use Infocyph\Omnibus\Envelope\AttemptStamp;
+use Infocyph\Omnibus\Envelope\BatchStamp;
+use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\DelayStamp;
+use Infocyph\Omnibus\Envelope\EnqueuedAtStamp;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Envelope\RouteStamp;
+use Infocyph\Omnibus\Envelope\UniqueStamp;
 
 final class CoreStampCodecs
 {
@@ -49,6 +53,54 @@ final class CoreStampCodecs
                 static fn(AttemptStamp $stamp): array => ['attempt' => $stamp->attempt],
                 static fn(array $data): AttemptStamp => new AttemptStamp(
                     self::int($data, 'attempt'),
+                ),
+            ),
+            new CallbackStampCodec(
+                'unique',
+                UniqueStamp::class,
+                static fn(UniqueStamp $stamp): array => [
+                    'key' => $stamp->key,
+                    'token' => $stamp->token,
+                    'lease_seconds' => $stamp->leaseSeconds,
+                ],
+                static fn(array $data): UniqueStamp => new UniqueStamp(
+                    self::string($data, 'key'),
+                    self::string($data, 'token'),
+                    self::float($data, 'lease_seconds'),
+                ),
+            ),
+            new CallbackStampCodec(
+                'enqueued_at',
+                EnqueuedAtStamp::class,
+                static fn(EnqueuedAtStamp $stamp): array => ['microseconds' => $stamp->microseconds],
+                static fn(array $data): EnqueuedAtStamp => new EnqueuedAtStamp(
+                    self::int($data, 'microseconds'),
+                ),
+            ),
+            new CallbackStampCodec(
+                'chain',
+                ChainStamp::class,
+                static fn(ChainStamp $stamp): array => [
+                    'workflow_id' => $stamp->workflowId,
+                    'index' => $stamp->index,
+                ],
+                static fn(array $data): ChainStamp => new ChainStamp(
+                    self::string($data, 'workflow_id'),
+                    self::int($data, 'index'),
+                ),
+            ),
+            new CallbackStampCodec(
+                'batch',
+                BatchStamp::class,
+                static fn(BatchStamp $stamp): array => [
+                    'workflow_id' => $stamp->workflowId,
+                    'item_id' => $stamp->itemId,
+                    'index' => $stamp->index,
+                ],
+                static fn(array $data): BatchStamp => new BatchStamp(
+                    self::string($data, 'workflow_id'),
+                    self::string($data, 'item_id'),
+                    self::int($data, 'index'),
                 ),
             ),
         ];

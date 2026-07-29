@@ -31,10 +31,28 @@ final readonly class Consumer
         $received = $succeeded = $released = $failed = 0;
         foreach ($this->receiver->receive($queue, $limit, $visibilitySeconds) as $reservation) {
             $received++;
+            $decodeFailure = $reservation->decodingFailure();
+            if ($decodeFailure !== null) {
+                $this->receiver->reject($reservation);
+                $this->failures->add(FailedMessage::undecodable(
+                    $reservation->receipt,
+                    $reservation->queue,
+                    $decodeFailure->payload,
+                    $reservation->attempt,
+                    $this->clock->now(),
+                    $decodeFailure->failureClass,
+                    $decodeFailure->reason,
+                    $decodeFailure->truncated,
+                ));
+                $failed++;
+
+                continue;
+            }
+            $envelope = $reservation->envelope();
 
             try {
-                $handler = $this->handlers->for($reservation->envelope->message);
-                $this->scope->run($reservation->envelope, $handler);
+                $handler = $this->handlers->for($envelope->message);
+                $this->scope->run($envelope, $handler);
                 $this->receiver->acknowledge($reservation);
                 $succeeded++;
             } catch (\Throwable $exception) {
@@ -49,14 +67,14 @@ final readonly class Consumer
                 }
 
                 $this->receiver->reject($reservation);
-                $messageIdStamp = $reservation->envelope->last(MessageIdStamp::class);
+                $messageIdStamp = $envelope->last(MessageIdStamp::class);
                 $messageId = $messageIdStamp instanceof MessageIdStamp
                     ? $messageIdStamp->id
                     : $reservation->receipt;
-                $this->failures->add(new FailedMessage(
+                $this->failures->add(FailedMessage::decoded(
                     $messageId,
                     $reservation->queue,
-                    $reservation->envelope,
+                    $envelope,
                     $reservation->attempt,
                     $this->clock->now(),
                     $exception::class,

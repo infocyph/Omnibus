@@ -26,21 +26,30 @@ by their selected adapters.
 - PSR-14 synchronous events with ordered listeners and stoppable events.
 - Opt-in queued listeners through the same message bus.
 - Immediate and delayed in-memory transport.
+- Durable DBLayer transport with transactional batch reservation.
+- Redis/Valkey transport with atomic Lua reservation and settlement.
+- Capability-aware AMQP and SQS provider boundaries.
 - Bounded reservation visibility, acknowledgement, release, and rejection.
 - Exponential retry with optional jitter.
-- In-memory failure storage with list/find/remove/clear/prune operations.
+- In-memory and DBLayer failure storage with retry, forget, flush, and prune.
 - Versioned JSON envelopes with explicit safe type aliases and size/depth
   limits.
+- Bounded custom binary/MessagePack serializer callback boundary.
 - Bounded batch receive.
 - Per-message execution-scope boundary for persistent-worker cleanup.
 - DBLayer dispatch-after-commit adapter.
+- CacheLayer uniqueness, overlap, rate-limit, and circuit-breaker decorators.
+- Persistent DBLayer chains and batches with cancellation and named lifecycle
+  events.
+- Cooperative execution deadlines and host-owned after-response dispatch.
+- Opt-in queue, wait, attempt, processing, retry, depth, and failure telemetry.
 - Explicit scheduled-message factory keys for Console integration.
 - Provider-neutral broadcast and channel-authorization contracts.
 - Recording sender for tests.
 
-Redis/Valkey, DBLayer queue storage, AMQP, SQS, durable batches/chains,
-CacheLayer coordination policies, provider broadcasting, and Console commands
-remain release-plan work. See [the architecture and status guide](docs/README.md).
+Console commands and Foundation's InterMix/HTTP/auth composition intentionally
+remain in their owning packages. See [the architecture and status
+guide](docs/README.md).
 
 ## Minimal synchronous bus
 
@@ -93,3 +102,8 @@ composer ic:ci
 composer benchmark
 composer soak:consumer
 ```
+
+Backend schema, setup, delivery guarantees, and recovery procedures are covered
+in [the backend guide](docs/backends.md). Workflow and coordination semantics
+are covered in [the workflow guide](docs/workflows.md) and [the policy
+guide](docs/policies.md).

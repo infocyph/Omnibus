@@ -19,5 +19,25 @@ Message aliases should include a stable domain name and payload version, such as
 `billing.invoice.create.v1`. A codec owns migration from its payload version to
 the current application object.
 
+`CallbackEnvelopeSerializer` supports MessagePack or another binary format
+without making its extension a core dependency. Its callbacks must retain the
+same explicit alias allow-list and must never deserialize arbitrary PHP class
+names. The byte limit applies before decode and after encode.
+
+```php
+$serializer = new CallbackEnvelopeSerializer(
+    decoder: static fn(string $payload): Envelope => $safeCodec->decode(
+        msgpack_unpack($payload),
+    ),
+    encoder: static fn(Envelope $envelope): string => msgpack_pack(
+        $safeCodec->encode($envelope),
+    ),
+);
+```
+
+The application-supplied `$safeCodec` owns alias validation. Do not pass
+MessagePack values directly to object constructors by a class name contained in
+the payload.
+
 Do not place secrets, credentials, access tokens, complete ORM/repository
 objects, open resources, closures, or unbounded binary data in messages.

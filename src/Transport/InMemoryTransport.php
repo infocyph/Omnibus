@@ -69,7 +69,7 @@ final class InMemoryTransport implements Transport
                 'expires_at' => $now + $visibilitySeconds,
                 'attempt' => $attempt,
             ];
-            $deliveries[] = new Reservation($receipt, $queue, $envelope, $attempt);
+            $deliveries[] = Reservation::decoded($receipt, $queue, $envelope, $attempt);
         }
         $this->queues[$queue] = $remaining;
 
@@ -110,9 +110,14 @@ final class InMemoryTransport implements Transport
 
     public function size(string $queue): int
     {
-        $this->restoreExpired($this->timestamp());
+        $now = $this->timestamp();
+        $this->restoreExpired($now);
+        $ready = 0;
+        foreach ($this->queues[$queue] ?? [] as $item) {
+            $ready += $item['available_at'] <= $now ? 1 : 0;
+        }
 
-        return count($this->queues[$queue] ?? []);
+        return $ready;
     }
 
     /**

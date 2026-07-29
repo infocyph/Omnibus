@@ -32,10 +32,13 @@
         "infocyph/phpforge": "dev-main@dev"
     },
     "suggest": {
+        "ext-msgpack": "One option for a CallbackEnvelopeSerializer binary codec.",
         "ext-redis": "Required by the native Redis/Valkey transport.",
+        "aws/aws-sdk-php": "One option for implementing the native SQS backend boundary.",
         "infocyph/cachelayer": "Required by unique-message, overlap, rate-limit, circuit-breaker, and distributed coordination adapters.",
         "infocyph/console": "Recommended for supervising multiple Omnibus consumer processes.",
-        "infocyph/dblayer": "Required by database queue, batch, and failure-store adapters."
+        "infocyph/dblayer": "Required by database queue, workflow, and failure-store adapters.",
+        "php-amqplib/php-amqplib": "One option for implementing the native AMQP backend boundary."
     },
     "minimum-stability": "stable",
     "prefer-stable": true,
@@ -63,6 +66,7 @@
     "scripts": {
         "benchmark": "@php benchmarks/run.php",
         "soak:consumer": "@php benchmarks/consumer-soak.php",
+        "soak:durable": "@php benchmarks/durable-soak.php",
         "test": "@php vendor/bin/pest --configuration vendor/infocyph/phpforge/resources/pest.xml --bootstrap vendor/autoload.php tests --compact"
     }
 }

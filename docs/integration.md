@@ -18,14 +18,17 @@ supervision. Omnibus owns the work performed by one consumer.
 after the outermost successful commit inside a transaction, and not after a
 rollback.
 
-Future DB queue and failure adapters will use DBLayer connections and schema
-definitions rather than adding another connection or migration layer.
+`DBLayerTransport`, `DBLayerFailureStore`, and `DBLayerWorkflowStore` use the
+application's existing connection. `QueueSchema::statements()` supplies
+driver-specific DDL for application migrations; adapters never create or alter
+tables during dispatch or consumption.
 
 ## CacheLayer
 
-Future unique-message, overlap, rate-limit, circuit-breaker, and distributed
-workflow coordination will adapt CacheLayer's existing backends and lease
-contracts. Omnibus will not introduce another cache/lock provider hierarchy.
+Unique-message, overlap, fixed-window rate-limit, and circuit-breaker decorators
+adapt CacheLayer's lock and atomic-counter contracts. They are constructed only
+when selected. Omnibus does not introduce another cache/lock provider
+hierarchy.
 
 ## Foundation and InterMix
 
@@ -34,9 +37,16 @@ module. It supplies handler/listener factories, configuration, authorization,
 after-response integration, and an `ExecutionScope` backed by InterMix so every
 message receives a fresh job scope and cleanup on success or failure.
 
+Omnibus supplies only the `AfterResponseRuntime` contract. Foundation adapts
+the active HTTP runtime and must not construct it for CLI consumers.
+
 ## Broadcasting
 
 `Broadcaster` is a provider boundary. `ChannelAuthorizer` accepts an application
 principal supplied by Foundation; Omnibus does not resolve authentication.
 Broadcast providers remain optional and must not initialize for non-broadcast
 messages.
+
+`CallbackBroadcaster` is the SDK-neutral provider adapter. Provider
+authentication, connection management, and channel authorization stay outside
+Omnibus.
