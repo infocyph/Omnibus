@@ -10,6 +10,7 @@ use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Serialization\DecodeFailure;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
+use Infocyph\Omnibus\Transport\QueueName;
 use Infocyph\Omnibus\Transport\Reservation;
 use Infocyph\Omnibus\Transport\Transport;
 use Infocyph\UID\ULID;
@@ -28,7 +29,8 @@ class BrokerTransport implements Transport
 
     public function receive(string $queue, int $limit = 1, float $visibilitySeconds = 60.0): iterable
     {
-        if ($queue === '' || $limit < 1 || !is_finite($visibilitySeconds) || $visibilitySeconds <= 0.0) {
+        QueueName::assert($queue);
+        if ($limit < 1 || !is_finite($visibilitySeconds) || $visibilitySeconds <= 0.0) {
             throw new \InvalidArgumentException(
                 'Receive requires a queue, positive limit, and positive visibility timeout.',
             );
@@ -43,6 +45,14 @@ class BrokerTransport implements Transport
 
         $reservations = [];
         foreach ($this->backend->receive($queue, $limit, $visibilitySeconds) as $delivery) {
+            if (count($reservations) >= $limit) {
+                throw new \UnexpectedValueException(sprintf(
+                    'Broker returned more than the requested %d deliveries.',
+                    $limit,
+                ));
+            }
+            $delivery = self::delivery($delivery);
+
             try {
                 $envelope = $this->serializer
                     ->decode($delivery->payload)
@@ -85,9 +95,7 @@ class BrokerTransport implements Transport
 
     public function send(Envelope $envelope, string $queue): Envelope
     {
-        if ($queue === '') {
-            throw new \InvalidArgumentException('Queue name cannot be empty.');
-        }
+        QueueName::assert($queue);
         $messageId = $envelope->last(MessageIdStamp::class);
         if (!$messageId instanceof MessageIdStamp) {
             $messageId = new MessageIdStamp(ULID::generateMonotonic());
@@ -110,6 +118,21 @@ class BrokerTransport implements Transport
 
     public function size(string $queue): int
     {
-        return $this->backend->size($queue);
+        QueueName::assert($queue);
+        $size = $this->backend->size($queue);
+        if ($size < 0) {
+            throw new \UnexpectedValueException('Broker queue size cannot be negative.');
+        }
+
+        return $size;
+    }
+
+    private static function delivery(mixed $delivery): BrokerDelivery
+    {
+        if (!$delivery instanceof BrokerDelivery) {
+            throw new \UnexpectedValueException('Broker receive must yield BrokerDelivery instances.');
+        }
+
+        return $delivery;
     }
 }

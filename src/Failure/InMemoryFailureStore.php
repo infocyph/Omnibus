@@ -16,8 +16,8 @@ final class InMemoryFailureStore implements FailureStore
 
     public function all(int $limit = 100): array
     {
-        if ($limit < 1) {
-            throw new \InvalidArgumentException('Failure list limit must be positive.');
+        if ($limit < 1 || $limit > 1_000) {
+            throw new \InvalidArgumentException('Failure list limit must be between 1 and 1000.');
         }
 
         return array_slice(array_values($this->failures), 0, $limit);

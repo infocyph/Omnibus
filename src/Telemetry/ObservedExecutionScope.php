@@ -21,23 +21,33 @@ final readonly class ObservedExecutionScope implements ExecutionScope
         try {
             $result = $this->inner->run($envelope, $handler);
         } catch (\Throwable $failure) {
-            $this->telemetry->record('queue.processing.failed', 1, [
+            $this->record('queue.processing.failed', 1, [
                 'message' => $envelope->message::class,
                 'failure' => $failure::class,
             ]);
 
             throw $failure;
         } finally {
-            $this->telemetry->record(
+            $this->record(
                 'queue.processing.duration_ms',
                 (hrtime(true) - $started) / 1_000_000,
                 ['message' => $envelope->message::class],
             );
         }
-        $this->telemetry->record('queue.processing.succeeded', 1, [
+        $this->record('queue.processing.succeeded', 1, [
             'message' => $envelope->message::class,
         ]);
 
         return $result;
+    }
+
+    /** @param array<string, bool|float|int|string> $attributes */
+    private function record(string $metric, float|int $value, array $attributes): void
+    {
+        try {
+            $this->telemetry->record($metric, $value, $attributes);
+        } catch (\Throwable) {
+            // Instrumentation must never replace a handler result or failure.
+        }
     }
 }

@@ -9,11 +9,13 @@ use Infocyph\Omnibus\Envelope\BatchStamp;
 use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
+use Infocyph\Omnibus\Transport\QueueName;
 use Infocyph\Omnibus\Workflow\WorkflowItem;
 use Infocyph\Omnibus\Workflow\WorkflowNotFound;
 use Infocyph\Omnibus\Workflow\WorkflowState;
 use Infocyph\Omnibus\Workflow\WorkflowStatus;
 use Infocyph\Omnibus\Workflow\WorkflowStore;
+use Infocyph\Omnibus\Workflow\WorkflowTransition;
 use Infocyph\UID\ULID;
 
 final readonly class DBLayerWorkflowStore implements WorkflowStore
@@ -33,19 +35,28 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         $this->items = SqlIdentifier::quote($workflowItemTable, $driver);
     }
 
-    public function cancel(string $id): WorkflowState
+    public function cancel(string $id): WorkflowTransition
     {
-        return $this->stateTransaction(function (Connection $connection) use ($id): WorkflowState {
+        return $this->stateTransaction(function (Connection $connection) use ($id): WorkflowTransition {
+            $state = $this->required($id);
+            if (
+                $state->status === WorkflowStatus::Completed
+                || $state->status === WorkflowStatus::Cancelled
+            ) {
+                return new WorkflowTransition($state, false);
+            }
             $cancelled = $connection->update(
                 "UPDATE {$this->items} SET item_status = 'cancelled' WHERE workflow_id = ? AND item_status = 'pending'",
                 [$id],
             );
+            $status = $state->status === WorkflowStatus::Failed ? 'failed' : 'cancelled';
+            $statusChanged = $state->status !== WorkflowStatus::Failed;
             $connection->update(
-                "UPDATE {$this->workflows} SET workflow_status = 'cancelled', cancelled = cancelled + ? WHERE id = ?",
-                [$cancelled, $id],
+                "UPDATE {$this->workflows} SET workflow_status = ?, cancelled = cancelled + ? WHERE id = ?",
+                [$status, $cancelled, $id],
             );
 
-            return $this->required($id);
+            return new WorkflowTransition($this->required($id), $statusChanged || $cancelled > 0);
         });
     }
 
@@ -74,14 +85,17 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         );
     }
 
-    public function fail(string $id, int $index): WorkflowState
+    public function fail(string $id, int $index): WorkflowTransition
     {
-        return $this->stateTransaction(function (Connection $connection) use ($id, $index): WorkflowState {
+        return $this->stateTransaction(function (Connection $connection) use ($id, $index): WorkflowTransition {
             $state = $this->required($id);
             $failed = $connection->update(
-                "UPDATE {$this->items} SET item_status = 'failed' WHERE workflow_id = ? AND item_index = ? AND item_status NOT IN ('failed', 'succeeded', 'cancelled')",
+                "UPDATE {$this->items} SET item_status = 'failed' WHERE workflow_id = ? AND item_index = ? AND item_status IN ('pending', 'dispatched')",
                 [$id, $index],
             );
+            if ($failed !== 1) {
+                return new WorkflowTransition($state, false);
+            }
             $cancelled = 0;
             if ($state->kind === 'chain') {
                 $cancelled = $connection->update(
@@ -89,12 +103,13 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
                     [$id, $index],
                 );
             }
+            $status = $state->status === WorkflowStatus::Cancelled ? 'cancelled' : 'failed';
             $connection->update(
-                "UPDATE {$this->workflows} SET workflow_status = 'failed', failed = failed + ?, cancelled = cancelled + ? WHERE id = ?",
-                [$failed, $cancelled, $id],
+                "UPDATE {$this->workflows} SET workflow_status = ?, failed = failed + 1, cancelled = cancelled + ? WHERE id = ?",
+                [$status, $cancelled, $id],
             );
 
-            return $this->required($id);
+            return new WorkflowTransition($this->required($id), true);
         });
     }
 
@@ -135,21 +150,25 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         ), $rows));
     }
 
-    public function succeed(string $id, int $index): WorkflowState
+    public function succeed(string $id, int $index): WorkflowTransition
     {
-        return $this->stateTransaction(function (Connection $connection) use ($id, $index): WorkflowState {
+        return $this->stateTransaction(function (Connection $connection) use ($id, $index): WorkflowTransition {
             $changed = $connection->update(
                 "UPDATE {$this->items} SET item_status = 'succeeded' WHERE workflow_id = ? AND item_index = ? AND item_status IN ('pending', 'dispatched')",
                 [$id, $index],
             );
-            if ($changed === 1) {
-                $connection->update(
-                    "UPDATE {$this->workflows} SET succeeded = succeeded + 1 WHERE id = ?",
-                    [$id],
-                );
+            if ($changed !== 1) {
+                return new WorkflowTransition($this->required($id), false);
             }
+            $connection->update(
+                "UPDATE {$this->workflows} SET succeeded = succeeded + 1 WHERE id = ?",
+                [$id],
+            );
             $state = $this->required($id);
-            if ($state->succeeded === $state->total) {
+            if (
+                $state->succeeded === $state->total
+                && in_array($state->status, [WorkflowStatus::Pending, WorkflowStatus::Running], true)
+            ) {
                 $connection->update(
                     "UPDATE {$this->workflows} SET workflow_status = 'completed' WHERE id = ?",
                     [$id],
@@ -157,7 +176,7 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
                 $state = $this->required($id);
             }
 
-            return $state;
+            return new WorkflowTransition($state, true);
         });
     }
 
@@ -165,7 +184,10 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
     private static function int(array $row, string $key): int
     {
         $value = $row[$key] ?? null;
-        if (!is_int($value) && !is_string($value)) {
+        if (
+            (!is_int($value) && !is_string($value))
+            || filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]) === false
+        ) {
             throw new \UnexpectedValueException(sprintf('Workflow row "%s" must be an integer.', $key));
         }
 
@@ -189,9 +211,10 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
      */
     private function create(string $id, string $kind, array $envelopes, string $queue): void
     {
-        if ($id === '' || $queue === '' || $envelopes === []) {
+        if ($id === '' || strlen($id) > 26 || $envelopes === []) {
             throw new \InvalidArgumentException('Workflow ID, queue, and messages are required.');
         }
+        QueueName::assert($queue);
         $this->connection->transaction(function (Connection $connection) use (
             $id,
             $kind,
@@ -246,14 +269,14 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
             ?? throw new WorkflowNotFound(sprintf('Workflow "%s" was not found.', $id));
     }
 
-    /** @param callable(Connection):WorkflowState $operation */
-    private function stateTransaction(callable $operation): WorkflowState
+    /** @param callable(Connection):WorkflowTransition $operation */
+    private function stateTransaction(callable $operation): WorkflowTransition
     {
-        $state = $this->connection->transaction($operation);
-        if (!$state instanceof WorkflowState) {
+        $transition = $this->connection->transaction($operation);
+        if (!$transition instanceof WorkflowTransition) {
             throw new \LogicException('DBLayer returned an invalid workflow transaction result.');
         }
 
-        return $state;
+        return $transition;
     }
 }

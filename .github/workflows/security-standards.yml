@@ -18,13 +18,13 @@ jobs:
     with:
       php_versions: '["8.4","8.5"]'
       dependency_versions: '["prefer-lowest","prefer-stable"]'
-      php_extensions: "redis"
+      php_extensions: "memcached, pdo, pdo_mysql, pdo_pgsql, pdo_sqlite, redis"
       composer_flags: ""
       phpstan_memory_limit: "1G"
       psalm_threads: "1"
       run_analysis: true
       run_svg_report: true
-      fail_on_skipped_tests: false
+      fail_on_skipped_tests: true
       run_clean_install: true
       benchmark_composer_script: ""
       benchmark_result_file: ""
@@ -36,9 +36,9 @@ jobs:
       enable_memcached_service: true
       enable_postgres_service: true
       enable_mysql_service: true
-      enable_scylladb_service: true
-      enable_elasticsearch_service: true
-      enable_mongodb_service: true
+      enable_scylladb_service: false
+      enable_elasticsearch_service: false
+      enable_mongodb_service: false
       service_db_name: "phpforge"
       service_db_user: "phpforge"
       service_db_password: "phpforge"

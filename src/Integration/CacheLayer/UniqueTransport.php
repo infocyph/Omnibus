@@ -36,10 +36,19 @@ final readonly class UniqueTransport implements Transport
 
     public function release(Reservation $reservation, float $delaySeconds = 0.0): void
     {
+        if (!is_finite($delaySeconds) || $delaySeconds < 0.0) {
+            throw new \InvalidArgumentException('Release delay must be a finite non-negative number.');
+        }
         $handle = $this->handle($reservation);
+        $requiredLease = $handle instanceof LockHandle
+            ? $handle->leaseSeconds + $delaySeconds
+            : 0.0;
         if (
             $handle instanceof LockHandle
-            && !$this->locks->refresh($handle, $handle->leaseSeconds)
+            && (
+                !is_finite($requiredLease)
+                || !$this->locks->refresh($handle, $requiredLease)
+            )
         ) {
             throw new LeaseLost(sprintf('Unique-message lease "%s" was lost.', $handle->key));
         }

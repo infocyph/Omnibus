@@ -24,8 +24,20 @@ final readonly class CallbackMessageCodec implements MessageCodec
         callable $encoder,
         callable $decoder,
     ) {
-        if ($name === '') {
-            throw new \InvalidArgumentException('Message codec alias cannot be empty.');
+        if (
+            $name === ''
+            || strlen($name) > 200
+            || preg_match('/[\x00-\x1F\x7F]/D', $name) === 1
+        ) {
+            throw new \InvalidArgumentException(
+                'Message codec aliases must contain between 1 and 200 bytes without control characters.',
+            );
+        }
+        if (!class_exists($messageType) && !interface_exists($messageType)) {
+            throw new \InvalidArgumentException(sprintf(
+                'Message codec type "%s" is not a loadable class or interface.',
+                $messageType,
+            ));
         }
         $this->encoder = $encoder(...);
         $this->decoder = $decoder(...);

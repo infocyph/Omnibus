@@ -17,6 +17,7 @@ final readonly class WorkflowState
     ) {
         if (
             $id === ''
+            || strlen($id) > 26
             || !in_array($kind, ['batch', 'chain'], true)
             || $total < 1
             || min($succeeded, $failed, $cancelled) < 0

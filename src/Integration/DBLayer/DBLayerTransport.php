@@ -11,7 +11,9 @@ use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Serialization\DecodeFailure;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
+use Infocyph\Omnibus\Transport\Duration;
 use Infocyph\Omnibus\Transport\InvalidReservation;
+use Infocyph\Omnibus\Transport\QueueName;
 use Infocyph\Omnibus\Transport\Reservation;
 use Infocyph\Omnibus\Transport\ReservationReceipt;
 use Infocyph\Omnibus\Transport\Transport;
@@ -45,7 +47,7 @@ final readonly class DBLayerTransport implements Transport
     {
         self::validateReceive($queue, $limit, $visibilitySeconds);
         $now = $this->microseconds();
-        $reservedUntil = $now + self::secondsToMicroseconds($visibilitySeconds);
+        $reservedUntil = $now + Duration::microseconds($visibilitySeconds, $now);
         $token = ULID::generateMonotonic();
 
         /** @var list<array{id:mixed,payload:mixed,attempts:mixed}> $rows */
@@ -121,7 +123,7 @@ final readonly class DBLayerTransport implements Transport
         $changed = $this->connection->update(
             "UPDATE {$this->table} SET available_at = ?, reserved_until = NULL, receipt = NULL WHERE id = ? AND queue_name = ? AND receipt = ?",
             [
-                $this->microseconds() + self::secondsToMicroseconds($delaySeconds),
+                ($now = $this->microseconds()) + Duration::microseconds($delaySeconds, $now),
                 $id,
                 $reservation->queue,
                 $token,
@@ -132,9 +134,7 @@ final readonly class DBLayerTransport implements Transport
 
     public function send(Envelope $envelope, string $queue): Envelope
     {
-        if ($queue === '') {
-            throw new \InvalidArgumentException('Queue name cannot be empty.');
-        }
+        QueueName::assert($queue);
         if (!$envelope->last(MessageIdStamp::class) instanceof MessageIdStamp) {
             $envelope = $envelope->with(new MessageIdStamp(ULID::generateMonotonic()));
         }
@@ -146,7 +146,10 @@ final readonly class DBLayerTransport implements Transport
                 ULID::generateMonotonic(),
                 $queue,
                 $this->serializer->encode($envelope),
-                $now + self::secondsToMicroseconds($delay instanceof DelayStamp ? $delay->seconds : 0.0),
+                $now + Duration::microseconds(
+                    $delay instanceof DelayStamp ? $delay->seconds : 0.0,
+                    $now,
+                ),
                 $now,
             ],
         );
@@ -156,11 +159,16 @@ final readonly class DBLayerTransport implements Transport
 
     public function size(string $queue): int
     {
+        QueueName::assert($queue);
+        $now = $this->microseconds();
         $count = $this->connection->scalar(
             "SELECT COUNT(*) FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?)",
-            [$queue, $this->microseconds(), $this->microseconds()],
+            [$queue, $now, $now],
         );
-        if (!is_int($count) && !is_string($count)) {
+        if (
+            (!is_int($count) && !is_string($count))
+            || filter_var($count, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]) === false
+        ) {
             throw new \UnexpectedValueException('Queue count must be an integer.');
         }
 
@@ -171,7 +179,10 @@ final readonly class DBLayerTransport implements Transport
     private static function rowInt(array $row, string $key): int
     {
         $value = $row[$key] ?? null;
-        if (!is_int($value) && !is_string($value)) {
+        if (
+            (!is_int($value) && !is_string($value))
+            || filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]) === false
+        ) {
             throw new \UnexpectedValueException(sprintf('Queue row "%s" must be an integer.', $key));
         }
 
@@ -189,14 +200,10 @@ final readonly class DBLayerTransport implements Transport
         return $value;
     }
 
-    private static function secondsToMicroseconds(float $seconds): int
-    {
-        return (int) round($seconds * 1_000_000);
-    }
-
     private static function validateReceive(string $queue, int $limit, float $visibilitySeconds): void
     {
-        if ($queue === '' || $limit < 1 || !is_finite($visibilitySeconds) || $visibilitySeconds <= 0.0) {
+        QueueName::assert($queue);
+        if ($limit < 1 || !is_finite($visibilitySeconds) || $visibilitySeconds <= 0.0) {
             throw new \InvalidArgumentException(
                 'Receive requires a queue, positive limit, and positive visibility timeout.',
             );
@@ -218,8 +225,9 @@ final readonly class DBLayerTransport implements Transport
 
     private function microseconds(): int
     {
-        return ((int) $this->clock->now()->format('U')) * 1_000_000
-            + (int) $this->clock->now()->format('u');
+        $now = $this->clock->now();
+
+        return ((int) $now->format('U')) * 1_000_000 + (int) $now->format('u');
     }
 
     /** @return array{string,string} */

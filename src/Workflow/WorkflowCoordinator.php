@@ -31,10 +31,12 @@ final readonly class WorkflowCoordinator
 
     public function cancel(string $id): WorkflowState
     {
-        $state = $this->store->cancel($id);
-        $this->finalizeBatch($state);
+        $transition = $this->store->cancel($id);
+        if ($transition->changed) {
+            $this->finalizeBatch($transition->state);
+        }
 
-        return $state;
+        return $transition->state;
     }
 
     /** @param iterable<object|Envelope> $messages */
@@ -63,16 +65,20 @@ final readonly class WorkflowCoordinator
     {
         $chain = $envelope->last(ChainStamp::class);
         if ($chain instanceof ChainStamp) {
-            $state = $this->store->fail($chain->workflowId, $chain->index);
-            $this->events?->dispatch(new ChainFailed($state, $chain->index));
+            $transition = $this->store->fail($chain->workflowId, $chain->index);
+            if ($transition->changed) {
+                $this->events?->dispatch(new ChainFailed($transition->state, $chain->index));
+            }
 
             return;
         }
         $batch = $envelope->last(BatchStamp::class);
         if ($batch instanceof BatchStamp) {
-            $state = $this->store->fail($batch->workflowId, $batch->index);
-            $this->events?->dispatch(new BatchFailed($state, $batch->index));
-            $this->finalizeBatch($state);
+            $transition = $this->store->fail($batch->workflowId, $batch->index);
+            if ($transition->changed) {
+                $this->events?->dispatch(new BatchFailed($transition->state, $batch->index));
+                $this->finalizeBatch($transition->state);
+            }
         }
     }
 
@@ -80,9 +86,12 @@ final readonly class WorkflowCoordinator
     {
         $chain = $envelope->last(ChainStamp::class);
         if ($chain instanceof ChainStamp) {
-            $state = $this->store->succeed($chain->workflowId, $chain->index);
-            if ($state->status === WorkflowStatus::Completed) {
-                $this->events?->dispatch(new ChainCompleted($state));
+            $transition = $this->store->succeed($chain->workflowId, $chain->index);
+            if (!$transition->changed) {
+                return;
+            }
+            if ($transition->state->status === WorkflowStatus::Completed) {
+                $this->events?->dispatch(new ChainCompleted($transition->state));
             } else {
                 $this->dispatchPending($chain->workflowId, 1);
             }
@@ -91,11 +100,14 @@ final readonly class WorkflowCoordinator
         }
         $batch = $envelope->last(BatchStamp::class);
         if ($batch instanceof BatchStamp) {
-            $state = $this->store->succeed($batch->workflowId, $batch->index);
-            if ($state->status === WorkflowStatus::Completed) {
-                $this->events?->dispatch(new BatchCompleted($state));
+            $transition = $this->store->succeed($batch->workflowId, $batch->index);
+            if (!$transition->changed) {
+                return;
             }
-            $this->finalizeBatch($state);
+            if ($transition->state->status === WorkflowStatus::Completed) {
+                $this->events?->dispatch(new BatchCompleted($transition->state));
+            }
+            $this->finalizeBatch($transition->state);
         }
     }
 

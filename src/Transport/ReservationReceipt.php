@@ -9,6 +9,9 @@ final class ReservationReceipt
     /** @return array{string,string} */
     public static function decode(string $receipt): array
     {
+        if ($receipt === '' || strlen($receipt) > 1_024) {
+            throw new InvalidReservation('Malformed reservation receipt.');
+        }
         $padding = (4 - strlen($receipt) % 4) % 4;
         $decoded = base64_decode(
             strtr($receipt, '-_', '+/') . str_repeat('=', $padding),
@@ -40,8 +43,15 @@ final class ReservationReceipt
 
     public static function encode(string $id, string $token): string
     {
-        if ($id === '' || $token === '') {
-            throw new \InvalidArgumentException('Receipt identifiers cannot be empty.');
+        if (
+            $id === ''
+            || strlen($id) > 512
+            || $token === ''
+            || strlen($token) > 512
+        ) {
+            throw new \InvalidArgumentException(
+                'Receipt identifiers must contain between 1 and 512 bytes.',
+            );
         }
 
         return rtrim(
