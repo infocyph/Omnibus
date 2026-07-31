@@ -32,7 +32,7 @@
         "infocyph/phpforge": "dev-main@dev"
     },
     "suggest": {
-        "ext-memcached": "Optional for Memcached-backed CacheLayer coordination policies.",
+        "ext-memcached": "Optional for Memcached-backed uniqueness and overlap leases.",
         "ext-msgpack": "One option for a CallbackEnvelopeSerializer binary codec.",
         "ext-redis": "Required by the native Redis/Valkey transport.",
         "aws/aws-sdk-php": "One option for implementing the native SQS backend boundary.",

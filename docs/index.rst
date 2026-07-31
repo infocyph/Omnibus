@@ -14,6 +14,7 @@ adapters, and provider-neutral broadcasts.
    :caption: Guide
 
    getting-started
+   recipes
    architecture
    messages
    events

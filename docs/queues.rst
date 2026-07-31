@@ -81,3 +81,6 @@ is excluded. A broker adapter may declare this estimate inexact.
 
 The in-memory transport is deterministic process-local infrastructure. It is
 not a durable or cross-worker fallback.
+
+See :ref:`complete-sqlite-durable-queue`, :ref:`host-owned-worker-loop`, and
+:ref:`failure-inspection-and-replay` for complete operational examples.

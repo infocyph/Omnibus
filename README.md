@@ -41,7 +41,7 @@ only when their adapters are constructed.
 - Safe versioned JSON envelopes with allow-listed aliases and strict limits
 - CacheLayer uniqueness, overlap, rate-limit, and circuit-breaker decorators
 - Redis-free operation through DBLayer, including zero-service SQLite; Memcached
-  may back CacheLayer coordination but is intentionally not a queue transport
+  may back lease-based uniqueness and overlap but is not a queue transport
 - Persistent chains and batches with idempotent terminal transitions
 - Provider-neutral scheduling, broadcasting, after-response, and telemetry
 - No filesystem scanning, hidden provider initialization, or runtime discovery
@@ -101,7 +101,7 @@ produce durable side effects must remain idempotent.
 ## Quality checks
 
 ```bash
-composer test
+composer ic:tests
 composer ic:ci
 composer benchmark
 composer soak:consumer

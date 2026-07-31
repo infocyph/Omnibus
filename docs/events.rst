@@ -31,3 +31,6 @@ Use a direct method call when the caller requires a result, or when the
 operation is mandatory validation, authorization, persistence, or transaction
 control. Events are appropriate for independently meaningful reactions to an
 already successful state change.
+
+See :ref:`synchronous-and-queued-events` for complete synchronous and queued
+listener composition.

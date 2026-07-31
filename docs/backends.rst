@@ -134,3 +134,8 @@ Memcached is not a queue transport. Its eviction model and primitive set cannot
 provide Omnibus's durable message record, ordered delayed set, reservation
 receipt, visibility reclaim, and atomic settlement guarantees. Do not emulate a
 reliable queue by storing messages as cache entries.
+
+See :ref:`complete-sqlite-durable-queue`,
+:ref:`redis-or-valkey-transport`, and
+:ref:`memcached-uniqueness-with-a-durable-database-queue` for copyable
+compositions.

@@ -57,8 +57,6 @@ The coordination decorators depend on CacheLayer contracts rather than Redis.
 CacheLayer's Memcached lock provider can be wrapped with
 ``DetachedLeaseAdapter`` and used for uniqueness and overlap protection. Its
 token ownership and CAS refresh/release behavior preserve lease ownership.
-Atomic counters supplied by the selected CacheLayer backend can support rate
-limits and circuit state.
 
 .. code-block:: php
 
@@ -73,7 +71,21 @@ limits and circuit state.
    );
 
 Memcached coordination remains ephemeral: eviction or a Memcached restart can
-drop policy state. That may be acceptable for rate limits, circuit breakers, or
-best-effort duplicate suppression, but it must not be confused with durable
-queue storage. Combine Memcached-backed policies with ``DBLayerTransport`` when
-Redis is unavailable and queued messages must survive restarts.
+drop lease state. That may be acceptable for overlap protection or best-effort
+duplicate suppression, but it must not be confused with durable queue storage.
+Combine Memcached-backed policies with ``DBLayerTransport`` when Redis is
+unavailable and queued messages must survive restarts.
+
+Rate limiting and circuit breaking require CacheLayer's
+``AtomicCounterStoreInterface``. CacheLayer 2.0 ships Redis and Valkey counter
+stores. An application may supply another implementation with equivalent
+atomic increment, read, delete, and TTL semantics; a normal PSR cache adapter is
+not sufficient.
+
+Logical policy identifiers are validated and hashed into bounded backend-safe
+storage keys. This permits domain identifiers such as ``tenant:42`` without
+violating Redis counter or Memcached key restrictions and avoids exposing the
+logical value in backend key listings.
+
+See :ref:`memcached-uniqueness-with-a-durable-database-queue` for the complete
+producer and consumer decorator order.
