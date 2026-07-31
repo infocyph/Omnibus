@@ -34,8 +34,7 @@ final readonly class CircuitBreakerScope implements ExecutionScope
 
     public function run(Envelope $envelope, callable $handler): mixed
     {
-        $key = ($this->key)($envelope);
-        PolicyKey::assert($key);
+        $key = PolicyKey::storage('circuit', ($this->key)($envelope));
         $this->assertClosed($key);
 
         try {
@@ -73,12 +72,12 @@ final readonly class CircuitBreakerScope implements ExecutionScope
 
     private function failureKey(string $key): string
     {
-        return 'omnibus:circuit:failures:' . $key;
+        return $key . '.failures';
     }
 
     private function openKey(string $key): string
     {
-        return 'omnibus:circuit:open:' . $key;
+        return $key . '.open';
     }
 
     private function recordFailure(string $key): void
@@ -104,7 +103,7 @@ final readonly class CircuitBreakerScope implements ExecutionScope
     /** @param callable():void $operation */
     private function withLock(string $key, callable $operation): void
     {
-        $handle = $this->locks->acquire('omnibus:circuit:lock:' . $key, 0.0, 5.0);
+        $handle = $this->locks->acquire($key . '.lock', 0.0, 5.0);
         if ($handle === null) {
             throw new CircuitOpen(sprintf('Circuit "%s" state is being updated.', $key));
         }

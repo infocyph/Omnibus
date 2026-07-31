@@ -52,3 +52,6 @@ provider SDK without introducing a hard dependency:
 Omnibus does not resolve authentication, sessions, or provider credentials.
 Provider clients initialize only when the application constructs a broadcast
 path.
+
+See :ref:`scheduling-and-broadcasting-recipe` for complete scheduler and
+provider-callback examples.

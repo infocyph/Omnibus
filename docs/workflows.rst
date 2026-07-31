@@ -58,3 +58,6 @@ accepts the message but the state update fails, recovery may send a duplicate.
 This is the unavoidable at-least-once boundary between two independent durable
 systems. Restore connectivity and call ``dispatchPending($workflowId)`` again;
 handlers must remain idempotent.
+
+See :ref:`durable-chains-and-batches` for complete DBLayer store, transport,
+failure-store, cancellation-scope, chain, and batch composition.

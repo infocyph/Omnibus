@@ -18,4 +18,18 @@ final class PolicyKey
             );
         }
     }
+
+    public static function storage(string $namespace, string $key): string
+    {
+        self::assert($key);
+        if (
+            $namespace === ''
+            || strlen($namespace) > 32
+            || preg_match('/^[a-z][a-z0-9.-]*$/D', $namespace) !== 1
+        ) {
+            throw new \InvalidArgumentException('Policy storage namespaces must be bounded lowercase identifiers.');
+        }
+
+        return sprintf('omnibus.%s.%s', $namespace, hash('sha256', $key));
+    }
 }

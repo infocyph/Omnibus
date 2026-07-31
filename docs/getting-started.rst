@@ -99,3 +99,6 @@ CLI system:
 
 Omnibus deliberately does not own daemonization, signals, PID files, process
 scaling, or subprocess supervision.
+
+Continue with :doc:`recipes` for complete SQLite, Redis, Memcached, workflow,
+worker, failure-replay, scheduling, broadcasting, and telemetry compositions.

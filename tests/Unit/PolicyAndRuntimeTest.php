@@ -9,6 +9,7 @@ use Infocyph\Omnibus\Consumer\ExecutionTimedOut;
 use Infocyph\Omnibus\Dispatch\AfterResponseDispatcher;
 use Infocyph\Omnibus\Dispatch\AfterResponseRuntime;
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Envelope\UniqueStamp;
 use Infocyph\Omnibus\Integration\CacheLayer\CircuitBreakerScope;
 use Infocyph\Omnibus\Integration\CacheLayer\CircuitOpen;
 use Infocyph\Omnibus\Integration\CacheLayer\FixedWindowRateLimitScope;
@@ -42,6 +43,9 @@ test('unique lease survives retries and ends on settlement', function (): void {
         ->toThrow(Infocyph\Omnibus\Integration\CacheLayer\DuplicateMessage::class);
 
     $reservation = [...$transport->receive('work')][0];
+    $unique = $reservation->envelope()->last(UniqueStamp::class);
+    expect($unique)->toBeInstanceOf(UniqueStamp::class)
+        ->and($unique?->key)->toMatch('/^omnibus\.unique\.[a-f0-9]{64}$/D');
     $transport->release($reservation, 5);
     expect($locks->lastRefreshedLease)->toBe(305.0);
     expect(fn() => $sender->send(new Envelope(new TestCommand('two')), 'work'))

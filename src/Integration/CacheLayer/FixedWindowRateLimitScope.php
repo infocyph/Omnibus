@@ -31,16 +31,16 @@ final readonly class FixedWindowRateLimitScope implements ExecutionScope
 
     public function run(Envelope $envelope, callable $handler): mixed
     {
-        $key = ($this->key)($envelope);
-        PolicyKey::assert($key);
+        $logicalKey = ($this->key)($envelope);
+        $key = PolicyKey::storage('rate', $logicalKey);
         $timestamp = (int) $this->clock->now()->format('U');
         $bucket = intdiv($timestamp, $this->windowSeconds);
         $value = $this->counters->increment(
-            sprintf('omnibus:rate:%s:%d', $key, $bucket),
+            sprintf('%s.%d', $key, $bucket),
             ttlSeconds: $this->windowSeconds + 1,
         );
         if ($value->value > $this->maximum) {
-            throw new RateLimitExceeded(sprintf('Rate limit "%s" is exhausted.', $key));
+            throw new RateLimitExceeded(sprintf('Rate limit "%s" is exhausted.', $logicalKey));
         }
 
         return $this->inner->run($envelope, $handler);

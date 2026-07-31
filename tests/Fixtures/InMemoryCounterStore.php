@@ -19,6 +19,7 @@ final class InMemoryCounterStore implements AtomicCounterStoreInterface
 
     public function delete(string $key): bool
     {
+        self::assertKey($key);
         $exists = isset($this->values[$key]);
         unset($this->values[$key]);
 
@@ -27,6 +28,8 @@ final class InMemoryCounterStore implements AtomicCounterStoreInterface
 
     public function get(string $key): ?int
     {
+        self::assertKey($key);
+
         return $this->values[$key] ?? null;
     }
 
@@ -37,6 +40,7 @@ final class InMemoryCounterStore implements AtomicCounterStoreInterface
 
     private function change(string $key, int $by, ?int $ttlSeconds): AtomicCounterValue
     {
+        self::assertKey($key);
         $initialized = !isset($this->values[$key]);
         $this->values[$key] = ($this->values[$key] ?? 0) + $by;
         if ($ttlSeconds !== null && $ttlSeconds < 1) {
@@ -44,5 +48,12 @@ final class InMemoryCounterStore implements AtomicCounterStoreInterface
         }
 
         return new AtomicCounterValue($this->values[$key] ?? 0, $initialized);
+    }
+
+    private static function assertKey(string $key): void
+    {
+        if (preg_match('/^[A-Za-z0-9_.-]+$/D', $key) !== 1) {
+            throw new \InvalidArgumentException('Counter key is not backend-safe.');
+        }
     }
 }

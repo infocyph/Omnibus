@@ -62,3 +62,6 @@ Monitor terminal failure count, oldest failure age, visible queue depth,
 attempt distribution, and handler duration. Define retention and pruning in the
 application. Back up the durable failure table according to its operational
 value and payload sensitivity.
+
+See :ref:`host-owned-worker-loop`, :ref:`failure-inspection-and-replay`, and
+:ref:`telemetry-decorators` for complete runtime compositions.

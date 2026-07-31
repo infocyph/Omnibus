@@ -43,15 +43,14 @@ Commands
 
 .. code-block:: console
 
-   composer test
+   composer ic:tests
    composer ic:ci
    composer benchmark
    composer soak:consumer
    composer soak:durable
 
 ``composer ic:tests`` and ``composer ic:ci`` are supplied by PHPForge and are
-the authoritative quality suites. The local ``composer test`` alias is a
-conventional fast Pest-only entry point.
+the authoritative quality suites.
 
 The remaining local scripts are intentionally package-specific:
 
