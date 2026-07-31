@@ -17,10 +17,15 @@ final readonly class ObservedFailureStore implements FailureStore
     public function add(FailedMessage $failure): void
     {
         $this->inner->add($failure);
-        $this->telemetry->record('queue.failed', 1, [
-            'queue' => $failure->queue,
-            'failure' => $failure->failureClass,
-        ]);
+
+        try {
+            $this->telemetry->record('queue.failed', 1, [
+                'queue' => $failure->queue,
+                'failure' => $failure->failureClass,
+            ]);
+        } catch (\Throwable) {
+            // Failure persistence must not be reported as failed by telemetry.
+        }
     }
 
     public function all(int $limit = 100): array

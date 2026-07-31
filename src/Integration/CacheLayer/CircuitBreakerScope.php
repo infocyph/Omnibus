@@ -35,9 +35,7 @@ final readonly class CircuitBreakerScope implements ExecutionScope
     public function run(Envelope $envelope, callable $handler): mixed
     {
         $key = ($this->key)($envelope);
-        if ($key === '') {
-            throw new \UnexpectedValueException('Circuit-breaker key cannot be empty.');
-        }
+        PolicyKey::assert($key);
         $this->assertClosed($key);
 
         try {

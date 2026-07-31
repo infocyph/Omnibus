@@ -10,7 +10,12 @@ final class RouteMap
     private array $resolved = [];
 
     /** @param array<class-string, Route> $routes */
-    public function __construct(private array $routes = [], private readonly Route $default = new Route()) {}
+    public function __construct(private array $routes = [], private readonly Route $default = new Route())
+    {
+        foreach ($routes as $type => $route) {
+            self::validateMapping($type, $route);
+        }
+    }
 
     public function for(object $message): Route
     {
@@ -29,5 +34,16 @@ final class RouteMap
         }
 
         return $this->resolved[$class] = $this->default;
+    }
+
+    private static function validateMapping(mixed $type, mixed $route): void
+    {
+        if (
+            !is_string($type)
+            || (!class_exists($type) && !interface_exists($type))
+            || !$route instanceof Route
+        ) {
+            throw new \InvalidArgumentException('Route mappings require loadable types and Route values.');
+        }
     }
 }

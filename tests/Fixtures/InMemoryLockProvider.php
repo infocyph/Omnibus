@@ -14,6 +14,8 @@ final class InMemoryLockProvider implements DetachedLeaseProvider
 
     public bool $refreshable = true;
 
+    public ?float $lastRefreshedLease = null;
+
     public function acquire(string $key, float $waitSeconds, float $leaseSeconds = 30.0): ?LockHandle
     {
         if (isset($this->locks[$key])) {
@@ -27,6 +29,8 @@ final class InMemoryLockProvider implements DetachedLeaseProvider
 
     public function refresh(?LockHandle $handle, float $leaseSeconds): bool
     {
+        $this->lastRefreshedLease = $leaseSeconds;
+
         return $this->refreshable
             && $handle instanceof LockHandle
             && $leaseSeconds > 0.0

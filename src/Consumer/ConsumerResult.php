@@ -11,5 +11,12 @@ final readonly class ConsumerResult
         public int $succeeded,
         public int $released,
         public int $failed,
-    ) {}
+    ) {
+        if (
+            min($received, $succeeded, $released, $failed) < 0
+            || $received !== $succeeded + $released + $failed
+        ) {
+            throw new \InvalidArgumentException('Consumer result counters are inconsistent.');
+        }
+    }
 }

@@ -35,9 +35,7 @@ final readonly class UniqueSender implements Sender
     public function send(Envelope $envelope, string $queue): Envelope
     {
         $key = ($this->key)($envelope);
-        if ($key === '') {
-            throw new \UnexpectedValueException('Unique-message key cannot be empty.');
-        }
+        PolicyKey::assert($key);
         $handle = $this->locks->acquire($key, $this->waitSeconds, $this->leaseSeconds);
         if ($handle === null) {
             throw new DuplicateMessage(sprintf('Unique message "%s" is already active.', $key));

@@ -153,12 +153,12 @@ test('DBLayer workflow store persists chain progress and batch cancellation', fu
     $store->dispatched('01CHAIN0000000000000000000', $first[0]->itemId);
     $state = $store->succeed('01CHAIN0000000000000000000', 0);
 
-    expect($state->succeeded)->toBe(1)
+    expect($state->state->succeeded)->toBe(1)
         ->and($store->pending('01CHAIN0000000000000000000'))->toHaveCount(1);
 
     $second = $store->pending('01CHAIN0000000000000000000')[0];
     $store->dispatched('01CHAIN0000000000000000000', $second->itemId);
-    expect($store->succeed('01CHAIN0000000000000000000', 1)->status)
+    expect($store->succeed('01CHAIN0000000000000000000', 1)->state->status)
         ->toBe(WorkflowStatus::Completed);
 
     $store->createBatch('01BATCH0000000000000000000', [
@@ -166,7 +166,7 @@ test('DBLayer workflow store persists chain progress and batch cancellation', fu
         new Envelope(new TestCommand('two')),
     ], 'work');
     $cancelled = $store->cancel('01BATCH0000000000000000000');
-    expect($cancelled->status)->toBe(WorkflowStatus::Cancelled)
-        ->and($cancelled->cancelled)->toBe(2)
+    expect($cancelled->state->status)->toBe(WorkflowStatus::Cancelled)
+        ->and($cancelled->state->cancelled)->toBe(2)
         ->and($store->pending('01BATCH0000000000000000000'))->toBe([]);
 });

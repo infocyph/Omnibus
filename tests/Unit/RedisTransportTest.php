@@ -75,3 +75,52 @@ test('reservation receipts reject tampering', function (): void {
         ->and(fn() => ReservationReceipt::decode($receipt.'x'))
         ->toThrow(InvalidReservation::class);
 });
+
+test('Redis transport rejects malformed and overflowing backend responses', function (mixed $response): void {
+    $transport = new RedisTransport(
+        new CallbackRedisClient(static fn(): mixed => $response),
+        omnibusRedisSerializer(),
+        new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00')),
+    );
+
+    expect(fn() => $transport->size('work'))->toThrow(UnexpectedValueException::class);
+})->with([
+    'negative' => [-1],
+    'fractional' => ['1.5'],
+    'overflow' => [(string) PHP_INT_MAX.'0'],
+    'non scalar' => [[]],
+]);
+
+test('Redis transport surfaces missing payload hash entries as poison reservations', function (): void {
+    $transport = new RedisTransport(
+        new CallbackRedisClient(static fn(): array => ['row-1', '', '1']),
+        omnibusRedisSerializer(),
+        new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00')),
+    );
+
+    $reservation = [...$transport->receive('work')][0];
+
+    expect($reservation->decodingFailure())->not->toBeNull()
+        ->and($reservation->decodingFailure()?->payload)->toBe('');
+});
+
+test('Redis transport rejects malformed batches hash-tag collisions and excessive limits', function (): void {
+    $transport = new RedisTransport(
+        new CallbackRedisClient(static fn(): array => ['incomplete']),
+        omnibusRedisSerializer(),
+        new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00')),
+    );
+
+    expect(fn() => [...$transport->receive('work')])
+        ->toThrow(UnexpectedValueException::class)
+        ->and(fn() => [...$transport->receive('work{other}')])
+        ->toThrow(InvalidArgumentException::class)
+        ->and(fn() => [...$transport->receive('work', 1_001)])
+        ->toThrow(InvalidArgumentException::class)
+        ->and(fn() => new RedisTransport(
+            new CallbackRedisClient(static fn(): int => 1),
+            omnibusRedisSerializer(),
+            new FrozenClock(new DateTimeImmutable()),
+            'prefix{collision}',
+        ))->toThrow(InvalidArgumentException::class);
+});

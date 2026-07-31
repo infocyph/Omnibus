@@ -10,7 +10,9 @@ use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Serialization\DecodeFailure;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
+use Infocyph\Omnibus\Transport\Duration;
 use Infocyph\Omnibus\Transport\InvalidReservation;
+use Infocyph\Omnibus\Transport\QueueName;
 use Infocyph\Omnibus\Transport\Reservation;
 use Infocyph\Omnibus\Transport\ReservationReceipt;
 use Infocyph\Omnibus\Transport\Transport;
@@ -43,7 +45,8 @@ for _, id in ipairs(ids) do
     local attempt = redis.call('HINCRBY', KEYS[4], id, 1)
     redis.call('HSET', KEYS[5], id, ARGV[3])
     table.insert(result, id)
-    table.insert(result, redis.call('HGET', KEYS[3], id))
+    local payload = redis.call('HGET', KEYS[3], id)
+    table.insert(result, payload or '')
     table.insert(result, tostring(attempt))
 end
 return result
@@ -74,8 +77,16 @@ LUA;
         private ClockInterface $clock,
         private string $prefix = 'omnibus',
     ) {
-        if ($prefix === '' || str_contains($prefix, '{') || str_contains($prefix, '}')) {
-            throw new \InvalidArgumentException('Redis key prefix cannot be empty or contain hash-tag braces.');
+        if (
+            $prefix === ''
+            || strlen($prefix) > 191
+            || preg_match('/[\x00-\x1F\x7F]/D', $prefix) === 1
+            || str_contains($prefix, '{')
+            || str_contains($prefix, '}')
+        ) {
+            throw new \InvalidArgumentException(
+                'Redis key prefix must be bounded and cannot contain control characters or hash-tag braces.',
+            );
         }
     }
 
@@ -100,7 +111,7 @@ LUA;
         $keys = $this->keys($queue);
         $result = $this->eval(self::RECEIVE, array_values($keys), [
             (string) $now,
-            (string) ($now + self::secondsToMicroseconds($visibilitySeconds)),
+            (string) ($now + Duration::microseconds($visibilitySeconds, $now)),
             $token,
             (string) $limit,
         ]);
@@ -152,16 +163,14 @@ LUA;
         ], [
             $id,
             $token,
-            (string) ($this->microseconds() + self::secondsToMicroseconds($delaySeconds)),
+            (string) (($now = $this->microseconds()) + Duration::microseconds($delaySeconds, $now)),
         ]);
         $this->assertChanged($changed, $reservation);
     }
 
     public function send(Envelope $envelope, string $queue): Envelope
     {
-        if ($queue === '') {
-            throw new \InvalidArgumentException('Queue name cannot be empty.');
-        }
+        $this->assertQueue($queue);
         if (!$envelope->last(MessageIdStamp::class) instanceof MessageIdStamp) {
             $envelope = $envelope->with(new MessageIdStamp(ULID::generateMonotonic()));
         }
@@ -175,8 +184,8 @@ LUA;
             ULID::generateMonotonic(),
             $this->serializer->encode($envelope),
             (string) (
-                $this->microseconds()
-                + self::secondsToMicroseconds($delay instanceof DelayStamp ? $delay->seconds : 0.0)
+                ($now = $this->microseconds())
+                + Duration::microseconds($delay instanceof DelayStamp ? $delay->seconds : 0.0, $now)
             ),
         ]);
 
@@ -185,6 +194,7 @@ LUA;
 
     public function size(string $queue): int
     {
+        $this->assertQueue($queue);
         $keys = $this->keys($queue);
         $result = $this->eval(
             self::SIZE,
@@ -199,8 +209,7 @@ LUA;
     {
         if (
             (!is_int($value) && !is_string($value))
-            || !is_numeric($value)
-            || (int) $value < 0
+            || filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]) === false
         ) {
             throw new \UnexpectedValueException(sprintf('Redis %s must be a non-negative integer.', $field));
         }
@@ -220,21 +229,20 @@ LUA;
 
     private static function scalarString(mixed $value, string $field): string
     {
-        if (!is_string($value) && !is_int($value) && !is_float($value)) {
-            throw new \UnexpectedValueException(sprintf('Redis %s must be scalar.', $field));
+        if (!is_string($value)) {
+            throw new \UnexpectedValueException(sprintf('Redis %s must be a string.', $field));
         }
 
-        return (string) $value;
-    }
-
-    private static function secondsToMicroseconds(float $seconds): int
-    {
-        return (int) round($seconds * 1_000_000);
+        return $value;
     }
 
     private static function validateReceive(string $queue, int $limit, float $visibilitySeconds): void
     {
-        if ($queue === '' || $limit < 1 || !is_finite($visibilitySeconds) || $visibilitySeconds <= 0.0) {
+        QueueName::assert($queue);
+        if (str_contains($queue, '{') || str_contains($queue, '}')) {
+            throw new \InvalidArgumentException('Redis queue names cannot contain hash-tag braces.');
+        }
+        if ($limit < 1 || !is_finite($visibilitySeconds) || $visibilitySeconds <= 0.0) {
             throw new \InvalidArgumentException(
                 'Receive requires a queue, positive limit, and positive visibility timeout.',
             );
@@ -251,6 +259,14 @@ LUA;
                 'Reservation "%s" is no longer active.',
                 $reservation->receipt,
             ));
+        }
+    }
+
+    private function assertQueue(string $queue): void
+    {
+        QueueName::assert($queue);
+        if (str_contains($queue, '{') || str_contains($queue, '}')) {
+            throw new \InvalidArgumentException('Redis queue names cannot contain hash-tag braces.');
         }
     }
 

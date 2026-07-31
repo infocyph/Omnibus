@@ -26,9 +26,16 @@ final readonly class CallbackStampCodec implements StampCodec
         callable $encoder,
         callable $decoder,
     ) {
-        if ($name === '') {
-            throw new \InvalidArgumentException('Stamp codec alias cannot be empty.');
+        if (
+            $name === ''
+            || strlen($name) > 200
+            || preg_match('/[\x00-\x1F\x7F]/D', $name) === 1
+        ) {
+            throw new \InvalidArgumentException(
+                'Stamp codec aliases must contain between 1 and 200 bytes without control characters.',
+            );
         }
+        self::validateType($stampType);
         $this->encoder = $encoder(...);
         $this->decoder = $decoder(...);
     }
@@ -65,5 +72,16 @@ final readonly class CallbackStampCodec implements StampCodec
     public function type(): string
     {
         return $this->stampType;
+    }
+
+    private static function validateType(string $stampType): void
+    {
+        if (!is_a($stampType, Stamp::class, true)) {
+            throw new \InvalidArgumentException(sprintf(
+                'Stamp codec type "%s" must implement %s.',
+                $stampType,
+                Stamp::class,
+            ));
+        }
     }
 }

@@ -11,7 +11,7 @@ final readonly class JsonEnvelopeSerializer implements EnvelopeSerializer
     /** @var positive-int */
     private int $maximumBytes;
 
-    /** @var int<2, max> */
+    /** @var int<2, 512> */
     private int $maximumDepth;
 
     /** @var positive-int */
@@ -102,11 +102,11 @@ final readonly class JsonEnvelopeSerializer implements EnvelopeSerializer
         return $payload;
     }
 
-    /** @return int<2, max> */
+    /** @return int<2, 512> */
     private static function depth(int $value): int
     {
-        if ($value < 2) {
-            throw new \InvalidArgumentException('Maximum depth must be at least two.');
+        if ($value < 2 || $value > 512) {
+            throw new \InvalidArgumentException('Maximum depth must be between 2 and 512.');
         }
 
         return $value;

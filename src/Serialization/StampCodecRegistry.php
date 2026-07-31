@@ -19,11 +19,14 @@ final readonly class StampCodecRegistry
     {
         $byAlias = $byType = [];
         foreach ($codecs as $codec) {
-            if (isset($byAlias[$codec->alias()]) || isset($byType[$codec->type()])) {
+            $alias = $codec->alias();
+            $type = $codec->type();
+            self::validateIdentity($alias, $type);
+            if (isset($byAlias[$alias]) || isset($byType[$type])) {
                 throw new \InvalidArgumentException('Stamp codec aliases and types must be unique.');
             }
-            $byAlias[$codec->alias()] = $codec;
-            $byType[$codec->type()] = $codec;
+            $byAlias[$alias] = $codec;
+            $byType[$type] = $codec;
         }
         $this->byAlias = $byAlias;
         $this->byType = $byType;
@@ -41,5 +44,17 @@ final readonly class StampCodecRegistry
             ?? throw new UnknownStampType(
                 sprintf('No stamp codec is registered for "%s".', $stamp::class),
             );
+    }
+
+    private static function validateIdentity(string $alias, string $type): void
+    {
+        if (
+            $alias === ''
+            || strlen($alias) > 200
+            || preg_match('/[\x00-\x1F\x7F]/D', $alias) === 1
+            || !is_a($type, Stamp::class, true)
+        ) {
+            throw new \InvalidArgumentException('Stamp codecs must expose a valid alias and stamp type.');
+        }
     }
 }

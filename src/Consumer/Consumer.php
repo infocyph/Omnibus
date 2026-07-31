@@ -33,9 +33,8 @@ final readonly class Consumer
             $received++;
             $decodeFailure = $reservation->decodingFailure();
             if ($decodeFailure !== null) {
-                $this->receiver->reject($reservation);
                 $this->failures->add(FailedMessage::undecodable(
-                    $reservation->receipt,
+                    self::failureId($reservation->receipt, $reservation->queue),
                     $reservation->queue,
                     $decodeFailure->payload,
                     $reservation->attempt,
@@ -44,6 +43,7 @@ final readonly class Consumer
                     $decodeFailure->reason,
                     $decodeFailure->truncated,
                 ));
+                $this->receiver->reject($reservation);
                 $failed++;
 
                 continue;
@@ -53,8 +53,6 @@ final readonly class Consumer
             try {
                 $handler = $this->handlers->for($envelope->message);
                 $this->scope->run($envelope, $handler);
-                $this->receiver->acknowledge($reservation);
-                $succeeded++;
             } catch (\Throwable $exception) {
                 if ($this->retry->shouldRetry($exception, $reservation->attempt)) {
                     $this->receiver->release(
@@ -66,7 +64,6 @@ final readonly class Consumer
                     continue;
                 }
 
-                $this->receiver->reject($reservation);
                 $messageIdStamp = $envelope->last(MessageIdStamp::class);
                 $messageId = $messageIdStamp instanceof MessageIdStamp
                     ? $messageIdStamp->id
@@ -80,10 +77,23 @@ final readonly class Consumer
                     $exception::class,
                     $exception->getMessage(),
                 ));
+                $this->receiver->reject($reservation);
                 $failed++;
+
+                continue;
             }
+
+            $this->receiver->acknowledge($reservation);
+            $succeeded++;
         }
 
         return new ConsumerResult($received, $succeeded, $released, $failed);
+    }
+
+    private static function failureId(string $receipt, string $queue): string
+    {
+        return strlen($receipt) <= 191
+            ? $receipt
+            : 'receipt-' . hash('sha256', $queue . "\0" . $receipt);
     }
 }

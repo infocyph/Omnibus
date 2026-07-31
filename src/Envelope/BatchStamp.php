@@ -11,7 +11,13 @@ final readonly class BatchStamp implements Stamp
         public string $itemId,
         public int $index,
     ) {
-        if ($workflowId === '' || $itemId === '' || $index < 0) {
+        if (
+            $workflowId === ''
+            || strlen($workflowId) > 26
+            || $itemId === ''
+            || strlen($itemId) > 26
+            || $index < 0
+        ) {
             throw new \InvalidArgumentException('Batch stamp requires workflow/item IDs and non-negative index.');
         }
     }

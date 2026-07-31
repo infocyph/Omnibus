@@ -6,7 +6,9 @@ use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Integration\AMQP\AmqpTransport;
 use Infocyph\Omnibus\Integration\Broker\BrokerCapabilities;
+use Infocyph\Omnibus\Integration\Broker\BrokerBackend;
 use Infocyph\Omnibus\Integration\Broker\BrokerDelivery;
+use Infocyph\Omnibus\Integration\Broker\BrokerTransport;
 use Infocyph\Omnibus\Integration\Broker\UnsupportedBrokerCapability;
 use Infocyph\Omnibus\Tests\Fixtures\RecordingBrokerBackend;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
@@ -48,3 +50,48 @@ test('broker transport rejects capabilities the selected provider does not offer
         ->and(fn() => [...$transport->receive('work', 2)])
         ->toThrow(InvalidArgumentException::class);
 });
+
+test('broker transport rejects provider over-delivery and invalid yielded values', function (mixed $delivery): void {
+    $backend = new class($delivery) implements BrokerBackend {
+        public function __construct(private readonly mixed $delivery) {}
+
+        public function acknowledge(string $queue, string $receipt): void {}
+
+        public function capabilities(): BrokerCapabilities
+        {
+            return new BrokerCapabilities(true, true, false, 10);
+        }
+
+        public function receive(string $queue, int $limit, float $visibilitySeconds): array
+        {
+            if ($queue === '' || $limit < 1 || $visibilitySeconds <= 0.0) {
+                return [];
+            }
+
+            return [$this->delivery, $this->delivery];
+        }
+
+        public function reject(string $queue, string $receipt): void {}
+
+        public function release(string $queue, string $receipt, float $delaySeconds): void {}
+
+        public function send(
+            string $queue,
+            string $messageId,
+            string $payload,
+            float $delaySeconds,
+        ): void {}
+
+        public function size(string $queue): int
+        {
+            return $queue === '' ? 0 : 2;
+        }
+    };
+    $transport = new BrokerTransport($backend, TestSerializer::make());
+
+    expect(fn() => [...$transport->receive('work', 1)])
+        ->toThrow(UnexpectedValueException::class);
+})->with([
+    'over delivery' => new BrokerDelivery('receipt', '{}', 1),
+    'wrong value type' => 'not-a-delivery',
+]);

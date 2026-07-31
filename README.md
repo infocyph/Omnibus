@@ -1,12 +1,19 @@
-# Infocyph Omnibus
+# Omnibus
 
-Omnibus is a framework-agnostic, unified application-event bus and reliable
-message queue for PHP.
+[![Security & Standards](https://github.com/infocyph/Omnibus/actions/workflows/security-standards.yml/badge.svg)](https://github.com/infocyph/Omnibus/actions/workflows/security-standards.yml)
+![Packagist Downloads](https://img.shields.io/packagist/dt/infocyph/omnibus?color=green)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+![Packagist Version](https://img.shields.io/packagist/v/infocyph/omnibus)
+![Packagist PHP Version](https://img.shields.io/packagist/dependency-v/infocyph/omnibus/php)
+![GitHub Code Size](https://img.shields.io/github/languages/code-size/infocyph/Omnibus)
+[![Documentation](https://img.shields.io/badge/Documentation-Omnibus-blue?logo=readthedocs&logoColor=white)](https://docs.infocyph.com/projects/Omnibus)
 
-It provides one message lifecycle for direct commands, synchronous events,
-queued listeners, delayed work, scheduled dispatch, and optional broadcasts.
-Applications can change a message from synchronous to asynchronous execution by
-changing its explicit route rather than changing business code.
+A framework-agnostic event bus and reliable message queue for PHP.
+
+Omnibus provides one explicit lifecycle for synchronous commands, PSR-14
+events, queued listeners, delayed work, durable consumers, workflows,
+scheduling adapters, and broadcasts. It works as a standalone Composer library
+and does not require a framework or command package.
 
 ## Install
 
@@ -14,44 +21,32 @@ changing its explicit route rather than changing business code.
 composer require infocyph/omnibus
 ```
 
-The core requires only UID and the PSR clock/event contracts. DBLayer,
-CacheLayer, Console, and external brokers remain optional and are loaded only
-by their selected adapters.
+Requirements:
 
-## Current implementation
+- PHP `^8.4`
+- `infocyph/uid`
+- `psr/clock`
+- `psr/event-dispatcher`
 
-- Immutable envelope with typed extensible stamps.
-- Explicit polymorphic message and listener maps with resolved-route caching.
-- Direct synchronous handlers.
-- PSR-14 synchronous events with ordered listeners and stoppable events.
-- Opt-in queued listeners through the same message bus.
-- Immediate and delayed in-memory transport.
-- Durable DBLayer transport with transactional batch reservation.
-- Redis/Valkey transport with atomic Lua reservation and settlement.
-- Capability-aware AMQP and SQS provider boundaries.
-- Bounded reservation visibility, acknowledgement, release, and rejection.
-- Exponential retry with optional jitter.
-- In-memory and DBLayer failure storage with retry, forget, flush, and prune.
-- Versioned JSON envelopes with explicit safe type aliases and size/depth
-  limits.
-- Bounded custom binary/MessagePack serializer callback boundary.
-- Bounded batch receive.
-- Per-message execution-scope boundary for persistent-worker cleanup.
-- DBLayer dispatch-after-commit adapter.
-- CacheLayer uniqueness, overlap, rate-limit, and circuit-breaker decorators.
-- Persistent DBLayer chains and batches with cancellation and named lifecycle
-  events.
-- Cooperative execution deadlines and host-owned after-response dispatch.
-- Opt-in queue, wait, attempt, processing, retry, depth, and failure telemetry.
-- Explicit scheduled-message factory keys for Console integration.
-- Provider-neutral broadcast and channel-authorization contracts.
-- Recording sender for tests.
+DBLayer, CacheLayer, Redis/Valkey clients, and broker SDKs are optional and load
+only when their adapters are constructed.
 
-Console commands and Foundation's InterMix/HTTP/auth composition intentionally
-remain in their owning packages. See [the architecture and status
-guide](docs/README.md).
+## Highlights
 
-## Minimal synchronous bus
+- Explicit, cached route, handler, listener, codec, transport, and factory maps
+- Direct synchronous handlers and ordered PSR-14 events
+- In-memory, DBLayer, Redis/Valkey, AMQP, and SQS transport boundaries
+- Conditional reservation settlement and visibility-based crash recovery
+- Bounded retries, poison-payload capture, and durable failure management
+- Safe versioned JSON envelopes with allow-listed aliases and strict limits
+- CacheLayer uniqueness, overlap, rate-limit, and circuit-breaker decorators
+- Redis-free operation through DBLayer, including zero-service SQLite; Memcached
+  may back CacheLayer coordination but is intentionally not a queue transport
+- Persistent chains and batches with idempotent terminal transitions
+- Provider-neutral scheduling, broadcasting, after-response, and telemetry
+- No filesystem scanning, hidden provider initialization, or runtime discovery
+
+## Quick start
 
 ```php
 use Infocyph\Omnibus\Envelope\HandledStamp;
@@ -62,20 +57,23 @@ use Infocyph\Omnibus\Transport\SyncTransport;
 use Infocyph\Omnibus\Transport\TransportRegistry;
 
 $handlers = new HandlerMap([
-    CreateInvoice::class => static fn(CreateInvoice $message): string =>
+    CreateInvoice::class => static fn (CreateInvoice $message): string =>
         $invoiceService->create($message),
 ]);
 
 $bus = new MessageBus(
     new RouteMap(),
-    new TransportRegistry(['sync' => new SyncTransport($handlers)]),
+    new TransportRegistry([
+        'sync' => new SyncTransport($handlers),
+    ]),
 );
 
 $result = $bus->dispatch(new CreateInvoice($accountId));
 $invoiceId = $result->last(HandledStamp::class)?->result;
 ```
 
-## Routing asynchronously
+Route selected messages asynchronously without changing the message or business
+handler:
 
 ```php
 use Infocyph\Omnibus\Routing\Route;
@@ -85,14 +83,20 @@ $routes = new RouteMap([
     CreateInvoice::class => new Route(
         transport: 'redis',
         queue: 'billing',
-        delaySeconds: 2,
+        delaySeconds: 2.0,
     ),
 ]);
 ```
 
-The selected transport is the only transport resolved by dispatch. Consumers,
-failure stores, broker clients, and unrelated listeners are not initialized by
-synchronous routes.
+`Consumer::run()` performs one bounded receive call. Any application loop,
+scheduler, process manager, or CLI can invoke it directly.
+
+## Delivery semantics
+
+Durable transports provide at-least-once delivery. Terminal failures are
+persisted before rejection, stale receipts cannot settle reclaimed work, and
+telemetry failures cannot change queue or handler outcomes. Handlers that
+produce durable side effects must remain idempotent.
 
 ## Quality checks
 
@@ -101,9 +105,33 @@ composer test
 composer ic:ci
 composer benchmark
 composer soak:consumer
+composer soak:durable
 ```
 
-Backend schema, setup, delivery guarantees, and recovery procedures are covered
-in [the backend guide](docs/backends.md). Workflow and coordination semantics
-are covered in [the workflow guide](docs/workflows.md) and [the policy
-guide](docs/policies.md).
+## Documentation
+
+Read the complete [Omnibus documentation](https://docs.infocyph.com/projects/Omnibus),
+including [getting started](https://docs.infocyph.com/projects/Omnibus/en/latest/getting-started.html),
+[queue semantics](https://docs.infocyph.com/projects/Omnibus/en/latest/queues.html),
+[durable backends](https://docs.infocyph.com/projects/Omnibus/en/latest/backends.html),
+[serialization security](https://docs.infocyph.com/projects/Omnibus/en/latest/serialization.html),
+[workflows](https://docs.infocyph.com/projects/Omnibus/en/latest/workflows.html), and
+[operations](https://docs.infocyph.com/projects/Omnibus/en/latest/operations.html).
+
+## Security
+
+Protected by [PHPForge](https://github.com/infocyph/PHPForge), the automated
+quality and security gate used across Infocyph PHP libraries.
+
+---
+
+<div align="center">
+  <sub><strong>Made with ❤️ for the PHP community</strong></sub><br />
+  <sub><a href="LICENSE">MIT Licensed</a></sub><br />
+  <a href="https://docs.infocyph.com/projects/Omnibus">Documentation</a> •
+  <a href="SECURITY.md">Security</a> •
+  <a href="CODE_OF_CONDUCT.md">Code of Conduct</a> •
+  <a href="CONTRIBUTING.md">Contributing</a> •
+  <a href="https://github.com/infocyph/Omnibus/issues">Report Bug</a> •
+  <a href="https://github.com/infocyph/Omnibus/issues">Request Feature</a>
+</div>

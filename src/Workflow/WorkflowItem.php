@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\Omnibus\Workflow;
 
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Transport\QueueName;
 
 final readonly class WorkflowItem
 {
@@ -15,8 +16,15 @@ final readonly class WorkflowItem
         public string $queue,
         public Envelope $envelope,
     ) {
-        if ($workflowId === '' || $itemId === '' || $index < 0 || $queue === '') {
+        if (
+            $workflowId === ''
+            || strlen($workflowId) > 26
+            || $itemId === ''
+            || strlen($itemId) > 26
+            || $index < 0
+        ) {
             throw new \InvalidArgumentException('Workflow item fields are invalid.');
         }
+        QueueName::assert($queue);
     }
 }

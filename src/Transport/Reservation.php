@@ -18,12 +18,13 @@ final readonly class Reservation
     ) {
         if (
             $receipt === ''
-            || $queue === ''
+            || strlen($receipt) > 4_096
             || $attempt < 1
             || (($decodedEnvelope === null) === ($decodeFailure === null))
         ) {
             throw new \InvalidArgumentException('A reservation requires a receipt, queue, and positive attempt.');
         }
+        QueueName::assert($queue);
     }
 
     public static function decoded(

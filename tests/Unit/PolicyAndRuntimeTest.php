@@ -42,10 +42,12 @@ test('unique lease survives retries and ends on settlement', function (): void {
         ->toThrow(Infocyph\Omnibus\Integration\CacheLayer\DuplicateMessage::class);
 
     $reservation = [...$transport->receive('work')][0];
-    $transport->release($reservation);
+    $transport->release($reservation, 5);
+    expect($locks->lastRefreshedLease)->toBe(305.0);
     expect(fn() => $sender->send(new Envelope(new TestCommand('two')), 'work'))
         ->toThrow(Infocyph\Omnibus\Integration\CacheLayer\DuplicateMessage::class);
 
+    $clock->advance('+5 seconds');
     $redelivery = [...$transport->receive('work')][0];
     $transport->acknowledge($redelivery);
     expect($sender->send(new Envelope(new TestCommand('three')), 'work'))

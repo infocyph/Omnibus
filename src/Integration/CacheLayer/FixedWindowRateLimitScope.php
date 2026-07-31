@@ -32,9 +32,7 @@ final readonly class FixedWindowRateLimitScope implements ExecutionScope
     public function run(Envelope $envelope, callable $handler): mixed
     {
         $key = ($this->key)($envelope);
-        if ($key === '') {
-            throw new \UnexpectedValueException('Rate-limit key cannot be empty.');
-        }
+        PolicyKey::assert($key);
         $timestamp = (int) $this->clock->now()->format('U');
         $bucket = intdiv($timestamp, $this->windowSeconds);
         $value = $this->counters->increment(

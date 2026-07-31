@@ -10,7 +10,7 @@ final readonly class ChainStamp implements Stamp
         public string $workflowId,
         public int $index,
     ) {
-        if ($workflowId === '' || $index < 0) {
+        if ($workflowId === '' || strlen($workflowId) > 26 || $index < 0) {
             throw new \InvalidArgumentException('Chain stamp requires a workflow ID and non-negative index.');
         }
     }

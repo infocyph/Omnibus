@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\Omnibus\Testing;
 
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Transport\QueueName;
 use Infocyph\Omnibus\Transport\Sender;
 
 final class RecordingSender implements Sender
@@ -36,6 +37,7 @@ final class RecordingSender implements Sender
 
     public function send(Envelope $envelope, string $queue): Envelope
     {
+        QueueName::assert($queue);
         $this->sent[] = ['envelope' => $envelope, 'queue' => $queue];
 
         return $envelope;

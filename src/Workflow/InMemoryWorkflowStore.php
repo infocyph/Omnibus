@@ -7,6 +7,7 @@ namespace Infocyph\Omnibus\Workflow;
 use Infocyph\Omnibus\Envelope\BatchStamp;
 use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Transport\QueueName;
 use Infocyph\UID\ULID;
 
 final class InMemoryWorkflowStore implements WorkflowStore
@@ -20,18 +21,30 @@ final class InMemoryWorkflowStore implements WorkflowStore
      */
     private array $workflows = [];
 
-    public function cancel(string $id): WorkflowState
+    public function cancel(string $id): WorkflowTransition
     {
         $workflow = &$this->workflow($id);
+        if (
+            $workflow['status'] === WorkflowStatus::Completed
+            || $workflow['status'] === WorkflowStatus::Cancelled
+        ) {
+            return new WorkflowTransition($this->state($id, $workflow), false);
+        }
+
+        $changed = false;
         foreach ($workflow['items'] as &$entry) {
             if ($entry['status'] === 'pending') {
                 $entry['status'] = 'cancelled';
+                $changed = true;
             }
         }
         unset($entry);
-        $workflow['status'] = WorkflowStatus::Cancelled;
+        if ($workflow['status'] !== WorkflowStatus::Failed) {
+            $workflow['status'] = WorkflowStatus::Cancelled;
+            $changed = true;
+        }
 
-        return $this->state($id, $workflow);
+        return new WorkflowTransition($this->state($id, $workflow), $changed);
     }
 
     public function createBatch(string $id, array $envelopes, string $queue): void
@@ -59,13 +72,14 @@ final class InMemoryWorkflowStore implements WorkflowStore
         throw new \LogicException(sprintf('Workflow item "%s" is not pending.', $itemId));
     }
 
-    public function fail(string $id, int $index): WorkflowState
+    public function fail(string $id, int $index): WorkflowTransition
     {
         $workflow = &$this->workflow($id);
         $entry = &$this->entry($workflow, $index);
-        if (!in_array($entry['status'], ['failed', 'succeeded'], true)) {
-            $entry['status'] = 'failed';
+        if (!in_array($entry['status'], ['pending', 'dispatched'], true)) {
+            return new WorkflowTransition($this->state($id, $workflow), false);
         }
+        $entry['status'] = 'failed';
         if ($workflow['kind'] === 'chain') {
             foreach ($workflow['items'] as &$candidate) {
                 if ($candidate['item']->index > $index && $candidate['status'] === 'pending') {
@@ -74,9 +88,11 @@ final class InMemoryWorkflowStore implements WorkflowStore
             }
             unset($candidate);
         }
-        $workflow['status'] = WorkflowStatus::Failed;
+        if ($workflow['status'] !== WorkflowStatus::Cancelled) {
+            $workflow['status'] = WorkflowStatus::Failed;
+        }
 
-        return $this->state($id, $workflow);
+        return new WorkflowTransition($this->state($id, $workflow), true);
     }
 
     public function find(string $id): ?WorkflowState
@@ -88,8 +104,8 @@ final class InMemoryWorkflowStore implements WorkflowStore
 
     public function pending(string $id, int $limit = 100): array
     {
-        if ($limit < 1) {
-            throw new \InvalidArgumentException('Pending workflow limit must be positive.');
+        if ($limit < 1 || $limit > 1_000) {
+            throw new \InvalidArgumentException('Pending workflow limit must be between 1 and 1000.');
         }
         $workflow = $this->workflow($id);
         if (
@@ -113,20 +129,24 @@ final class InMemoryWorkflowStore implements WorkflowStore
         return $items;
     }
 
-    public function succeed(string $id, int $index): WorkflowState
+    public function succeed(string $id, int $index): WorkflowTransition
     {
         $workflow = &$this->workflow($id);
         $entry = &$this->entry($workflow, $index);
-        if ($entry['status'] !== 'succeeded') {
-            $entry['status'] = 'succeeded';
+        if (!in_array($entry['status'], ['pending', 'dispatched'], true)) {
+            return new WorkflowTransition($this->state($id, $workflow), false);
         }
+        $entry['status'] = 'succeeded';
         $state = $this->state($id, $workflow);
-        if ($state->succeeded === $state->total) {
+        if (
+            $state->succeeded === $state->total
+            && in_array($workflow['status'], [WorkflowStatus::Pending, WorkflowStatus::Running], true)
+        ) {
             $workflow['status'] = WorkflowStatus::Completed;
             $state = $this->state($id, $workflow);
         }
 
-        return $state;
+        return new WorkflowTransition($state, true);
     }
 
     /**
@@ -168,9 +188,10 @@ final class InMemoryWorkflowStore implements WorkflowStore
      */
     private function create(string $id, string $kind, array $envelopes, string $queue): void
     {
-        if ($id === '' || $queue === '' || $envelopes === [] || isset($this->workflows[$id])) {
+        if ($id === '' || strlen($id) > 26 || $envelopes === [] || isset($this->workflows[$id])) {
             throw new \InvalidArgumentException('Workflow ID, queue, and non-empty unique item list are required.');
         }
+        QueueName::assert($queue);
         $items = [];
         foreach ($envelopes as $index => $envelope) {
             $itemId = ULID::generateMonotonic();

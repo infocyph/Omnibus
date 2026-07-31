@@ -35,9 +35,7 @@ final readonly class OverlapProtectionScope implements ExecutionScope
     public function run(Envelope $envelope, callable $handler): mixed
     {
         $key = ($this->key)($envelope);
-        if ($key === '') {
-            throw new \UnexpectedValueException('Overlap key cannot be empty.');
-        }
+        PolicyKey::assert($key);
         $handle = $this->locks->acquire($key, $this->waitSeconds, $this->leaseSeconds);
         if ($handle === null) {
             throw new MessageOverlap(sprintf('Message overlap lock "%s" is active.', $key));

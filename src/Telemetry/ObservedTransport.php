@@ -26,22 +26,22 @@ final readonly class ObservedTransport implements Transport
     public function acknowledge(Reservation $reservation): void
     {
         $this->inner->acknowledge($reservation);
-        $this->telemetry->record('queue.acknowledged', 1, $this->attributes($reservation->queue));
+        $this->record('queue.acknowledged', 1, $this->attributes($reservation->queue));
     }
 
     public function receive(string $queue, int $limit = 1, float $visibilitySeconds = 60.0): iterable
     {
         $started = hrtime(true);
         $reservations = [...$this->inner->receive($queue, $limit, $visibilitySeconds)];
-        $this->telemetry->record(
+        $this->record(
             'queue.receive.duration_ms',
             (hrtime(true) - $started) / 1_000_000,
             $this->attributes($queue),
         );
-        $this->telemetry->record('queue.received', count($reservations), $this->attributes($queue));
+        $this->record('queue.received', count($reservations), $this->attributes($queue));
         $now = $this->microseconds();
         foreach ($reservations as $reservation) {
-            $this->telemetry->record(
+            $this->record(
                 'queue.attempt',
                 $reservation->attempt,
                 $this->attributes($queue),
@@ -52,12 +52,12 @@ final readonly class ObservedTransport implements Transport
             }
             $enqueued = $reservation->envelope()->last(EnqueuedAtStamp::class);
             if ($enqueued instanceof EnqueuedAtStamp) {
-                $this->telemetry->record(
+                $this->record(
                     'queue.wait_ms',
                     max(0, $now - $enqueued->microseconds) / 1_000,
                     $this->attributes($queue),
                 );
-                $this->telemetry->record(
+                $this->record(
                     'queue.age_ms',
                     max(0, $now - $enqueued->microseconds) / 1_000,
                     $this->attributes($queue),
@@ -71,14 +71,14 @@ final readonly class ObservedTransport implements Transport
     public function reject(Reservation $reservation): void
     {
         $this->inner->reject($reservation);
-        $this->telemetry->record('queue.rejected', 1, $this->attributes($reservation->queue));
+        $this->record('queue.rejected', 1, $this->attributes($reservation->queue));
     }
 
     public function release(Reservation $reservation, float $delaySeconds = 0.0): void
     {
         $this->inner->release($reservation, $delaySeconds);
-        $this->telemetry->record('queue.released', 1, $this->attributes($reservation->queue));
-        $this->telemetry->record('queue.retry_delay_ms', $delaySeconds * 1_000, $this->attributes(
+        $this->record('queue.released', 1, $this->attributes($reservation->queue));
+        $this->record('queue.retry_delay_ms', $delaySeconds * 1_000, $this->attributes(
             $reservation->queue,
         ));
     }
@@ -90,12 +90,12 @@ final readonly class ObservedTransport implements Transport
         }
         $started = hrtime(true);
         $sent = $this->inner->send($envelope, $queue);
-        $this->telemetry->record(
+        $this->record(
             'queue.enqueue.duration_ms',
             (hrtime(true) - $started) / 1_000_000,
             $this->attributes($queue),
         );
-        $this->telemetry->record('queue.enqueued', 1, $this->attributes($queue));
+        $this->record('queue.enqueued', 1, $this->attributes($queue));
 
         return $sent;
     }
@@ -103,7 +103,7 @@ final readonly class ObservedTransport implements Transport
     public function size(string $queue): int
     {
         $depth = $this->inner->size($queue);
-        $this->telemetry->record('queue.depth', $depth, $this->attributes($queue));
+        $this->record('queue.depth', $depth, $this->attributes($queue));
 
         return $depth;
     }
@@ -119,5 +119,15 @@ final readonly class ObservedTransport implements Transport
         $now = $this->clock->now();
 
         return ((int) $now->format('U')) * 1_000_000 + (int) $now->format('u');
+    }
+
+    /** @param array<string, bool|float|int|string> $attributes */
+    private function record(string $metric, float|int $value, array $attributes): void
+    {
+        try {
+            $this->telemetry->record($metric, $value, $attributes);
+        } catch (\Throwable) {
+            // Telemetry is observational and must not alter message settlement.
+        }
     }
 }

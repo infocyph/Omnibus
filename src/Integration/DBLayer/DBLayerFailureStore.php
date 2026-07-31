@@ -155,7 +155,11 @@ final readonly class DBLayerFailureStore implements FailureStore
         $failureClass = self::string($row, 'failure_class');
         $reason = self::string($row, 'reason');
 
-        if (self::string($row, 'payload_kind') === 'envelope') {
+        $kind = self::string($row, 'payload_kind');
+        if ($kind !== 'raw' && $kind !== 'envelope') {
+            throw new \UnexpectedValueException(sprintf('Stored failure payload kind "%s" is invalid.', $kind));
+        }
+        if ($kind === 'envelope') {
             try {
                 return FailedMessage::decoded(
                     $id,

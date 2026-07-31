@@ -17,11 +17,21 @@ final readonly class MessageCodecRegistry
     {
         $byAlias = $byType = [];
         foreach ($codecs as $codec) {
-            if (isset($byAlias[$codec->alias()]) || isset($byType[$codec->type()])) {
+            $alias = $codec->alias();
+            $type = $codec->type();
+            if (
+                $alias === ''
+                || strlen($alias) > 200
+                || preg_match('/[\x00-\x1F\x7F]/D', $alias) === 1
+                || (!class_exists($type) && !interface_exists($type))
+            ) {
+                throw new \InvalidArgumentException('Message codecs must expose a valid alias and type.');
+            }
+            if (isset($byAlias[$alias]) || isset($byType[$type])) {
                 throw new \InvalidArgumentException('Message codec aliases and types must be unique.');
             }
-            $byAlias[$codec->alias()] = $codec;
-            $byType[$codec->type()] = $codec;
+            $byAlias[$alias] = $codec;
+            $byType[$type] = $codec;
         }
         $this->byAlias = $byAlias;
         $this->byType = $byType;

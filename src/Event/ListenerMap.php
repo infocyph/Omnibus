@@ -12,7 +12,12 @@ final class ListenerMap implements ListenerProviderInterface
     private array $resolved = [];
 
     /** @param array<class-string, list<callable>> $listeners */
-    public function __construct(private array $listeners = []) {}
+    public function __construct(private array $listeners = [])
+    {
+        foreach ($listeners as $type => $registered) {
+            self::validateMapping($type, $registered);
+        }
+    }
 
     /** @return iterable<callable> */
     public function getListenersForEvent(object $event): iterable
@@ -30,5 +35,20 @@ final class ListenerMap implements ListenerProviderInterface
         }
 
         return $this->resolved[$class] = $listeners;
+    }
+
+    private static function validateMapping(mixed $type, mixed $listeners): void
+    {
+        if (!is_string($type) || (!class_exists($type) && !interface_exists($type))) {
+            throw new \InvalidArgumentException('Listener mappings require loadable event types.');
+        }
+        if (!is_array($listeners)) {
+            throw new \InvalidArgumentException('Listener mappings must contain listener lists.');
+        }
+        foreach ($listeners as $listener) {
+            if (!is_callable($listener)) {
+                throw new \InvalidArgumentException('Listener mappings must contain callable listeners.');
+            }
+        }
     }
 }

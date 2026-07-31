@@ -7,6 +7,7 @@ namespace Infocyph\Omnibus\Transport;
 use Infocyph\Omnibus\Envelope\AttemptStamp;
 use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\UID\ULID;
 use Psr\Clock\ClockInterface;
 
@@ -40,8 +41,16 @@ final class InMemoryTransport implements Transport
 
     public function receive(string $queue, int $limit = 1, float $visibilitySeconds = 60.0): iterable
     {
-        if ($limit < 1 || !is_finite($visibilitySeconds) || $visibilitySeconds <= 0.0) {
-            throw new \InvalidArgumentException('Receive limit and visibility timeout must be positive.');
+        QueueName::assert($queue);
+        if (
+            $limit < 1
+            || $limit > 1_000
+            || !is_finite($visibilitySeconds)
+            || $visibilitySeconds <= 0.0
+        ) {
+            throw new \InvalidArgumentException(
+                'Receive limit must be between 1 and 1000 and visibility timeout must be positive.',
+            );
         }
 
         $now = $this->timestamp();
@@ -97,6 +106,10 @@ final class InMemoryTransport implements Transport
 
     public function send(Envelope $envelope, string $queue): Envelope
     {
+        QueueName::assert($queue);
+        if (!$envelope->last(MessageIdStamp::class) instanceof MessageIdStamp) {
+            $envelope = $envelope->with(new MessageIdStamp(ULID::generateMonotonic()));
+        }
         $delayStamp = $envelope->last(DelayStamp::class);
         $delay = $delayStamp instanceof DelayStamp ? $delayStamp->seconds : 0.0;
         $this->queues[$queue][] = [
@@ -110,6 +123,7 @@ final class InMemoryTransport implements Transport
 
     public function size(string $queue): int
     {
+        QueueName::assert($queue);
         $now = $this->timestamp();
         $this->restoreExpired($now);
         $ready = 0;
