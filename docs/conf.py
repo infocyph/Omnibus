@@ -20,6 +20,14 @@ extensions = [
 ]
 autosectionlabel_prefix_document = True
 
+# Focused PHP examples intentionally omit the opening tag. Parse them as
+# inline PHP so Pygments applies PHP token highlighting instead of plain text.
+highlight_options = {
+    "php": {
+        "startinline": True,
+    },
+}
+
 html_theme = "sphinx_book_theme"
 html_theme_options = {
     "repository_url": "https://github.com/infocyph/Omnibus",

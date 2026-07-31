@@ -112,6 +112,7 @@ composer soak:durable
 
 Read the complete [Omnibus documentation](https://docs.infocyph.com/projects/Omnibus),
 including [getting started](https://docs.infocyph.com/projects/Omnibus/en/latest/getting-started.html),
+[real-world examples](https://docs.infocyph.com/projects/Omnibus/en/latest/recipes.html),
 [queue semantics](https://docs.infocyph.com/projects/Omnibus/en/latest/queues.html),
 [durable backends](https://docs.infocyph.com/projects/Omnibus/en/latest/backends.html),
 [serialization security](https://docs.infocyph.com/projects/Omnibus/en/latest/serialization.html),
