@@ -27,8 +27,6 @@ Synchronous message bus
 
 .. code-block:: php
 
-   <?php
-
    use Infocyph\Omnibus\Envelope\HandledStamp;
    use Infocyph\Omnibus\Handler\HandlerMap;
    use Infocyph\Omnibus\MessageBus;
