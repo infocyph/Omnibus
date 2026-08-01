@@ -28,7 +28,7 @@
     },
     "require-dev": {
         "infocyph/cachelayer": "^2.0.1",
-        "infocyph/dblayer": "^3.0.2",
+        "infocyph/dblayer": "^3.0.3",
         "infocyph/phpforge": "dev-main@dev"
     },
     "suggest": {
