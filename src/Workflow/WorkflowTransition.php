@@ -8,6 +8,10 @@ final readonly class WorkflowTransition
 {
     public function __construct(
         public WorkflowState $state,
-        public bool $changed,
+        public bool $itemChanged = false,
+        public bool $completedNow = false,
+        public bool $failedNow = false,
+        public bool $cancelledNow = false,
+        public bool $finalizedNow = false,
     ) {}
 }

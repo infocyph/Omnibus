@@ -65,3 +65,15 @@ value and payload sensitivity.
 
 See :ref:`host-owned-worker-loop`, :ref:`failure-inspection-and-replay`, and
 :ref:`telemetry-decorators` for complete runtime compositions.
+
+Workflow recovery
+-----------------
+
+Do not edit workflow rows while workers run. Expired queue reservations are
+reclaimed by normal receive; expired ``dispatching`` claims are reclaimed by
+``dispatchPending()``. A ``handled`` item means business code already returned:
+restore the queue/store dependency and reconcile settlement without replaying
+the handler. Inspect terminal ``failed`` workflows and choose a domain recovery
+operation. Generic failure retry refuses chain and batch stamps because a blind
+resend could violate the aggregate. Until failure-store retry claims are added,
+operators must serialize manual retry of a given non-workflow failure ID.

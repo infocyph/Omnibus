@@ -14,6 +14,8 @@ final class InMemoryLockProvider implements DetachedLeaseProvider
 
     public bool $refreshable = true;
 
+    public bool $releaseFails = false;
+
     public ?float $lastRefreshedLease = null;
 
     public function acquire(string $key, float $waitSeconds, float $leaseSeconds = 30.0): ?LockHandle
@@ -39,6 +41,9 @@ final class InMemoryLockProvider implements DetachedLeaseProvider
 
     public function release(?LockHandle $handle): void
     {
+        if ($this->releaseFails) {
+            throw new \RuntimeException('Lease cleanup unavailable.');
+        }
         if (
             $handle instanceof LockHandle
             && ($this->locks[$handle->key] ?? null) === $handle->token

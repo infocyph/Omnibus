@@ -15,6 +15,7 @@ use Infocyph\Omnibus\Integration\CacheLayer\CircuitOpen;
 use Infocyph\Omnibus\Integration\CacheLayer\FixedWindowRateLimitScope;
 use Infocyph\Omnibus\Integration\CacheLayer\LeaseLost;
 use Infocyph\Omnibus\Integration\CacheLayer\OverlapProtectionScope;
+use Infocyph\Omnibus\Integration\CacheLayer\PolicyKey;
 use Infocyph\Omnibus\Integration\CacheLayer\RateLimitExceeded;
 use Infocyph\Omnibus\Integration\CacheLayer\UniqueSender;
 use Infocyph\Omnibus\Integration\CacheLayer\UniqueTransport;
@@ -45,7 +46,7 @@ test('unique lease survives retries and ends on settlement', function (): void {
     $reservation = [...$transport->receive('work')][0];
     $unique = $reservation->envelope()->last(UniqueStamp::class);
     expect($unique)->toBeInstanceOf(UniqueStamp::class)
-        ->and($unique?->key)->toMatch('/^omnibus\.unique\.[a-f0-9]{64}$/D');
+        ->and($unique?->key)->toMatch('/^omnibus\.[a-f0-9]{32}$/D');
     $transport->release($reservation, 5);
     expect($locks->lastRefreshedLease)->toBe(305.0);
     expect(fn() => $sender->send(new Envelope(new TestCommand('two')), 'work'))
@@ -56,6 +57,41 @@ test('unique lease survives retries and ends on settlement', function (): void {
     $transport->acknowledge($redelivery);
     expect($sender->send(new Envelope(new TestCommand('three')), 'work'))
         ->toBeInstanceOf(Envelope::class);
+});
+
+test('policy counter keys remain inside CacheLayer bounds after suffixes', function (): void {
+    $base = PolicyKey::storage('circuit', str_repeat('logical-key', 40));
+
+    expect(strlen($base.'.failures'))->toBeLessThanOrEqual(64)
+        ->and(strlen($base.'.'.PHP_INT_MAX))->toBeLessThanOrEqual(64)
+        ->and($base)->toMatch('/^omnibus\.[a-f0-9]{32}$/D');
+});
+
+test('unique cleanup failure cannot undo durable queue settlement', function (): void {
+    $locks = new InMemoryLockProvider();
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $inner = new InMemoryTransport($clock);
+    $reported = 0;
+    $transport = new UniqueTransport(
+        $inner,
+        $locks,
+        static function () use (&$reported): void {
+            $reported++;
+        },
+    );
+    $sender = new UniqueSender(
+        $transport,
+        $locks,
+        static fn(Envelope $envelope): string => $envelope->message::class,
+    );
+    $sender->send(new Envelope(new TestCommand('one')), 'work');
+    $reservation = [...$transport->receive('work')][0];
+    $locks->releaseFails = true;
+
+    $transport->acknowledge($reservation);
+
+    expect($reported)->toBe(1)
+        ->and($inner->size('work'))->toBe(0);
 });
 
 test('overlap protection reports lease loss and always releases', function (): void {
@@ -111,7 +147,15 @@ test('rate limit and circuit breaker use CacheLayer atomic state', function (): 
         ->toThrow(CircuitOpen::class);
 
     $clock->advance('+6 seconds');
-    expect($circuit->run($envelope, static fn(): string => 'recovered'))->toBe('recovered');
+    $probes = 0;
+    expect($circuit->run($envelope, function () use ($circuit, $envelope, &$probes): string {
+        $probes++;
+        expect(fn() => $circuit->run($envelope, static fn(): null => null))
+            ->toThrow(CircuitOpen::class);
+
+        return 'recovered';
+    }))->toBe('recovered')
+        ->and($probes)->toBe(1);
 });
 
 test('deadline scope exposes cooperative cancellation without process signals', function (): void {

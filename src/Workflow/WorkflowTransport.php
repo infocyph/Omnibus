@@ -17,10 +17,13 @@ final readonly class WorkflowTransport implements Transport
 
     public function acknowledge(Reservation $reservation): void
     {
-        if ($reservation->decodingFailure() === null) {
-            $this->workflows->succeed($reservation->envelope());
+        if ($reservation->decodingFailure() !== null) {
+            $this->inner->acknowledge($reservation);
+
+            return;
         }
-        $this->inner->acknowledge($reservation);
+
+        $this->workflows->settle($this->inner, $reservation);
     }
 
     public function receive(string $queue, int $limit = 1, float $visibilitySeconds = 60.0): iterable

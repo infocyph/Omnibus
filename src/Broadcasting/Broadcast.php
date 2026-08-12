@@ -6,6 +6,8 @@ namespace Infocyph\Omnibus\Broadcasting;
 
 final readonly class Broadcast
 {
+    private const int DEFAULT_MAXIMUM_PAYLOAD_BYTES = 262_144;
+
     /**
      * @param list<Channel> $channels
      * @param array<string, mixed> $payload
@@ -14,6 +16,7 @@ final readonly class Broadcast
         public string $event,
         public array $channels,
         public array $payload,
+        int $maximumPayloadBytes = self::DEFAULT_MAXIMUM_PAYLOAD_BYTES,
     ) {
         if (
             $event === ''
@@ -21,14 +24,21 @@ final readonly class Broadcast
             || preg_match('/[\x00-\x1F\x7F]/D', $event) === 1
             || $channels === []
             || count($channels) > 1_000
+            || $maximumPayloadBytes < 1
         ) {
             throw new \InvalidArgumentException('A broadcast requires an event and at least one channel.');
         }
         foreach ($channels as $channel) {
             self::validateChannel($channel);
         }
-        foreach ($payload as $key => $_value) {
-            self::validatePayloadKey($key);
+        self::validatePayload($payload);
+        $encoded = json_encode(
+            $payload,
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+            64,
+        );
+        if (strlen($encoded) > $maximumPayloadBytes) {
+            throw new \LengthException('Broadcast payload exceeds the configured byte limit.');
         }
     }
 
@@ -39,10 +49,27 @@ final readonly class Broadcast
         }
     }
 
-    private static function validatePayloadKey(mixed $key): void
+    private static function validatePayload(mixed $value): void
     {
-        if (!is_string($key)) {
-            throw new \InvalidArgumentException('Broadcast payload keys must be strings.');
+        if (
+            $value === null
+            || is_bool($value)
+            || is_int($value)
+            || is_string($value)
+            || (is_float($value) && is_finite($value))
+        ) {
+            return;
+        }
+        if (!is_array($value)) {
+            throw new \InvalidArgumentException('Broadcast payload must contain JSON-compatible values.');
+        }
+
+        $list = array_is_list($value);
+        foreach ($value as $key => $item) {
+            if (!$list && !is_string($key)) {
+                throw new \InvalidArgumentException('Broadcast payload maps must use string keys.');
+            }
+            self::validatePayload($item);
         }
     }
 }

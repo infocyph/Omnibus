@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Infocyph\Omnibus\Consumer\Consumer;
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Envelope\AttemptStamp;
 use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
@@ -83,8 +84,10 @@ test('expired reservations become available for redelivery', function (): void {
 
     $clock->advance('+3 seconds');
 
-    expect($transport->size('default'))->toBe(1)
-        ->and([...$transport->receive('default')][0]->attempt)->toBe(2);
+    $redelivered = [...$transport->receive('default')][0];
+    expect($redelivered->attempt)->toBe(2)
+        ->and($redelivered->envelope()->all(AttemptStamp::class))->toHaveCount(1)
+        ->and($redelivered->envelope()->last(AttemptStamp::class)?->attempt)->toBe(2);
 });
 
 test('queue size reports visible depth rather than delayed messages', function (): void {

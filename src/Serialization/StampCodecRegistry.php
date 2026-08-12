@@ -52,7 +52,9 @@ final readonly class StampCodecRegistry
             $alias === ''
             || strlen($alias) > 200
             || preg_match('/[\x00-\x1F\x7F]/D', $alias) === 1
+            || !class_exists($type)
             || !is_a($type, Stamp::class, true)
+            || !new \ReflectionClass($type)->isInstantiable()
         ) {
             throw new \InvalidArgumentException('Stamp codecs must expose a valid alias and stamp type.');
         }

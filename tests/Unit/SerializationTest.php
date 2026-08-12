@@ -4,13 +4,19 @@ declare(strict_types=1);
 
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
+use Infocyph\Omnibus\Envelope\Stamp;
 use Infocyph\Omnibus\Serialization\CallbackMessageCodec;
+use Infocyph\Omnibus\Serialization\CallbackStampCodec;
 use Infocyph\Omnibus\Serialization\CoreStampCodecs;
 use Infocyph\Omnibus\Serialization\JsonEnvelopeSerializer;
 use Infocyph\Omnibus\Serialization\MessageCodecRegistry;
 use Infocyph\Omnibus\Serialization\StampCodecRegistry;
 use Infocyph\Omnibus\Serialization\UnknownMessageType;
 use Infocyph\Omnibus\Serialization\UnknownStampType;
+use Infocyph\Omnibus\Tests\Fixtures\AbstractMessageCodecFixture;
+use Infocyph\Omnibus\Tests\Fixtures\AbstractStampCodecFixture;
+use Infocyph\Omnibus\Tests\Fixtures\InterfaceMessageCodecFixture;
+use Infocyph\Omnibus\Tests\Fixtures\InterfaceStampCodecFixture;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 
 function omnibusSerializer(): JsonEnvelopeSerializer
@@ -141,4 +147,48 @@ test('codec registries reject duplicate aliases and types at construction', func
             new StampCodecRegistry(CoreStampCodecs::all()),
             maximumDepth: 1,
         ))->toThrow(InvalidArgumentException::class);
+});
+
+test('codec registration is concrete and encoder output is self-decodable', function (): void {
+    $numericMessage = new CallbackMessageCodec(
+        'numeric',
+        TestCommand::class,
+        static fn(TestCommand $message): array => [$message->value],
+        static fn(array $data): TestCommand => new TestCommand((string) ($data['value'] ?? '')),
+    );
+    $invalidStamp = new CallbackStampCodec(
+        'invalid',
+        MessageIdStamp::class,
+        static fn(MessageIdStamp $stamp): array => ['id' => ['nested', $stamp->id]],
+        static fn(array $data): MessageIdStamp => new MessageIdStamp((string) ($data['id'] ?? '')),
+    );
+
+    expect(fn() => new CallbackMessageCodec(
+        'interface',
+        InterfaceMessageCodecFixture::class,
+        static fn(object $message): array => get_object_vars($message),
+        static fn(array $data): object => (object) $data,
+    ))->toThrow(InvalidArgumentException::class)
+        ->and(fn() => new CallbackMessageCodec(
+            'abstract',
+            AbstractMessageCodecFixture::class,
+            static fn(object $message): array => get_object_vars($message),
+            static fn(array $data): object => (object) $data,
+        ))->toThrow(InvalidArgumentException::class)
+        ->and(fn() => new CallbackStampCodec(
+            'interface',
+            InterfaceStampCodecFixture::class,
+            static fn(Stamp $stamp): array => ['type' => $stamp::class],
+            static fn(array $data): Stamp => new MessageIdStamp((string) ($data['id'] ?? 'id')),
+        ))->toThrow(InvalidArgumentException::class)
+        ->and(fn() => new CallbackStampCodec(
+            'abstract',
+            AbstractStampCodecFixture::class,
+            static fn(Stamp $stamp): array => ['type' => $stamp::class],
+            static fn(array $data): Stamp => new MessageIdStamp((string) ($data['id'] ?? 'id')),
+        ))->toThrow(InvalidArgumentException::class)
+        ->and(fn() => $numericMessage->encode(new TestCommand('numeric')))
+        ->toThrow(UnexpectedValueException::class)
+        ->and(fn() => $invalidStamp->encode(new MessageIdStamp('id')))
+        ->toThrow(UnexpectedValueException::class);
 });

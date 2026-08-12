@@ -33,8 +33,9 @@ The Omnibus suite covers:
 * broker capability, malformed delivery, and over-delivery enforcement;
 * detached uniqueness, delayed retry lease refresh, overlap, rate limit,
   circuit recovery, and lease loss;
-* workflow ordering, cancellation, terminal-state non-regression, and
-  idempotent lifecycle events;
+* workflow claim ownership/expiry, handled redelivery reconciliation, bounded
+  1/100/101/1000 creation, cancellation races, terminal-state non-regression,
+  and idempotent lifecycle events;
 * telemetry success and exporter-failure isolation;
 * after-commit, after-response, scheduling, and broadcasting boundaries.
 
@@ -48,6 +49,7 @@ Commands
    composer benchmark
    composer soak:consumer
    composer soak:durable
+   composer soak:workflow
 
 ``composer ic:tests`` and ``composer ic:ci`` are supplied by PHPForge and are
 the authoritative quality suites.
@@ -60,6 +62,8 @@ The remaining local scripts are intentionally package-specific:
   progressive memory growth;
 * ``composer soak:durable`` proves that alternating SQLite consumers drain the
   durable queue;
+* ``composer soak:workflow`` exercises handled reconciliation and workflow
+  aggregate invariants repeatedly;
 * PHPForge's ``ic:soak:worker`` complements these by monitoring the RSS and
   lifetime of an arbitrary long-running worker command.
 

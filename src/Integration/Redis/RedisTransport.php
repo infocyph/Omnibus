@@ -8,9 +8,9 @@ use Infocyph\Omnibus\Envelope\AttemptStamp;
 use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
+use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Serialization\DecodeFailure;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
-use Infocyph\Omnibus\Transport\Duration;
 use Infocyph\Omnibus\Transport\InvalidReservation;
 use Infocyph\Omnibus\Transport\QueueName;
 use Infocyph\Omnibus\Transport\Reservation;
@@ -111,7 +111,7 @@ LUA;
         $keys = $this->keys($queue);
         $result = $this->eval(self::RECEIVE, array_values($keys), [
             (string) $now,
-            (string) ($now + Duration::microseconds($visibilitySeconds, $now)),
+            (string) Time::add($now, $visibilitySeconds),
             $token,
             (string) $limit,
         ]);
@@ -163,7 +163,7 @@ LUA;
         ], [
             $id,
             $token,
-            (string) (($now = $this->microseconds()) + Duration::microseconds($delaySeconds, $now)),
+            (string) Time::add($this->microseconds(), $delaySeconds),
         ]);
         $this->assertChanged($changed, $reservation);
     }
@@ -183,9 +183,9 @@ LUA;
         ], [
             ULID::generateMonotonic(),
             $this->serializer->encode($envelope),
-            (string) (
-                ($now = $this->microseconds())
-                + Duration::microseconds($delay instanceof DelayStamp ? $delay->seconds : 0.0, $now)
+            (string) Time::add(
+                $this->microseconds(),
+                $delay instanceof DelayStamp ? $delay->seconds : 0.0,
             ),
         ]);
 
@@ -301,8 +301,6 @@ LUA;
 
     private function microseconds(): int
     {
-        $now = $this->clock->now();
-
-        return ((int) $now->format('U')) * 1_000_000 + (int) $now->format('u');
+        return Time::fromDate($this->clock->now());
     }
 }

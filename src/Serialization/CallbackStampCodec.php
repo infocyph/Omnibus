@@ -65,7 +65,7 @@ final readonly class CallbackStampCodec implements StampCodec
             );
         }
 
-        return ($this->encoder)($stamp);
+        return self::validatePayload(($this->encoder)($stamp), $this->name);
     }
 
     /** @return class-string<T> */
@@ -74,11 +74,41 @@ final readonly class CallbackStampCodec implements StampCodec
         return $this->stampType;
     }
 
+    /**
+     * @param array<mixed, mixed> $payload
+     * @return array<string, bool|float|int|string|null>
+     */
+    private static function validatePayload(array $payload, string $name): array
+    {
+        foreach ($payload as $key => $value) {
+            if (
+                !is_string($key)
+                || (!is_bool($value)
+                    && !is_float($value)
+                    && !is_int($value)
+                    && !is_string($value)
+                    && $value !== null)
+                || (is_float($value) && !is_finite($value))
+            ) {
+                throw new \UnexpectedValueException(sprintf(
+                    'Codec "%s" must encode a string-keyed scalar stamp map.',
+                    $name,
+                ));
+            }
+        }
+
+        return $payload;
+    }
+
     private static function validateType(string $stampType): void
     {
-        if (!is_a($stampType, Stamp::class, true)) {
+        if (
+            !class_exists($stampType)
+            || !is_a($stampType, Stamp::class, true)
+            || !new \ReflectionClass($stampType)->isInstantiable()
+        ) {
             throw new \InvalidArgumentException(sprintf(
-                'Stamp codec type "%s" must implement %s.',
+                'Stamp codec type "%s" must be a concrete class implementing %s.',
                 $stampType,
                 Stamp::class,
             ));

@@ -7,6 +7,7 @@ namespace Infocyph\Omnibus\Integration\DBLayer;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\Omnibus\Failure\FailedMessage;
 use Infocyph\Omnibus\Failure\FailureStore;
+use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
 
 final readonly class DBLayerFailureStore implements FailureStore
@@ -16,9 +17,9 @@ final readonly class DBLayerFailureStore implements FailureStore
     public function __construct(
         private Connection $connection,
         private EnvelopeSerializer $serializer,
-        string $table = 'omnibus_failures',
+        private string $rawTable = 'omnibus_failures',
     ) {
-        $this->table = SqlIdentifier::quote($table, $connection->getDriverName());
+        $this->table = SqlIdentifier::quote($this->rawTable, $connection->getDriverName());
     }
 
     public function add(FailedMessage $failure): void
@@ -28,27 +29,33 @@ final readonly class DBLayerFailureStore implements FailureStore
             ? (string) $failure->payload
             : $this->serializer->encode($failure->envelope);
 
-        $this->connection->transaction(function (Connection $connection) use (
-            $failure,
-            $kind,
-            $payload,
-        ): void {
-            $connection->update("DELETE FROM {$this->table} WHERE id = ?", [$failure->id]);
-            $connection->insert(
-                "INSERT INTO {$this->table} (id, queue_name, payload, payload_kind, payload_truncated, attempt, failed_at, failure_class, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    $failure->id,
-                    $failure->queue,
-                    $payload,
-                    $kind,
-                    $failure->payloadTruncated ? 1 : 0,
-                    $failure->attempt,
-                    self::dateToMicroseconds($failure->failedAt),
-                    $failure->failureClass,
-                    $failure->reason,
-                ],
-            );
-        });
+        $upserted = $this->connection->table($this->rawTable)->upsert(
+            [
+                'id' => $failure->id,
+                'queue_name' => $failure->queue,
+                'payload' => $payload,
+                'payload_kind' => $kind,
+                'payload_truncated' => $failure->payloadTruncated ? 1 : 0,
+                'attempt' => $failure->attempt,
+                'failed_at' => Time::fromDate($failure->failedAt),
+                'failure_class' => $failure->failureClass,
+                'reason' => $failure->reason,
+            ],
+            ['id'],
+            [
+                'queue_name',
+                'payload',
+                'payload_kind',
+                'payload_truncated',
+                'attempt',
+                'failed_at',
+                'failure_class',
+                'reason',
+            ],
+        );
+        if (!$upserted) {
+            throw new \RuntimeException('DBLayer did not persist the failed message.');
+        }
     }
 
     public function all(int $limit = 100): array
@@ -65,7 +72,7 @@ final readonly class DBLayerFailureStore implements FailureStore
 
     public function clear(): int
     {
-        return $this->connection->update("DELETE FROM {$this->table}");
+        return $this->connection->delete("DELETE FROM {$this->table}");
     }
 
     public function find(string $id): ?FailedMessage
@@ -80,15 +87,15 @@ final readonly class DBLayerFailureStore implements FailureStore
 
     public function prune(\DateTimeImmutable $before): int
     {
-        return $this->connection->update(
+        return $this->connection->delete(
             "DELETE FROM {$this->table} WHERE failed_at < ?",
-            [self::dateToMicroseconds($before)],
+            [Time::fromDate($before)],
         );
     }
 
     public function remove(string $id): bool
     {
-        return $this->connection->update(
+        return $this->connection->delete(
             "DELETE FROM {$this->table} WHERE id = ?",
             [$id],
         ) === 1;
@@ -105,11 +112,6 @@ final readonly class DBLayerFailureStore implements FailureStore
         return (bool) $value;
     }
 
-    private static function dateToMicroseconds(\DateTimeImmutable $date): int
-    {
-        return ((int) $date->format('U')) * 1_000_000 + (int) $date->format('u');
-    }
-
     /** @param array<string, mixed> $row */
     private static function int(array $row, string $key): int
     {
@@ -119,18 +121,6 @@ final readonly class DBLayerFailureStore implements FailureStore
         }
 
         return (int) $value;
-    }
-
-    private static function microsecondsToDate(int $microseconds): \DateTimeImmutable
-    {
-        $seconds = intdiv($microseconds, 1_000_000);
-        $remainder = $microseconds % 1_000_000;
-        $date = \DateTimeImmutable::createFromFormat('U.u', sprintf('%d.%06d', $seconds, $remainder));
-        if (!$date instanceof \DateTimeImmutable) {
-            throw new \UnexpectedValueException('Stored failure timestamp is invalid.');
-        }
-
-        return $date;
     }
 
     /** @param array<string, mixed> $row */
@@ -151,7 +141,7 @@ final readonly class DBLayerFailureStore implements FailureStore
         $queue = self::string($row, 'queue_name');
         $payload = self::string($row, 'payload');
         $attempt = self::int($row, 'attempt');
-        $failedAt = self::microsecondsToDate(self::int($row, 'failed_at'));
+        $failedAt = Time::toDate(self::int($row, 'failed_at'));
         $failureClass = self::string($row, 'failure_class');
         $reason = self::string($row, 'reason');
 

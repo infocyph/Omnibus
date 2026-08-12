@@ -25,6 +25,7 @@ use Infocyph\Omnibus\Serialization\StampCodecRegistry;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
 use Infocyph\Omnibus\Transport\SyncTransport;
 use Infocyph\Omnibus\Transport\TransportRegistry;
+use Infocyph\Omnibus\Workflow\InMemoryWorkflowStore;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
@@ -142,6 +143,22 @@ $retryConsumer = new Consumer(
     new InMemoryFailureStore(),
     $clock,
 );
+$workflowMessages = static fn(int $count): array => array_map(
+    static fn(int $value): Envelope => new Envelope(new BenchmarkMessage($value)),
+    range(1, $count),
+);
+$workflowCreation = static function (int $count) use ($workflowMessages): void {
+    (new InMemoryWorkflowStore())->createBatch('benchmark', $workflowMessages($count), 'benchmark');
+};
+$workflowTransition = static function () use ($workflowMessages): void {
+    $store = new InMemoryWorkflowStore();
+    $store->createBatch('benchmark', $workflowMessages(100), 'benchmark');
+    foreach ($store->claimPending('benchmark', 100, 30) as $claim) {
+        $store->confirmDispatched('benchmark', $claim->item->itemId, $claim->token);
+        $store->markHandled('benchmark', $claim->item->index, $claim->item->itemId);
+        $store->succeed('benchmark', $claim->item->index);
+    }
+};
 
 $results = [
     'sync_dispatch' => measure($iterations, static fn() => $bus->dispatch($message)),
@@ -179,6 +196,22 @@ $results = [
                 $database->acknowledge($reservation);
             }
         },
+    ),
+    'workflow_create_1' => measureWithoutWarmup(
+        min($iterations, 1_000),
+        static fn() => $workflowCreation(1),
+    ),
+    'workflow_create_100' => measureWithoutWarmup(
+        min($iterations, 100),
+        static fn() => $workflowCreation(100),
+    ),
+    'workflow_create_1000' => measureWithoutWarmup(
+        min($iterations, 10),
+        static fn() => $workflowCreation(1_000),
+    ),
+    'workflow_claim_and_transition_100' => measureWithoutWarmup(
+        min($iterations, 100),
+        $workflowTransition,
     ),
 ];
 

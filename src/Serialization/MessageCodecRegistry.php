@@ -23,7 +23,8 @@ final readonly class MessageCodecRegistry
                 $alias === ''
                 || strlen($alias) > 200
                 || preg_match('/[\x00-\x1F\x7F]/D', $alias) === 1
-                || (!class_exists($type) && !interface_exists($type))
+                || !class_exists($type)
+                || !new \ReflectionClass($type)->isInstantiable()
             ) {
                 throw new \InvalidArgumentException('Message codecs must expose a valid alias and type.');
             }

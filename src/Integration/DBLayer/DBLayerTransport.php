@@ -6,21 +6,30 @@ namespace Infocyph\Omnibus\Integration\DBLayer;
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\Omnibus\Envelope\AttemptStamp;
+use Infocyph\Omnibus\Envelope\BatchStamp;
+use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
+use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Serialization\DecodeFailure;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
-use Infocyph\Omnibus\Transport\Duration;
 use Infocyph\Omnibus\Transport\InvalidReservation;
 use Infocyph\Omnibus\Transport\QueueName;
 use Infocyph\Omnibus\Transport\Reservation;
 use Infocyph\Omnibus\Transport\ReservationReceipt;
 use Infocyph\Omnibus\Transport\Transport;
+use Infocyph\Omnibus\Workflow\AtomicWorkflowTransport;
+use Infocyph\Omnibus\Workflow\WorkflowStore;
+use Infocyph\Omnibus\Workflow\WorkflowTransition;
 use Infocyph\UID\ULID;
 use Psr\Clock\ClockInterface;
 
-final readonly class DBLayerTransport implements Transport
+/**
+ * SQLite deployments must use one active consuming writer because DBLayer 4.0
+ * does not expose an immediate-writer transaction mode.
+ */
+final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transport
 {
     private string $table;
 
@@ -35,19 +44,46 @@ final readonly class DBLayerTransport implements Transport
 
     public function acknowledge(Reservation $reservation): void
     {
-        [$id, $token] = $this->receipt($reservation);
-        $deleted = $this->connection->update(
-            "DELETE FROM {$this->table} WHERE id = ? AND queue_name = ? AND receipt = ?",
-            [$id, $reservation->queue, $token],
-        );
-        $this->assertChanged($deleted, $reservation);
+        $this->deleteReservation($reservation, $this->connection);
+    }
+
+    public function acknowledgeWorkflow(
+        Reservation $reservation,
+        WorkflowStore $store,
+    ): WorkflowTransition {
+        if (!$store instanceof DBLayerWorkflowStore || !$store->usesConnection($this->connection)) {
+            throw new \LogicException('Atomic workflow settlement requires the same DBLayer connection.');
+        }
+
+        $transition = $this->connection->transaction(function (Connection $connection) use (
+            $reservation,
+            $store,
+        ): WorkflowTransition {
+            $this->deleteReservation($reservation, $connection);
+            $envelope = $reservation->envelope();
+            $chain = $envelope->last(ChainStamp::class);
+            if ($chain instanceof ChainStamp) {
+                return $store->succeed($chain->workflowId, $chain->index);
+            }
+            $batch = $envelope->last(BatchStamp::class);
+            if ($batch instanceof BatchStamp) {
+                return $store->succeed($batch->workflowId, $batch->index);
+            }
+
+            throw new \LogicException('Atomic workflow settlement requires a workflow stamp.');
+        });
+        if (!$transition instanceof WorkflowTransition) {
+            throw new \LogicException('DBLayer returned an invalid workflow settlement result.');
+        }
+
+        return $transition;
     }
 
     public function receive(string $queue, int $limit = 1, float $visibilitySeconds = 60.0): iterable
     {
         self::validateReceive($queue, $limit, $visibilitySeconds);
         $now = $this->microseconds();
-        $reservedUntil = $now + Duration::microseconds($visibilitySeconds, $now);
+        $reservedUntil = Time::add($now, $visibilitySeconds);
         $token = ULID::generateMonotonic();
 
         /** @var list<array{id:mixed,payload:mixed,attempts:mixed}> $rows */
@@ -123,7 +159,7 @@ final readonly class DBLayerTransport implements Transport
         $changed = $this->connection->update(
             "UPDATE {$this->table} SET available_at = ?, reserved_until = NULL, receipt = NULL WHERE id = ? AND queue_name = ? AND receipt = ?",
             [
-                ($now = $this->microseconds()) + Duration::microseconds($delaySeconds, $now),
+                Time::add($this->microseconds(), $delaySeconds),
                 $id,
                 $reservation->queue,
                 $token,
@@ -146,9 +182,9 @@ final readonly class DBLayerTransport implements Transport
                 ULID::generateMonotonic(),
                 $queue,
                 $this->serializer->encode($envelope),
-                $now + Duration::microseconds(
-                    $delay instanceof DelayStamp ? $delay->seconds : 0.0,
+                Time::add(
                     $now,
+                    $delay instanceof DelayStamp ? $delay->seconds : 0.0,
                 ),
                 $now,
             ],
@@ -173,6 +209,11 @@ final readonly class DBLayerTransport implements Transport
         }
 
         return (int) $count;
+    }
+
+    public function supportsWorkflowStore(WorkflowStore $store): bool
+    {
+        return $store instanceof DBLayerWorkflowStore && $store->usesConnection($this->connection);
     }
 
     /** @param array<string, mixed> $row */
@@ -223,11 +264,19 @@ final readonly class DBLayerTransport implements Transport
         }
     }
 
+    private function deleteReservation(Reservation $reservation, Connection $connection): void
+    {
+        [$id, $token] = $this->receipt($reservation);
+        $deleted = $connection->delete(
+            "DELETE FROM {$this->table} WHERE id = ? AND queue_name = ? AND receipt = ?",
+            [$id, $reservation->queue, $token],
+        );
+        $this->assertChanged($deleted, $reservation);
+    }
+
     private function microseconds(): int
     {
-        $now = $this->clock->now();
-
-        return ((int) $now->format('U')) * 1_000_000 + (int) $now->format('u');
+        return Time::fromDate($this->clock->now());
     }
 
     /** @return array{string,string} */

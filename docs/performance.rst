@@ -25,7 +25,9 @@ Benchmarks
 * in-memory send/receive/ack;
 * failure-store writes;
 * consumer terminal retry;
-* SQLite enqueue and receive/ack batches.
+* SQLite enqueue and receive/ack batches;
+* workflow creation at 1, 100, and 1000 items;
+* workflow claim and terminal transition throughput.
 
 These are microbenchmarks, not application requests per second. Application
 throughput also depends on bootstrap, handlers, storage, network latency,
@@ -37,6 +39,23 @@ Soak tests
 ``composer soak:consumer`` checks bounded memory and stable process-local depth.
 ``composer soak:durable`` alternates SQLite consumers and verifies the durable
 queue drains without duplicate settlement.
+``composer soak:workflow`` repeatedly claims, handles, and finalizes batches
+while checking aggregate reconciliation invariants.
+
+Database contention is an operational benchmark: test 2/4/8 consumers against
+10k and 100k+ mixed ready/delayed/reserved rows on the intended MySQL and
+PostgreSQL versions. Capture messages/s, reservation latency, lock waits,
+duplicate settlements, stale-settlement rejection, and ``EXPLAIN ANALYZE`` for
+``(queue_name, available_at, reserved_until)`` versus candidate ready/reclaim
+indexes. SQLite remains restricted to one active consuming writer until DBLayer
+offers a managed immediate-writer transaction.
+
+Run the harness for each service database, for example:
+
+.. code-block:: console
+
+   composer benchmark:db-contention -- mysql 4 100000
+   composer benchmark:db-contention -- pgsql 8 100000
 
 Regression practice
 -------------------

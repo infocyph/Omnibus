@@ -8,10 +8,10 @@ use Psr\EventDispatcher\ListenerProviderInterface;
 
 final class ListenerMap implements ListenerProviderInterface
 {
-    /** @var array<class-string, list<callable>> */
+    /** @var array<class-string, list<callable|ShouldQueue>> */
     private array $resolved = [];
 
-    /** @param array<class-string, list<callable>> $listeners */
+    /** @param array<class-string, list<callable|ShouldQueue>> $listeners */
     public function __construct(private array $listeners = [])
     {
         foreach ($listeners as $type => $registered) {
@@ -19,7 +19,7 @@ final class ListenerMap implements ListenerProviderInterface
         }
     }
 
-    /** @return iterable<callable> */
+    /** @return iterable<callable|ShouldQueue> */
     public function getListenersForEvent(object $event): iterable
     {
         $class = $event::class;
@@ -28,7 +28,14 @@ final class ListenerMap implements ListenerProviderInterface
         }
 
         $listeners = $this->listeners[$class] ?? [];
-        foreach (class_parents($event) + class_implements($event) as $type) {
+        foreach (class_parents($event) as $type) {
+            foreach ($this->listeners[$type] ?? [] as $listener) {
+                $listeners[] = $listener;
+            }
+        }
+        $interfaces = class_implements($event);
+        sort($interfaces);
+        foreach ($interfaces as $type) {
             foreach ($this->listeners[$type] ?? [] as $listener) {
                 $listeners[] = $listener;
             }
@@ -46,8 +53,10 @@ final class ListenerMap implements ListenerProviderInterface
             throw new \InvalidArgumentException('Listener mappings must contain listener lists.');
         }
         foreach ($listeners as $listener) {
-            if (!is_callable($listener)) {
-                throw new \InvalidArgumentException('Listener mappings must contain callable listeners.');
+            if (!is_callable($listener) && !$listener instanceof ShouldQueue) {
+                throw new \InvalidArgumentException(
+                    'Listener mappings must contain callables or ShouldQueue markers.',
+                );
             }
         }
     }

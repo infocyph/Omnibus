@@ -15,8 +15,8 @@ Install an optional integration only when it is selected:
 
 .. code-block:: console
 
-   composer require infocyph/dblayer
-   composer require infocyph/cachelayer
+   composer require infocyph/dblayer:^4.0
+   composer require infocyph/cachelayer:^3.1
 
 The Redis adapter uses the ``RedisClient`` contract. ``CallbackRedisClient`` can
 adapt phpredis, Predis, or another client without making that client a core

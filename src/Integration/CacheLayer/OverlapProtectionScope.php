@@ -10,6 +10,10 @@ use Infocyph\Omnibus\Envelope\Envelope;
 
 final readonly class OverlapProtectionScope implements ExecutionScope
 {
+    /**
+     * The host must keep normal handler duration below its hard worker timeout,
+     * and that timeout below this lock lease. Omnibus does not run heartbeats.
+     */
     /** @var \Closure(Envelope):string */
     private \Closure $key;
 

@@ -35,12 +35,12 @@ final readonly class CircuitBreakerScope implements ExecutionScope
     public function run(Envelope $envelope, callable $handler): mixed
     {
         $key = PolicyKey::storage('circuit', ($this->key)($envelope));
-        $this->assertClosed($key);
+        $probe = $this->assertExecutionAllowed($key);
 
         try {
             $result = $this->inner->run($envelope, $handler);
         } catch (\Throwable $failure) {
-            $this->recordFailure($key);
+            $this->recordFailure($key, $probe);
 
             throw $failure;
         }
@@ -53,9 +53,10 @@ final readonly class CircuitBreakerScope implements ExecutionScope
         return $result;
     }
 
-    private function assertClosed(string $key): void
+    private function assertExecutionAllowed(string $key): bool
     {
-        $this->withLock($key, function () use ($key): void {
+        $probe = false;
+        $this->withLock($key, function () use ($key, &$probe): void {
             $openedAt = $this->counters->get($this->openKey($key));
             if ($openedAt === null) {
                 return;
@@ -65,9 +66,13 @@ final readonly class CircuitBreakerScope implements ExecutionScope
                 throw new CircuitOpen(sprintf('Circuit "%s" is open.', $key));
             }
 
-            $this->counters->delete($this->openKey($key));
             $this->counters->delete($this->failureKey($key));
+            $this->counters->delete($this->openKey($key));
+            $this->counters->increment($this->openKey($key), $now, $this->recoverySeconds);
+            $probe = true;
         });
+
+        return $probe;
     }
 
     private function failureKey(string $key): string
@@ -80,14 +85,14 @@ final readonly class CircuitBreakerScope implements ExecutionScope
         return $key . '.open';
     }
 
-    private function recordFailure(string $key): void
+    private function recordFailure(string $key, bool $probe): void
     {
-        $this->withLock($key, function () use ($key): void {
+        $this->withLock($key, function () use ($key, $probe): void {
             $failures = $this->counters->increment(
                 $this->failureKey($key),
                 ttlSeconds: $this->failureWindowSeconds,
             );
-            if ($failures->value < $this->failureThreshold) {
+            if (!$probe && $failures->value < $this->failureThreshold) {
                 return;
             }
 

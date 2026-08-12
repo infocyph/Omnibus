@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Infocyph\Omnibus\Workflow;
 
+use Infocyph\Omnibus\Clock\SystemClock;
 use Infocyph\Omnibus\Envelope\BatchStamp;
 use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Transport\QueueName;
 use Infocyph\UID\ULID;
+use Psr\Clock\ClockInterface;
 
 final class InMemoryWorkflowStore implements WorkflowStore
 {
@@ -16,35 +19,118 @@ final class InMemoryWorkflowStore implements WorkflowStore
      * @var array<string, array{
      *     kind: 'batch'|'chain',
      *     status: WorkflowStatus,
-     *     items: list<array{item: WorkflowItem, status: string}>
+     *     items: list<array{
+     *         item: WorkflowItem,
+     *         status: WorkflowItemStatus,
+     *         claim_token: string|null,
+     *         claim_until: int|null
+     *     }>
      * }>
      */
     private array $workflows = [];
 
+    public function __construct(private readonly ClockInterface $clock = new SystemClock()) {}
+
     public function cancel(string $id): WorkflowTransition
     {
         $workflow = &$this->workflow($id);
-        if (
-            $workflow['status'] === WorkflowStatus::Completed
-            || $workflow['status'] === WorkflowStatus::Cancelled
-        ) {
-            return new WorkflowTransition($this->state($id, $workflow), false);
+        if (in_array($workflow['status'], [WorkflowStatus::Completed, WorkflowStatus::Cancelled], true)) {
+            return new WorkflowTransition($this->state($id, $workflow));
         }
 
-        $changed = false;
+        $cancelled = 0;
         foreach ($workflow['items'] as &$entry) {
-            if ($entry['status'] === 'pending') {
-                $entry['status'] = 'cancelled';
-                $changed = true;
+            if (!in_array($entry['status'], [
+                WorkflowItemStatus::Pending,
+                WorkflowItemStatus::Dispatching,
+                WorkflowItemStatus::Dispatched,
+            ], true)) {
+                continue;
+            }
+            $entry['status'] = WorkflowItemStatus::Cancelled;
+            $entry['claim_token'] = null;
+            $entry['claim_until'] = null;
+            $cancelled++;
+        }
+        unset($entry);
+
+        $cancelledNow = $workflow['status'] !== WorkflowStatus::Failed;
+        if ($cancelledNow) {
+            $workflow['status'] = WorkflowStatus::Cancelled;
+        }
+        $state = $this->state($id, $workflow);
+
+        return new WorkflowTransition(
+            $state,
+            itemChanged: $cancelled > 0,
+            cancelledNow: $cancelledNow,
+            finalizedNow: $cancelled > 0 && self::isFinalized($state),
+        );
+    }
+
+    public function claimPending(
+        string $id,
+        int $limit = 100,
+        float $leaseSeconds = 30.0,
+    ): array {
+        self::validateClaim($limit, $leaseSeconds);
+        $workflow = &$this->workflow($id);
+        if (
+            $workflow['status'] === WorkflowStatus::Cancelled
+            || ($workflow['kind'] === 'chain' && $workflow['status'] === WorkflowStatus::Failed)
+        ) {
+            return [];
+        }
+
+        $now = Time::fromDate($this->clock->now());
+        foreach ($workflow['items'] as &$entry) {
+            if (
+                $entry['status'] === WorkflowItemStatus::Dispatching
+                && $entry['claim_until'] !== null
+                && $entry['claim_until'] <= $now
+            ) {
+                $entry['status'] = WorkflowItemStatus::Pending;
+                $entry['claim_token'] = null;
+                $entry['claim_until'] = null;
             }
         }
         unset($entry);
-        if ($workflow['status'] !== WorkflowStatus::Failed) {
-            $workflow['status'] = WorkflowStatus::Cancelled;
-            $changed = true;
+
+        $resolvedLimit = $workflow['kind'] === 'chain' ? 1 : $limit;
+        $expiresAt = Time::add($now, $leaseSeconds);
+        $claims = [];
+        foreach ($workflow['items'] as &$entry) {
+            if ($entry['status'] !== WorkflowItemStatus::Pending) {
+                continue;
+            }
+            $token = ULID::generateMonotonic();
+            $entry['status'] = WorkflowItemStatus::Dispatching;
+            $entry['claim_token'] = $token;
+            $entry['claim_until'] = $expiresAt;
+            $claims[] = new WorkflowDispatchClaim($entry['item'], $token, $expiresAt);
+            if (count($claims) >= $resolvedLimit) {
+                break;
+            }
+        }
+        unset($entry);
+
+        return $claims;
+    }
+
+    public function confirmDispatched(string $id, string $itemId, string $claimToken): void
+    {
+        $entry = &$this->entryByItem($this->workflow($id), $itemId);
+        if (
+            $entry['status'] !== WorkflowItemStatus::Dispatching
+            || $entry['claim_token'] !== $claimToken
+        ) {
+            throw new \LogicException(sprintf('Workflow item "%s" has a stale dispatch claim.', $itemId));
         }
 
-        return new WorkflowTransition($this->state($id, $workflow), $changed);
+        $entry['status'] = WorkflowItemStatus::Dispatched;
+        $entry['claim_token'] = null;
+        $entry['claim_until'] = null;
+        $this->workflows[$id]['status'] = WorkflowStatus::Running;
     }
 
     public function createBatch(string $id, array $envelopes, string $queue): void
@@ -57,42 +143,53 @@ final class InMemoryWorkflowStore implements WorkflowStore
         $this->create($id, 'chain', $envelopes, $queue);
     }
 
-    public function dispatched(string $id, string $itemId): void
-    {
-        $workflow = &$this->workflow($id);
-        foreach ($workflow['items'] as &$entry) {
-            if ($entry['item']->itemId === $itemId && $entry['status'] === 'pending') {
-                $entry['status'] = 'dispatched';
-                $workflow['status'] = WorkflowStatus::Running;
-
-                return;
-            }
-        }
-
-        throw new \LogicException(sprintf('Workflow item "%s" is not pending.', $itemId));
-    }
-
     public function fail(string $id, int $index): WorkflowTransition
     {
         $workflow = &$this->workflow($id);
-        $entry = &$this->entry($workflow, $index);
-        if (!in_array($entry['status'], ['pending', 'dispatched'], true)) {
-            return new WorkflowTransition($this->state($id, $workflow), false);
+        if (in_array($workflow['status'], [WorkflowStatus::Completed, WorkflowStatus::Cancelled], true)) {
+            return new WorkflowTransition($this->state($id, $workflow));
         }
-        $entry['status'] = 'failed';
+
+        $entry = &$this->entry($workflow, $index);
+        if (!in_array($entry['status'], [
+            WorkflowItemStatus::Pending,
+            WorkflowItemStatus::Dispatching,
+            WorkflowItemStatus::Dispatched,
+        ], true)) {
+            return new WorkflowTransition($this->state($id, $workflow));
+        }
+        $entry['status'] = WorkflowItemStatus::Failed;
+        $entry['claim_token'] = null;
+        $entry['claim_until'] = null;
+        $cancelled = 0;
         if ($workflow['kind'] === 'chain') {
             foreach ($workflow['items'] as &$candidate) {
-                if ($candidate['item']->index > $index && $candidate['status'] === 'pending') {
-                    $candidate['status'] = 'cancelled';
+                if (
+                    $candidate['item']->index > $index
+                    && in_array($candidate['status'], [
+                        WorkflowItemStatus::Pending,
+                        WorkflowItemStatus::Dispatching,
+                        WorkflowItemStatus::Dispatched,
+                    ], true)
+                ) {
+                    $candidate['status'] = WorkflowItemStatus::Cancelled;
+                    $candidate['claim_token'] = null;
+                    $candidate['claim_until'] = null;
+                    $cancelled++;
                 }
             }
             unset($candidate);
         }
-        if ($workflow['status'] !== WorkflowStatus::Cancelled) {
-            $workflow['status'] = WorkflowStatus::Failed;
-        }
+        $failedNow = $workflow['status'] !== WorkflowStatus::Failed;
+        $workflow['status'] = WorkflowStatus::Failed;
+        $state = $this->state($id, $workflow);
 
-        return new WorkflowTransition($this->state($id, $workflow), true);
+        return new WorkflowTransition(
+            $state,
+            itemChanged: true,
+            failedNow: $failedNow,
+            finalizedNow: self::isFinalized($state),
+        );
     }
 
     public function find(string $id): ?WorkflowState
@@ -102,60 +199,94 @@ final class InMemoryWorkflowStore implements WorkflowStore
         return $workflow === null ? null : $this->state($id, $workflow);
     }
 
-    public function pending(string $id, int $limit = 100): array
+    public function itemStatus(string $id, int $index, ?string $itemId = null): WorkflowItemStatus
     {
-        if ($limit < 1 || $limit > 1_000) {
-            throw new \InvalidArgumentException('Pending workflow limit must be between 1 and 1000.');
+        $entry = $this->entry($this->workflow($id), $index);
+        if ($itemId !== null && $entry['item']->itemId !== $itemId) {
+            throw new WorkflowInconsistentDelivery('Workflow item identity does not match its index.');
         }
-        $workflow = $this->workflow($id);
+
+        return $entry['status'];
+    }
+
+    public function markHandled(string $id, int $index, ?string $itemId = null): void
+    {
+        $workflow = &$this->workflow($id);
+        $entry = &$this->entry($workflow, $index);
+        if ($itemId !== null && $entry['item']->itemId !== $itemId) {
+            throw new WorkflowInconsistentDelivery('Workflow item identity does not match its index.');
+        }
+        if ($entry['status'] !== WorkflowItemStatus::Dispatched) {
+            throw new WorkflowInconsistentDelivery(sprintf(
+                'Workflow item "%s:%d" cannot be marked handled while it is %s.',
+                $id,
+                $index,
+                $entry['status']->value,
+            ));
+        }
+        $entry['status'] = WorkflowItemStatus::Handled;
+    }
+
+    public function releaseDispatchClaim(string $id, string $itemId, string $claimToken): void
+    {
+        $entry = &$this->entryByItem($this->workflow($id), $itemId);
         if (
-            $workflow['status'] === WorkflowStatus::Cancelled
-            || ($workflow['kind'] === 'chain' && $workflow['status'] === WorkflowStatus::Failed)
+            $entry['status'] !== WorkflowItemStatus::Dispatching
+            || $entry['claim_token'] !== $claimToken
         ) {
-            return [];
+            throw new \LogicException(sprintf('Workflow item "%s" has a stale dispatch claim.', $itemId));
         }
-
-        $items = [];
-        foreach ($workflow['items'] as $entry) {
-            if ($entry['status'] !== 'pending') {
-                continue;
-            }
-            $items[] = $entry['item'];
-            if ($workflow['kind'] === 'chain' || count($items) >= $limit) {
-                break;
-            }
-        }
-
-        return $items;
+        $entry['status'] = WorkflowItemStatus::Pending;
+        $entry['claim_token'] = null;
+        $entry['claim_until'] = null;
     }
 
     public function succeed(string $id, int $index): WorkflowTransition
     {
         $workflow = &$this->workflow($id);
         $entry = &$this->entry($workflow, $index);
-        if (!in_array($entry['status'], ['pending', 'dispatched'], true)) {
-            return new WorkflowTransition($this->state($id, $workflow), false);
+        if ($entry['status'] !== WorkflowItemStatus::Handled) {
+            return new WorkflowTransition($this->state($id, $workflow));
         }
-        $entry['status'] = 'succeeded';
+
+        $entry['status'] = WorkflowItemStatus::Succeeded;
         $state = $this->state($id, $workflow);
-        if (
-            $state->succeeded === $state->total
-            && in_array($workflow['status'], [WorkflowStatus::Pending, WorkflowStatus::Running], true)
-        ) {
+        $completedNow = $state->succeeded === $state->total
+            && in_array($workflow['status'], [WorkflowStatus::Pending, WorkflowStatus::Running], true);
+        if ($completedNow) {
             $workflow['status'] = WorkflowStatus::Completed;
             $state = $this->state($id, $workflow);
         }
 
-        return new WorkflowTransition($state, true);
+        return new WorkflowTransition(
+            $state,
+            itemChanged: true,
+            completedNow: $completedNow,
+            finalizedNow: self::isFinalized($state),
+        );
+    }
+
+    private static function isFinalized(WorkflowState $state): bool
+    {
+        return $state->succeeded + $state->failed + $state->cancelled === $state->total;
+    }
+
+    private static function validateClaim(int $limit, float $leaseSeconds): void
+    {
+        if ($limit < 1 || $limit > 1_000 || !is_finite($leaseSeconds) || $leaseSeconds <= 0.0) {
+            throw new \InvalidArgumentException(
+                'Workflow claim limit must be 1..1000 and its lease must be positive.',
+            );
+        }
     }
 
     /**
      * @param array{
      *     kind: 'batch'|'chain',
      *     status: WorkflowStatus,
-     *     items: list<array{item: WorkflowItem, status: string}>
+     *     items: list<array{item: WorkflowItem,status: WorkflowItemStatus,claim_token: string|null,claim_until: int|null}>
      * } $workflow
-     * @return array{item: WorkflowItem, status: string}
+     * @return array{item: WorkflowItem,status: WorkflowItemStatus,claim_token: string|null,claim_until: int|null}
      */
     private function &entry(array &$workflow, int $index): array
     {
@@ -167,10 +298,30 @@ final class InMemoryWorkflowStore implements WorkflowStore
     }
 
     /**
+     * @param array{
+     *     kind: 'batch'|'chain',
+     *     status: WorkflowStatus,
+     *     items: list<array{item: WorkflowItem,status: WorkflowItemStatus,claim_token: string|null,claim_until: int|null}>
+     * } $workflow
+     * @return array{item: WorkflowItem,status: WorkflowItemStatus,claim_token: string|null,claim_until: int|null}
+     */
+    private function &entryByItem(array &$workflow, string $itemId): array
+    {
+        foreach ($workflow['items'] as &$entry) {
+            if ($entry['item']->itemId === $itemId) {
+                return $entry;
+            }
+        }
+        unset($entry);
+
+        throw new \OutOfBoundsException(sprintf('Workflow item "%s" does not exist.', $itemId));
+    }
+
+    /**
      * @return array{
      *     kind: 'batch'|'chain',
      *     status: WorkflowStatus,
-     *     items: list<array{item: WorkflowItem, status: string}>
+     *     items: list<array{item: WorkflowItem,status: WorkflowItemStatus,claim_token: string|null,claim_until: int|null}>
      * }
      */
     private function &workflow(string $id): array
@@ -183,13 +334,22 @@ final class InMemoryWorkflowStore implements WorkflowStore
     }
 
     /**
-     * @param 'batch'|'chain' $kind
+     * @param string $kind One of ``batch`` or ``chain``.
      * @param list<Envelope> $envelopes
      */
     private function create(string $id, string $kind, array $envelopes, string $queue): void
     {
-        if ($id === '' || strlen($id) > 26 || $envelopes === [] || isset($this->workflows[$id])) {
-            throw new \InvalidArgumentException('Workflow ID, queue, and non-empty unique item list are required.');
+        if ($kind !== 'batch' && $kind !== 'chain') {
+            throw new \InvalidArgumentException('Workflow kind must be batch or chain.');
+        }
+        if (
+            $id === ''
+            || strlen($id) > 26
+            || $envelopes === []
+            || count($envelopes) > 1_000
+            || isset($this->workflows[$id])
+        ) {
+            throw new \InvalidArgumentException('Workflows require a unique ID and between 1 and 1000 items.');
         }
         QueueName::assert($queue);
         $items = [];
@@ -199,14 +359,10 @@ final class InMemoryWorkflowStore implements WorkflowStore
                 ? new ChainStamp($id, $index)
                 : new BatchStamp($id, $itemId, $index);
             $items[] = [
-                'item' => new WorkflowItem(
-                    $id,
-                    $itemId,
-                    $index,
-                    $queue,
-                    $envelope->with($stamp),
-                ),
-                'status' => 'pending',
+                'item' => new WorkflowItem($id, $itemId, $index, $queue, $envelope->with($stamp)),
+                'status' => WorkflowItemStatus::Pending,
+                'claim_token' => null,
+                'claim_until' => null,
             ];
         }
         $this->workflows[$id] = [
@@ -220,16 +376,16 @@ final class InMemoryWorkflowStore implements WorkflowStore
      * @param array{
      *     kind: 'batch'|'chain',
      *     status: WorkflowStatus,
-     *     items: list<array{item: WorkflowItem, status: string}>
+     *     items: list<array{item: WorkflowItem,status: WorkflowItemStatus,claim_token: string|null,claim_until: int|null}>
      * } $workflow
      */
     private function state(string $id, array $workflow): WorkflowState
     {
         $succeeded = $failed = $cancelled = 0;
         foreach ($workflow['items'] as $entry) {
-            $succeeded += $entry['status'] === 'succeeded' ? 1 : 0;
-            $failed += $entry['status'] === 'failed' ? 1 : 0;
-            $cancelled += $entry['status'] === 'cancelled' ? 1 : 0;
+            $succeeded += $entry['status'] === WorkflowItemStatus::Succeeded ? 1 : 0;
+            $failed += $entry['status'] === WorkflowItemStatus::Failed ? 1 : 0;
+            $cancelled += $entry['status'] === WorkflowItemStatus::Cancelled ? 1 : 0;
         }
 
         return new WorkflowState(

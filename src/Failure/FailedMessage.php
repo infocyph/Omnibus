@@ -9,6 +9,10 @@ use Infocyph\Omnibus\Transport\QueueName;
 
 final readonly class FailedMessage
 {
+    private const int MAX_REASON_BYTES = 16_384;
+
+    public string $reason;
+
     private function __construct(
         public string $id,
         public string $queue,
@@ -17,7 +21,7 @@ final readonly class FailedMessage
         public int $attempt,
         public \DateTimeImmutable $failedAt,
         public string $failureClass,
-        public string $reason,
+        string $reason,
         public bool $payloadTruncated,
     ) {
         if (
@@ -31,6 +35,9 @@ final readonly class FailedMessage
             throw new \InvalidArgumentException('A failed message requires one decoded envelope or raw payload.');
         }
         QueueName::assert($queue);
+        $this->reason = strlen($reason) > self::MAX_REASON_BYTES
+            ? substr($reason, 0, self::MAX_REASON_BYTES)
+            : $reason;
     }
 
     public static function decoded(

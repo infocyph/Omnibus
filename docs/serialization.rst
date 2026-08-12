@@ -26,7 +26,9 @@ aliases registered in ``MessageCodecRegistry`` and ``StampCodecRegistry``.
 Decode never calls PHP ``unserialize()`` and never instantiates a class name
 selected by payload data. Unknown message or stamp aliases fail before handler
 execution. Registry construction rejects duplicate aliases and duplicate
-runtime types.
+runtime types. Codec runtime types must be concrete classes and are resolved by
+exact class only; interface registrations and polymorphic persistent lookup are
+rejected.
 
 Message aliases should be stable and versioned, for example
 ``billing.invoice.create.v1``. The codec owns migration from that payload
@@ -47,8 +49,11 @@ version to the current application object.
        ),
    ]);
 
-Stamp payloads contain scalar values only. Message codec payloads may be nested
-JSON structures, bounded by the global byte and depth limits.
+Encoder output is validated before JSON encoding. Stamp payloads must be
+string-keyed scalar maps. Message payload roots must be string-keyed maps and
+may contain nested JSON-compatible structures, bounded by the global byte and
+depth limits. Numeric-root message maps, objects, resources, and non-finite
+floats are rejected at encode time.
 
 Binary codecs
 -------------
