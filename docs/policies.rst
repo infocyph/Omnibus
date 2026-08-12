@@ -80,6 +80,9 @@ token ownership and CAS refresh/release behavior preserve lease ownership.
 Memcached coordination remains ephemeral: eviction or a Memcached restart can
 drop lease state. That may be acceptable for overlap protection or best-effort
 duplicate suppression, but it must not be confused with durable queue storage.
+Memcached release installs a one-second CAS tombstone to prevent a release from
+deleting a newer owner's lease. Configure uniqueness acquisition with at least
+a two-second wait when immediate post-settlement re-enqueue is required.
 Combine Memcached-backed policies with ``DBLayerTransport`` when Redis is
 unavailable and queued messages must survive restarts.
 

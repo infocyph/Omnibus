@@ -15,6 +15,7 @@ use Infocyph\Omnibus\Integration\CacheLayer\CircuitOpen;
 use Infocyph\Omnibus\Integration\CacheLayer\FixedWindowRateLimitScope;
 use Infocyph\Omnibus\Integration\CacheLayer\LeaseLost;
 use Infocyph\Omnibus\Integration\CacheLayer\OverlapProtectionScope;
+use Infocyph\Omnibus\Integration\CacheLayer\PolicyKey;
 use Infocyph\Omnibus\Integration\CacheLayer\RateLimitExceeded;
 use Infocyph\Omnibus\Integration\CacheLayer\UniqueSender;
 use Infocyph\Omnibus\Integration\CacheLayer\UniqueTransport;
@@ -45,7 +46,7 @@ test('unique lease survives retries and ends on settlement', function (): void {
     $reservation = [...$transport->receive('work')][0];
     $unique = $reservation->envelope()->last(UniqueStamp::class);
     expect($unique)->toBeInstanceOf(UniqueStamp::class)
-        ->and($unique?->key)->toMatch('/^omnibus\.unique\.[a-f0-9]{64}$/D');
+        ->and($unique?->key)->toMatch('/^omnibus\.[a-f0-9]{32}$/D');
     $transport->release($reservation, 5);
     expect($locks->lastRefreshedLease)->toBe(305.0);
     expect(fn() => $sender->send(new Envelope(new TestCommand('two')), 'work'))
@@ -56,6 +57,14 @@ test('unique lease survives retries and ends on settlement', function (): void {
     $transport->acknowledge($redelivery);
     expect($sender->send(new Envelope(new TestCommand('three')), 'work'))
         ->toBeInstanceOf(Envelope::class);
+});
+
+test('policy counter keys remain inside CacheLayer bounds after suffixes', function (): void {
+    $base = PolicyKey::storage('circuit', str_repeat('logical-key', 40));
+
+    expect(strlen($base.'.failures'))->toBeLessThanOrEqual(64)
+        ->and(strlen($base.'.'.PHP_INT_MAX))->toBeLessThanOrEqual(64)
+        ->and($base)->toMatch('/^omnibus\.[a-f0-9]{32}$/D');
 });
 
 test('unique cleanup failure cannot undo durable queue settlement', function (): void {

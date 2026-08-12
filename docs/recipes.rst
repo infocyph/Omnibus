@@ -457,12 +457,15 @@ Memcached lease provider with DBLayer:
            return 'receipt:'.$message->invoiceId;
        },
        leaseSeconds: 300,
+       waitSeconds: 2,
    );
 
 Register ``$uniqueProducer`` in the producer's ``TransportRegistry`` and pass
 ``$leasedQueue`` to the consumer. The producer adds the lease stamp; settlement
 through ``$leasedQueue`` releases it. A retry refreshes the lease for its
 original duration plus the retry delay.
+The acquisition wait covers Memcached's one-second ownership-safe release
+tombstone when the same key is immediately enqueued again.
 
 .. _execution-policies:
 

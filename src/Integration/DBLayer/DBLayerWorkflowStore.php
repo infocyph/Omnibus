@@ -415,9 +415,7 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
                     'handled_at' => null,
                 ];
             }
-            if (!$connection->table($this->itemTable)->insert($rows)) {
-                throw new \RuntimeException('DBLayer did not insert workflow items.');
-            }
+            $this->insertItems($connection, $rows);
         });
     }
 
@@ -450,6 +448,23 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
             self::int($row, 'failed'),
             self::int($row, 'cancelled'),
         );
+    }
+
+    /**
+     * Use DBLayer's driver compiler for portable multi-row SQL, then its typed
+     * raw insert path so PostgreSQL is not asked for an absent generated ID.
+     *
+     * @param list<array<string, mixed>> $rows
+     */
+    private function insertItems(Connection $connection, array $rows): void
+    {
+        foreach (array_chunk($rows, 100) as $chunk) {
+            $builder = $connection->table($this->itemTable);
+            $compiled = $connection->getCompiler()->compile($builder->toInsertPayload($chunk));
+            if (!$connection->insert($compiled->sql, $compiled->bindings)) {
+                throw new \RuntimeException('DBLayer did not insert workflow items.');
+            }
+        }
     }
 
     private function required(string $id, bool $forUpdate = false): WorkflowState

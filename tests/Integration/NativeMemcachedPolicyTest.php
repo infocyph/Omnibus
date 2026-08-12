@@ -52,6 +52,7 @@ test('native Memcached service preserves the unique-message lease lifecycle', fu
         $locks,
         static fn(Envelope $envelope): string => $envelope->message::class,
         leaseSeconds: 30,
+        waitSeconds: 2,
     );
 
     $sender->send(new Envelope(new TestCommand('first')), 'work');

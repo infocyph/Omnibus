@@ -30,6 +30,6 @@ final class PolicyKey
             throw new \InvalidArgumentException('Policy storage namespaces must be bounded lowercase identifiers.');
         }
 
-        return sprintf('omnibus.%s.%s', $namespace, hash('sha256', $key));
+        return 'omnibus.' . substr(hash('sha256', $namespace . "\0" . $key), 0, 32);
     }
 }
