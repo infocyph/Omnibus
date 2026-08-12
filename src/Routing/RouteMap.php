@@ -35,7 +35,7 @@ final class RouteMap
 
         $matched = $this->interfaceRoutes($message);
         if ($matched !== []) {
-            $route = array_first($matched);
+            $route = $matched[array_key_first($matched)];
             foreach ($matched as $candidate) {
                 if ($candidate != $route) {
                     throw new AmbiguousRoute(sprintf(

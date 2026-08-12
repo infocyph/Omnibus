@@ -35,7 +35,7 @@ final class HandlerMap
 
         $matched = $this->interfaceHandlers($message);
         if ($matched !== []) {
-            $handler = array_first($matched);
+            $handler = $matched[array_key_first($matched)];
             foreach ($matched as $candidate) {
                 if ($candidate !== $handler) {
                     throw new AmbiguousHandler(sprintf(
