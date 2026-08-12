@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\Omnibus\Consumer\DirectExecutionScope;
 use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
@@ -19,8 +20,11 @@ use Infocyph\Omnibus\Serialization\MessageCodecRegistry;
 use Infocyph\Omnibus\Serialization\StampCodecRegistry;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
-use Infocyph\Omnibus\Workflow\WorkflowStatus;
 use Infocyph\Omnibus\Transport\InvalidReservation;
+use Infocyph\Omnibus\Workflow\WorkflowCoordinator;
+use Infocyph\Omnibus\Workflow\WorkflowExecutionScope;
+use Infocyph\Omnibus\Workflow\WorkflowStatus;
+use Infocyph\Omnibus\Workflow\WorkflowTransport;
 
 /** @return array{Connection, DBLayerTransport, DBLayerFailureStore, FrozenClock, JsonEnvelopeSerializer} */
 function omnibusDatabaseQueue(): array
@@ -149,15 +153,26 @@ test('DBLayer workflow store persists chain progress and batch cancellation', fu
         new Envelope(new TestCommand('two')),
     ], 'work');
 
-    $first = $store->pending('01CHAIN0000000000000000000', 100);
-    $store->dispatched('01CHAIN0000000000000000000', $first[0]->itemId);
+    $first = $store->claimPending('01CHAIN0000000000000000000', 100);
+    $store->confirmDispatched(
+        '01CHAIN0000000000000000000',
+        $first[0]->item->itemId,
+        $first[0]->token,
+    );
+    $store->markHandled('01CHAIN0000000000000000000', 0, $first[0]->item->itemId);
     $state = $store->succeed('01CHAIN0000000000000000000', 0);
+    $secondClaims = $store->claimPending('01CHAIN0000000000000000000');
 
     expect($state->state->succeeded)->toBe(1)
-        ->and($store->pending('01CHAIN0000000000000000000'))->toHaveCount(1);
+        ->and($secondClaims)->toHaveCount(1);
 
-    $second = $store->pending('01CHAIN0000000000000000000')[0];
-    $store->dispatched('01CHAIN0000000000000000000', $second->itemId);
+    $second = $secondClaims[0];
+    $store->confirmDispatched(
+        '01CHAIN0000000000000000000',
+        $second->item->itemId,
+        $second->token,
+    );
+    $store->markHandled('01CHAIN0000000000000000000', 1, $second->item->itemId);
     expect($store->succeed('01CHAIN0000000000000000000', 1)->state->status)
         ->toBe(WorkflowStatus::Completed);
 
@@ -168,5 +183,22 @@ test('DBLayer workflow store persists chain progress and batch cancellation', fu
     $cancelled = $store->cancel('01BATCH0000000000000000000');
     expect($cancelled->state->status)->toBe(WorkflowStatus::Cancelled)
         ->and($cancelled->state->cancelled)->toBe(2)
-        ->and($store->pending('01BATCH0000000000000000000'))->toBe([]);
+        ->and($store->claimPending('01BATCH0000000000000000000'))->toBe([]);
+});
+
+test('same-connection DBLayer acknowledgement and workflow finalization are atomic', function (): void {
+    [$connection, $transport, , , $serializer] = omnibusDatabaseQueue();
+    $store = new DBLayerWorkflowStore($connection, $serializer);
+    $coordinator = new WorkflowCoordinator($store, $transport);
+    $scope = new WorkflowExecutionScope(new DirectExecutionScope(), $store);
+    $workflowTransport = new WorkflowTransport($transport, $coordinator);
+    $id = $coordinator->batch([new TestCommand('atomic')], 'work');
+    $reservation = [...$workflowTransport->receive('work')][0];
+
+    $scope->run($reservation->envelope(), static fn(): null => null);
+    $workflowTransport->acknowledge($reservation);
+
+    expect($workflowTransport->size('work'))->toBe(0)
+        ->and($store->find($id)?->status)->toBe(WorkflowStatus::Completed)
+        ->and($store->find($id)?->succeeded)->toBe(1);
 });

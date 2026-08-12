@@ -30,14 +30,15 @@ container, or a framework adapter.
 DBLayer integration
 -------------------
 
-The database adapters use an existing DBLayer ``Connection``. Migrations execute
+The database adapters target DBLayer 4 and use an existing ``Connection``. Migrations execute
 ``QueueSchema`` statements outside Omnibus runtime paths. Dispatch-after-commit
 uses ``AfterCommitDispatcher`` and the connection's transaction callbacks.
 
 CacheLayer integration
 ----------------------
 
-Uniqueness, overlap protection, fixed-window rate limiting, and circuit breaking
+The policy adapters target CacheLayer 3.1. Uniqueness, overlap protection,
+fixed-window rate limiting, and circuit breaking
 adapt CacheLayer's existing lock and atomic-counter contracts. Omnibus does not
 introduce a competing cache-provider hierarchy.
 

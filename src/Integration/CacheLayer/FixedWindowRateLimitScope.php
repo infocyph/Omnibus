@@ -35,9 +35,10 @@ final readonly class FixedWindowRateLimitScope implements ExecutionScope
         $key = PolicyKey::storage('rate', $logicalKey);
         $timestamp = (int) $this->clock->now()->format('U');
         $bucket = intdiv($timestamp, $this->windowSeconds);
+        $remaining = $this->windowSeconds - ($timestamp % $this->windowSeconds);
         $value = $this->counters->increment(
             sprintf('%s.%d', $key, $bucket),
-            ttlSeconds: $this->windowSeconds + 1,
+            ttlSeconds: $remaining + 1,
         );
         if ($value->value > $this->maximum) {
             throw new RateLimitExceeded(sprintf('Rate limit "%s" is exhausted.', $logicalKey));

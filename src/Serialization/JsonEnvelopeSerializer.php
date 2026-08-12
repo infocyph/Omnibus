@@ -71,6 +71,10 @@ final readonly class JsonEnvelopeSerializer implements EnvelopeSerializer
     public function encode(Envelope $envelope): string
     {
         $messageCodec = $this->messages->forMessage($envelope->message);
+        $messageData = self::stringMap(
+            $messageCodec->encode($envelope->message),
+            'message.data',
+        );
         $encodedStamps = [];
         foreach ($envelope->stamps() as $stamp) {
             if (count($encodedStamps) >= $this->maximumStamps) {
@@ -79,7 +83,7 @@ final readonly class JsonEnvelopeSerializer implements EnvelopeSerializer
             $codec = $this->stamps->forStamp($stamp);
             $encodedStamps[] = [
                 'type' => $codec->alias(),
-                'data' => $codec->encode($stamp),
+                'data' => self::scalarMap($codec->encode($stamp), 'stamp.data'),
             ];
         }
 
@@ -88,7 +92,7 @@ final readonly class JsonEnvelopeSerializer implements EnvelopeSerializer
                 'version' => 1,
                 'message' => [
                     'type' => $messageCodec->alias(),
-                    'data' => $messageCodec->encode($envelope->message),
+                    'data' => $messageData,
                 ],
                 'stamps' => $encodedStamps,
             ],
@@ -136,6 +140,11 @@ final readonly class JsonEnvelopeSerializer implements EnvelopeSerializer
             ) {
                 throw new \UnexpectedValueException(
                     sprintf('Envelope field "%s" must contain only scalar values.', $field),
+                );
+            }
+            if (is_float($item) && !is_finite($item)) {
+                throw new \UnexpectedValueException(
+                    sprintf('Envelope field "%s" must contain only finite floats.', $field),
                 );
             }
         }

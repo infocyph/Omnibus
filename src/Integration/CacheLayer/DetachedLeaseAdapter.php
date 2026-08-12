@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace Infocyph\Omnibus\Integration\CacheLayer;
 
 use Infocyph\CacheLayer\Cache\Lock\LockHandle;
-use Infocyph\CacheLayer\Cache\Lock\LockProviderInterface;
+use Infocyph\CacheLayer\Cache\Lock\MemcachedLockProvider;
+use Infocyph\CacheLayer\Cache\Lock\RedisLockProvider;
 
 final readonly class DetachedLeaseAdapter implements DetachedLeaseProvider
 {
-    public function __construct(private LockProviderInterface $inner) {}
+    public function __construct(private RedisLockProvider|MemcachedLockProvider $inner) {}
 
     public function acquire(string $key, float $waitSeconds, float $leaseSeconds = 30.0): ?LockHandle
     {

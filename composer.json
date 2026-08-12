@@ -27,8 +27,8 @@
         "psr/event-dispatcher": "^1.0"
     },
     "require-dev": {
-        "infocyph/cachelayer": "^2.0.1",
-        "infocyph/dblayer": "^3.0.3",
+        "infocyph/cachelayer": "^3.1",
+        "infocyph/dblayer": "^4.0",
         "infocyph/phpforge": "dev-main@dev"
     },
     "suggest": {
@@ -36,8 +36,8 @@
         "ext-msgpack": "One option for a CallbackEnvelopeSerializer binary codec.",
         "ext-redis": "Required by the native Redis/Valkey transport.",
         "aws/aws-sdk-php": "One option for implementing the native SQS backend boundary.",
-        "infocyph/cachelayer": "Required by unique-message, overlap, rate-limit, circuit-breaker, and distributed coordination adapters.",
-        "infocyph/dblayer": "Required by database queue, workflow, and failure-store adapters.",
+        "infocyph/cachelayer": "Required for Omnibus CacheLayer coordination integrations; tested with CacheLayer 3.1.",
+        "infocyph/dblayer": "Required for Omnibus database queue, workflow, failure-store and after-commit integrations; tested with DBLayer 4.x.",
         "php-amqplib/php-amqplib": "One option for implementing the native AMQP backend boundary."
     },
     "minimum-stability": "stable",
@@ -65,7 +65,9 @@
     },
     "scripts": {
         "benchmark": "@php benchmarks/run.php",
+        "benchmark:db-contention": "@php benchmarks/db-contention.php",
         "soak:consumer": "@php benchmarks/consumer-soak.php",
-        "soak:durable": "@php benchmarks/durable-soak.php"
+        "soak:durable": "@php benchmarks/durable-soak.php",
+        "soak:workflow": "@php benchmarks/workflow-soak.php"
     }
 }

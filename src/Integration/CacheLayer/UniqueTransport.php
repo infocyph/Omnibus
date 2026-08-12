@@ -7,15 +7,25 @@ namespace Infocyph\Omnibus\Integration\CacheLayer;
 use Infocyph\CacheLayer\Cache\Lock\LockHandle;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\UniqueStamp;
+use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Transport\Reservation;
 use Infocyph\Omnibus\Transport\Transport;
 
 final readonly class UniqueTransport implements Transport
 {
+    /** @var (\Closure(\Throwable, Reservation):void)|null */
+    private ?\Closure $cleanupFailure;
+
+    /** @param callable(\Throwable, Reservation):void|null $cleanupFailure */
     public function __construct(
         private Transport $inner,
         private DetachedLeaseProvider $locks,
-    ) {}
+        ?callable $cleanupFailure = null,
+    ) {
+        $this->cleanupFailure = $cleanupFailure === null
+            ? null
+            : \Closure::fromCallable($cleanupFailure);
+    }
 
     public function acknowledge(Reservation $reservation): void
     {
@@ -43,6 +53,7 @@ final readonly class UniqueTransport implements Transport
         $requiredLease = $handle instanceof LockHandle
             ? $handle->leaseSeconds + $delaySeconds
             : 0.0;
+        Time::duration($requiredLease);
         if (
             $handle instanceof LockHandle
             && (
@@ -79,6 +90,18 @@ final readonly class UniqueTransport implements Transport
 
     private function releaseLease(Reservation $reservation): void
     {
-        $this->locks->release($this->handle($reservation));
+        try {
+            $this->locks->release($this->handle($reservation));
+        } catch (\Throwable $failure) {
+            if (!$this->cleanupFailure instanceof \Closure) {
+                return;
+            }
+
+            try {
+                ($this->cleanupFailure)($failure, $reservation);
+            } catch (\Throwable) {
+                // Queue settlement is already durable; lease TTL owns cleanup.
+            }
+        }
     }
 }

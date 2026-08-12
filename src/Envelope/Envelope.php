@@ -74,4 +74,42 @@ final readonly class Envelope
 
         return new self($this->message, [...$this->stamps, ...$stamps]);
     }
+
+    /** @param class-string<Stamp> ...$types */
+    public function without(string ...$types): self
+    {
+        if ($types === []) {
+            return $this;
+        }
+
+        foreach ($types as $type) {
+            self::assertStampType($type);
+        }
+
+        $removed = false;
+        $retained = [];
+        foreach ($this->stamps as $stamp) {
+            foreach ($types as $type) {
+                if ($stamp instanceof $type) {
+                    $removed = true;
+
+                    continue 2;
+                }
+            }
+            $retained[] = $stamp;
+        }
+
+        return $removed ? new self($this->message, $retained) : $this;
+    }
+
+    private static function assertStampType(string $type): void
+    {
+        if (!is_a($type, Stamp::class, true)) {
+            throw new \InvalidArgumentException(sprintf(
+                'Envelope stamp type "%s" must implement %s.',
+                $type,
+                Stamp::class,
+            ));
+        }
+    }
 }

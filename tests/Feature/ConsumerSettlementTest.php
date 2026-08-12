@@ -155,9 +155,8 @@ test('a missing handler is terminal even when retry capacity remains', function 
         ->and($failures->all()[0]->envelope?->message)->toBe($sent->message);
 });
 
-test('oversized provider receipts use a stable bounded failure identifier', function (): void {
+test('unsafe provider receipts use a stable bounded failure identifier', function (string $receipt): void {
     $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
-    $receipt = str_repeat('r', 2_000);
     $receiver = new class($receipt) implements Receiver {
         public function __construct(private readonly string $receipt) {}
 
@@ -203,4 +202,7 @@ test('oversized provider receipts use a stable bounded failure identifier', func
     expect($failure->id)->toStartWith('receipt-')
         ->and(strlen($failure->id))->toBeLessThanOrEqual(191)
         ->and($failure->payload)->toBe('raw');
-});
+})->with([
+    'oversized' => str_repeat('r', 2_000),
+    'control character' => "unsafe\nreceipt",
+]);

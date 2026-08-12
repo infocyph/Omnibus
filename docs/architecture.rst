@@ -68,3 +68,16 @@ Map lookup caches are bounded by the finite set of message/event classes seen
 by one configured application. Per-message state belongs in an
 ``ExecutionScope`` and must be released on both success and failure. Omnibus
 does not keep mutable global container state.
+
+Workflow correctness boundary
+-----------------------------
+
+Workflow dispatch uses expiring store claims: ``pending`` becomes
+``dispatching`` before send and ``dispatched`` only after sender acceptance.
+Execution is item-aware. Successful business handling persists ``handled``
+before queue acknowledgement; a redelivery of that item reconciles settlement
+without invoking the handler again. A shared ``DBLayerTransport`` and
+``DBLayerWorkflowStore`` connection atomically settles and finalizes. Other
+backend combinations retain an unavoidable cross-system at-least-once boundary.
+Omnibus does not claim exactly-once execution; domain side effects should still
+be idempotent.

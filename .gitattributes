@@ -18,8 +18,10 @@ phpcs.xml.dist export-ignore
 phpstan.neon.dist export-ignore
 phpunit.xml export-ignore
 pint.json export-ignore
+plan.md export-ignore
 psalm.xml export-ignore
 rector.php export-ignore
+omnibus.txt export-ignore
 vendor export-ignore
 
 * text eol=lf

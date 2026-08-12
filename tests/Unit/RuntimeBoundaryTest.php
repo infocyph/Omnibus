@@ -5,9 +5,9 @@ declare(strict_types=1);
 use Infocyph\Omnibus\Consumer\ConsumerResult;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Failure\FailedMessage;
+use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Routing\Route;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
-use Infocyph\Omnibus\Transport\Duration;
 use Infocyph\Omnibus\Transport\QueueName;
 use Infocyph\Omnibus\Transport\Reservation;
 use Infocyph\Omnibus\Transport\ReservationReceipt;
@@ -24,10 +24,10 @@ test('queue names are bounded consistently at public boundaries', function (): v
 });
 
 test('durations reject overflow before timestamp arithmetic', function (): void {
-    expect(Duration::microseconds(1.25))->toBe(1_250_000)
-        ->and(fn() => Duration::microseconds(INF))
+    expect(Time::duration(1.25))->toBe(1_250_000)
+        ->and(fn() => Time::duration(INF))
         ->toThrow(InvalidArgumentException::class)
-        ->and(fn() => Duration::microseconds((float) PHP_INT_MAX, 1))
+        ->and(fn() => Time::duration((float) PHP_INT_MAX, 1))
         ->toThrow(InvalidArgumentException::class);
 });
 

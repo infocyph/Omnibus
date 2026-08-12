@@ -58,6 +58,33 @@ test('unique lease survives retries and ends on settlement', function (): void {
         ->toBeInstanceOf(Envelope::class);
 });
 
+test('unique cleanup failure cannot undo durable queue settlement', function (): void {
+    $locks = new InMemoryLockProvider();
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $inner = new InMemoryTransport($clock);
+    $reported = 0;
+    $transport = new UniqueTransport(
+        $inner,
+        $locks,
+        static function () use (&$reported): void {
+            $reported++;
+        },
+    );
+    $sender = new UniqueSender(
+        $transport,
+        $locks,
+        static fn(Envelope $envelope): string => $envelope->message::class,
+    );
+    $sender->send(new Envelope(new TestCommand('one')), 'work');
+    $reservation = [...$transport->receive('work')][0];
+    $locks->releaseFails = true;
+
+    $transport->acknowledge($reservation);
+
+    expect($reported)->toBe(1)
+        ->and($inner->size('work'))->toBe(0);
+});
+
 test('overlap protection reports lease loss and always releases', function (): void {
     $locks = new InMemoryLockProvider();
     $locks->refreshable = false;
@@ -111,7 +138,15 @@ test('rate limit and circuit breaker use CacheLayer atomic state', function (): 
         ->toThrow(CircuitOpen::class);
 
     $clock->advance('+6 seconds');
-    expect($circuit->run($envelope, static fn(): string => 'recovered'))->toBe('recovered');
+    $probes = 0;
+    expect($circuit->run($envelope, function () use ($circuit, $envelope, &$probes): string {
+        $probes++;
+        expect(fn() => $circuit->run($envelope, static fn(): null => null))
+            ->toThrow(CircuitOpen::class);
+
+        return 'recovered';
+    }))->toBe('recovered')
+        ->and($probes)->toBe(1);
 });
 
 test('deadline scope exposes cooperative cancellation without process signals', function (): void {

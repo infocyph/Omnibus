@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Infocyph\Omnibus\Event\EventDispatcher;
 use Infocyph\Omnibus\Event\ListenerMap;
 use Infocyph\Omnibus\Event\QueuedListener;
+use Infocyph\Omnibus\Event\QueuedListenerNotConfigured;
+use Infocyph\Omnibus\Event\ShouldQueue;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\MessageBus;
 use Infocyph\Omnibus\Routing\Route;
@@ -15,6 +17,7 @@ use Infocyph\Omnibus\Tests\Fixtures\TestEvent;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
 use Infocyph\Omnibus\Transport\SyncTransport;
 use Infocyph\Omnibus\Transport\TransportRegistry;
+use Psr\EventDispatcher\StoppableEventInterface;
 
 test('event dispatcher invokes synchronous listeners in configured order', function (): void {
     $calls = [];
@@ -53,4 +56,46 @@ test('queued listeners use the message bus without executing synchronously', fun
     $dispatcher->dispatch(new TestEvent('queued'));
 
     expect($transport->size('listeners'))->toBe(1);
+});
+
+test('marker-only queued listeners and stoppable order follow the queued contract', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $transport = new InMemoryTransport($clock);
+    $marker = new class implements ShouldQueue {};
+    $bus = new MessageBus(
+        new RouteMap([QueuedListener::class => new Route('memory', 'listeners')]),
+        new TransportRegistry(['memory' => $transport]),
+    );
+
+    (new EventDispatcher(new ListenerMap([TestEvent::class => [$marker]]), $bus))
+        ->dispatch(new TestEvent('queued'));
+
+    expect($transport->size('listeners'))->toBe(1)
+        ->and(fn() => (new EventDispatcher(new ListenerMap([
+            TestEvent::class => [$marker],
+        ])))->dispatch(new TestEvent('missing-bus')))
+        ->toThrow(QueuedListenerNotConfigured::class);
+
+    $event = new class implements StoppableEventInterface {
+        public bool $stopped = false;
+
+        public function isPropagationStopped(): bool
+        {
+            return $this->stopped;
+        }
+    };
+    $calls = 0;
+    (new EventDispatcher(new ListenerMap([
+        $event::class => [
+            static function (object $event) use (&$calls): void {
+                $calls++;
+                $event->stopped = true;
+            },
+            static function () use (&$calls): void {
+                $calls++;
+            },
+        ],
+    ])))->dispatch($event);
+
+    expect($calls)->toBe(1);
 });

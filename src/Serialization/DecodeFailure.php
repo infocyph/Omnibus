@@ -6,14 +6,18 @@ namespace Infocyph\Omnibus\Serialization;
 
 final readonly class DecodeFailure
 {
+    private const int MAX_REASON_BYTES = 16_384;
+
     public string $payload;
+
+    public string $reason;
 
     public bool $truncated;
 
     public function __construct(
         string $payload,
         public string $failureClass,
-        public string $reason,
+        string $reason,
         int $maximumPayloadBytes = 262_144,
     ) {
         if ($failureClass === '' || $maximumPayloadBytes < 1) {
@@ -24,6 +28,9 @@ final readonly class DecodeFailure
         $this->payload = $this->truncated
             ? substr($payload, 0, $maximumPayloadBytes)
             : $payload;
+        $this->reason = strlen($reason) > self::MAX_REASON_BYTES
+            ? substr($reason, 0, self::MAX_REASON_BYTES)
+            : $reason;
     }
 
     public static function fromThrowable(

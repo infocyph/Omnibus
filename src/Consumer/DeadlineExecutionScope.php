@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\Omnibus\Consumer;
 
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Internal\Time;
 use Psr\Clock\ClockInterface;
 
 final readonly class DeadlineExecutionScope implements ExecutionScope
@@ -21,9 +22,9 @@ final readonly class DeadlineExecutionScope implements ExecutionScope
 
     public function run(Envelope $envelope, callable $handler): mixed
     {
-        $deadline = $this->clock->now()->modify(sprintf(
-            '+%d microseconds',
-            (int) round($this->timeoutSeconds * 1_000_000),
+        $deadline = Time::toDate(Time::add(
+            Time::fromDate($this->clock->now()),
+            $this->timeoutSeconds,
         ));
         $token = new CancellationToken($this->clock, $deadline);
         $result = $this->inner->run(

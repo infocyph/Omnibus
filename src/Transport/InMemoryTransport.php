@@ -73,7 +73,7 @@ final class InMemoryTransport implements Transport
             $receipt = ULID::generateMonotonic();
             $envelope = $item['envelope']->with(new AttemptStamp($attempt));
             $this->reserved[$receipt] = [
-                'envelope' => $envelope,
+                'envelope' => $item['envelope'],
                 'queue' => $queue,
                 'expires_at' => $now + $visibilitySeconds,
                 'attempt' => $attempt,

@@ -98,6 +98,10 @@ persisted before rejection, stale receipts cannot settle reclaimed work, and
 telemetry failures cannot change queue or handler outcomes. Handlers that
 produce durable side effects must remain idempotent.
 
+Workflows use expiring dispatch claims and a durable `handled` reconciliation
+state. Queue and workflow settlement can be atomic when DBLayer adapters share
+one connection; cross-system compositions remain at-least-once.
+
 ## Quality checks
 
 ```bash
@@ -106,33 +110,37 @@ composer ic:ci
 composer benchmark
 composer soak:consumer
 composer soak:durable
+composer soak:workflow
 ```
-
-## Documentation
-
-Read the complete [Omnibus documentation](https://docs.infocyph.com/projects/Omnibus),
-including [getting started](https://docs.infocyph.com/projects/Omnibus/en/latest/getting-started.html),
-[real-world examples](https://docs.infocyph.com/projects/Omnibus/en/latest/recipes.html),
-[queue semantics](https://docs.infocyph.com/projects/Omnibus/en/latest/queues.html),
-[durable backends](https://docs.infocyph.com/projects/Omnibus/en/latest/backends.html),
-[serialization security](https://docs.infocyph.com/projects/Omnibus/en/latest/serialization.html),
-[workflows](https://docs.infocyph.com/projects/Omnibus/en/latest/workflows.html), and
-[operations](https://docs.infocyph.com/projects/Omnibus/en/latest/operations.html).
 
 ## Security
 
-Protected by [PHPForge](https://github.com/infocyph/PHPForge), the automated
-quality and security gate used across Infocyph PHP libraries.
+Do not disclose suspected vulnerabilities in a public issue, discussion or pull request. Follow [SECURITY.md](SECURITY.md) and use [GitHub private vulnerability reporting](https://github.com/infocyph/Omnibus/security/advisories/new).
+
+Omnibus is protected by [PHPForge](https://github.com/infocyph/PHPForge), which provides automated tests, static and taint analysis, dependency auditing, architecture checks and release-readiness gates. Automated controls do not replace responsible disclosure or manual review.
 
 ---
 
 <div align="center">
   <sub><strong>Made with ❤️ for the PHP community</strong></sub><br />
   <sub><a href="LICENSE">MIT Licensed</a></sub><br />
-  <a href="https://docs.infocyph.com/projects/Omnibus">Documentation</a> •
+  <a href="https://docs.infocyph.com/projects/Omnibus/">Documentation</a> •
   <a href="SECURITY.md">Security</a> •
   <a href="CODE_OF_CONDUCT.md">Code of Conduct</a> •
-  <a href="CONTRIBUTING.md">Contributing</a> •
-  <a href="https://github.com/infocyph/Omnibus/issues">Report Bug</a> •
-  <a href="https://github.com/infocyph/Omnibus/issues">Request Feature</a>
+  <a href="CONTRIBUTING.md">Contributing</a><br />
+  <span title="Issue templates" aria-label="Issue templates">🗂️</span>
+  <a href="https://github.com/infocyph/Omnibus/issues/new?template=bug_report.yml">Bug</a> •
+  <a href="https://github.com/infocyph/Omnibus/issues/new?template=feature_request.yml">Feature</a> •
+  <a href="https://github.com/infocyph/Omnibus/issues/new?template=docs_improvement.yml">Documentation</a> •
+  <a href="https://github.com/infocyph/Omnibus/issues/new?template=question.yml">Question</a> •
+  <a href="https://github.com/infocyph/Omnibus/issues/new?template=ci_failure.yml">CI failure</a><br />
+  <span title="Pull request templates" aria-label="Pull request templates">🔀</span>
+  <a href="https://github.com/infocyph/Omnibus/compare/main...HEAD?quick_pull=1&amp;template=PULL_REQUEST_TEMPLATE.md">General</a> •
+  <a href="https://github.com/infocyph/Omnibus/compare/main...HEAD?quick_pull=1&amp;template=bug_fix.md">Bug fix</a> •
+  <a href="https://github.com/infocyph/Omnibus/compare/main...HEAD?quick_pull=1&amp;template=feature.md">Feature</a> •
+  <a href="https://github.com/infocyph/Omnibus/compare/main...HEAD?quick_pull=1&amp;template=refactor.md">Refactor</a> •
+  <a href="https://github.com/infocyph/Omnibus/compare/main...HEAD?quick_pull=1&amp;template=performance.md">Performance</a> •
+  <a href="https://github.com/infocyph/Omnibus/compare/main...HEAD?quick_pull=1&amp;template=security_reliability.md">Security &amp; reliability</a> •
+  <a href="https://github.com/infocyph/Omnibus/compare/main...HEAD?quick_pull=1&amp;template=documentation.md">Documentation</a> •
+  <a href="https://github.com/infocyph/Omnibus/compare/main...HEAD?quick_pull=1&amp;template=maintenance.md">Maintenance</a>
 </div>

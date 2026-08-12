@@ -602,7 +602,7 @@ Use the same durable queue, failure store, serializer, and database connection:
 
    use Infocyph\Omnibus\Consumer\DirectExecutionScope;
    use Infocyph\Omnibus\Integration\DBLayer\DBLayerWorkflowStore;
-   use Infocyph\Omnibus\Workflow\BatchCancellationScope;
+   use Infocyph\Omnibus\Workflow\WorkflowExecutionScope;
    use Infocyph\Omnibus\Workflow\WorkflowCoordinator;
    use Infocyph\Omnibus\Workflow\WorkflowFailureStore;
    use Infocyph\Omnibus\Workflow\WorkflowTransport;
@@ -616,7 +616,7 @@ Use the same durable queue, failure store, serializer, and database connection:
 
    $workflowQueue = new WorkflowTransport($queue, $coordinator);
    $workflowFailures = new WorkflowFailureStore($failureStore, $coordinator);
-   $workflowScope = new BatchCancellationScope(
+   $workflowScope = new WorkflowExecutionScope(
        new DirectExecutionScope(),
        $workflowStore,
    );
@@ -636,9 +636,10 @@ Use the same durable queue, failure store, serializer, and database connection:
    $coordinator->cancel($batchId);
 
 Pass ``$workflowQueue``, ``$workflowFailures``, and ``$workflowScope`` to the
-consumer. Register codecs for every workflow message. Successful
-acknowledgement advances state; terminal failure updates state through the
-failure-store decorator.
+consumer. Register codecs for every workflow message. Successful handling is
+recorded before acknowledgement; acknowledgement then finalizes state. Because
+the queue and store share one DBLayer connection, that settlement is atomic.
+Terminal failure updates state through the failure-store decorator.
 
 .. _host-owned-worker-loop:
 

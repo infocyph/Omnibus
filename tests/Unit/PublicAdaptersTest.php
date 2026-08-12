@@ -10,6 +10,7 @@ use Infocyph\Omnibus\Consumer\CancellationToken;
 use Infocyph\Omnibus\Consumer\Command\ConsumeRequest;
 use Infocyph\Omnibus\Consumer\Command\ConsumerTask;
 use Infocyph\Omnibus\Consumer\Consumer;
+use Infocyph\Omnibus\Consumer\DirectExecutionScope;
 use Infocyph\Omnibus\Consumer\ExecutionTimedOut;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Event\QueuedListener;
@@ -34,9 +35,11 @@ use Infocyph\Omnibus\Tests\Fixtures\TestSerializer;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
 use Infocyph\Omnibus\Workflow\InMemoryWorkflowStore;
 use Infocyph\Omnibus\Workflow\WorkflowCoordinator;
+use Infocyph\Omnibus\Workflow\WorkflowExecutionScope;
 use Infocyph\Omnibus\Workflow\WorkflowFailureStore;
 use Infocyph\Omnibus\Workflow\WorkflowStatus;
 use Infocyph\Omnibus\Workflow\WorkflowTransport;
+use Infocyph\CacheLayer\Cache\Lock\FileLockProvider;
 
 test('callback serializer enforces payload bounds in both directions', function (): void {
     $serializer = new CallbackEnvelopeSerializer(
@@ -124,7 +127,7 @@ test('SQS and detached CacheLayer adapters retain their generic contracts', func
     $transport = new SqsTransport($backend, TestSerializer::make());
     $transport->send(new Envelope(new TestCommand('sqs')), 'work');
 
-    $locks = new DetachedLeaseAdapter(new InMemoryLockProvider());
+    $locks = new InMemoryLockProvider();
     $lease = $locks->acquire('policy:key', 0, 10);
 
     expect($backend->sent)->toHaveCount(1)
@@ -135,6 +138,8 @@ test('SQS and detached CacheLayer adapters retain their generic contracts', func
     $locks->release($lease);
 
     expect($locks->acquire('policy:key', 0, 10))->not->toBeNull();
+    expect(fn() => new DetachedLeaseAdapter(new FileLockProvider()))
+        ->toThrow(TypeError::class);
 });
 
 test('workflow transport and failure store update durable workflow state', function (): void {
@@ -145,6 +150,10 @@ test('workflow transport and failure store update durable workflow state', funct
     $transport = new WorkflowTransport($inner, $coordinator);
     $chainId = $coordinator->chain([new TestCommand('chain')], 'work');
     $reservation = [...$transport->receive('work')][0];
+    (new WorkflowExecutionScope(new DirectExecutionScope(), $store))->run(
+        $reservation->envelope(),
+        static fn(): null => null,
+    );
 
     $transport->acknowledge($reservation);
 

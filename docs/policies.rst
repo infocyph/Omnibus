@@ -16,20 +16,25 @@ Unique messages
 
 * keeps the lease across delivery;
 * refreshes it before release for the original lease plus retry delay;
-* releases it only after successful acknowledgement or terminal rejection;
+* releases it, best effort, only after successful acknowledgement or terminal
+  rejection;
 * raises ``LeaseLost`` if retry safety cannot be maintained.
 
-Queued uniqueness requires a token-based provider implementing
-``DetachedLeaseProvider``. A process-bound file lock cannot safely cross the
-producer/consumer boundary.
+Queued uniqueness is bounded duplicate suppression while the lease is valid;
+it is not permanent uniqueness or exactly-once delivery. It requires a
+token-based provider implementing ``DetachedLeaseProvider``. CacheLayer 3.1
+Redis/Valkey and Memcached providers can be adapted; process/session-bound file
+and advisory locks are rejected. If cleanup fails after durable settlement,
+the queue result remains successful and the lease expires by TTL.
 
 Overlap protection
 ------------------
 
 ``OverlapProtectionScope`` holds the original CacheLayer lock while the handler
-runs, verifies refresh before returning, and releases in ``finally``. Configure
-the lease longer than normal execution and enforce a larger hard timeout in the
-host process.
+runs, verifies ownership before returning, and releases in ``finally``. Configure
+``normal handler duration < hard worker timeout < lock lease``. A post-handler
+check cannot make execution safe after a lease expires; Omnibus does not run a
+background heartbeat.
 
 Rate limits
 -----------
@@ -43,8 +48,10 @@ Circuit breaker
 
 ``CircuitBreakerScope`` serializes breaker-state mutations with a short lock and
 stores failure/open state in atomic counters. Once the failure threshold is
-reached, calls fail with ``CircuitOpen`` until the recovery window permits a
-probe. A successful probe clears failure and open state.
+reached, calls fail with ``CircuitOpen``. After the recovery window, exactly one
+caller owns the half-open probe while an open marker keeps concurrent callers
+out. Probe success closes the breaker; probe failure re-arms the recovery
+window.
 
 Policy exceptions enter the configured retry strategy. Applications can supply
 a strategy that assigns different attempt limits or delays to overlap,
@@ -77,7 +84,7 @@ Combine Memcached-backed policies with ``DBLayerTransport`` when Redis is
 unavailable and queued messages must survive restarts.
 
 Rate limiting and circuit breaking require CacheLayer's
-``AtomicCounterStoreInterface``. CacheLayer 2.0 ships Redis and Valkey counter
+``AtomicCounterStoreInterface``. CacheLayer 3.1 ships Redis and Valkey counter
 stores. An application may supply another implementation with equivalent
 atomic increment, read, delete, and TTL semantics; a normal PSR cache adapter is
 not sufficient.

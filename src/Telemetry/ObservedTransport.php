@@ -6,6 +6,7 @@ namespace Infocyph\Omnibus\Telemetry;
 
 use Infocyph\Omnibus\Envelope\EnqueuedAtStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Transport\Reservation;
 use Infocyph\Omnibus\Transport\Transport;
 use Psr\Clock\ClockInterface;
@@ -52,11 +53,6 @@ final readonly class ObservedTransport implements Transport
             }
             $enqueued = $reservation->envelope()->last(EnqueuedAtStamp::class);
             if ($enqueued instanceof EnqueuedAtStamp) {
-                $this->record(
-                    'queue.wait_ms',
-                    max(0, $now - $enqueued->microseconds) / 1_000,
-                    $this->attributes($queue),
-                );
                 $this->record(
                     'queue.age_ms',
                     max(0, $now - $enqueued->microseconds) / 1_000,
@@ -116,9 +112,7 @@ final readonly class ObservedTransport implements Transport
 
     private function microseconds(): int
     {
-        $now = $this->clock->now();
-
-        return ((int) $now->format('U')) * 1_000_000 + (int) $now->format('u');
+        return Time::fromDate($this->clock->now());
     }
 
     /** @param array<string, bool|float|int|string> $attributes */

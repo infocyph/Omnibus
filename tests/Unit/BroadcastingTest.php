@@ -34,3 +34,27 @@ test('presence channels cannot be public', function (): void {
     expect(fn() => new Channel('presence.orders', presence: true))
         ->toThrow(InvalidArgumentException::class);
 });
+
+test('broadcast payloads are recursively JSON-safe and byte bounded', function (): void {
+    expect(new Broadcast(
+        'safe',
+        [new Channel('channel')],
+        ['items' => [['amount' => 10.5, 'paid' => true]]],
+    ))->toBeInstanceOf(Broadcast::class)
+        ->and(fn() => new Broadcast(
+            'object',
+            [new Channel('channel')],
+            ['invalid' => new stdClass()],
+        ))->toThrow(InvalidArgumentException::class)
+        ->and(fn() => new Broadcast(
+            'nan',
+            [new Channel('channel')],
+            ['invalid' => NAN],
+        ))->toThrow(InvalidArgumentException::class)
+        ->and(fn() => new Broadcast(
+            'large',
+            [new Channel('channel')],
+            ['value' => str_repeat('x', 32)],
+            maximumPayloadBytes: 16,
+        ))->toThrow(LengthException::class);
+});

@@ -19,10 +19,6 @@ final readonly class EventDispatcher implements EventDispatcherInterface
     public function dispatch(object $event): object
     {
         foreach ($this->listeners->getListenersForEvent($event) as $listener) {
-            if (!is_callable($listener)) {
-                throw new \UnexpectedValueException('Listener providers must return callable listeners.');
-            }
-
             if ($event instanceof StoppableEventInterface && $event->isPropagationStopped()) {
                 break;
             }
@@ -39,13 +35,19 @@ final readonly class EventDispatcher implements EventDispatcherInterface
                 continue;
             }
 
+            if (!is_callable($listener)) {
+                throw new \UnexpectedValueException(
+                    'Listener providers must return callables or ShouldQueue markers.',
+                );
+            }
+
             $listener($event);
         }
 
         return $event;
     }
 
-    private function queuedListener(callable $listener): ?ShouldQueue
+    private function queuedListener(mixed $listener): ?ShouldQueue
     {
         if ($listener instanceof ShouldQueue) {
             return $listener;

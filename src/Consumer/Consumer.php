@@ -92,7 +92,9 @@ final readonly class Consumer
 
     private static function failureId(string $receipt, string $queue): string
     {
-        return strlen($receipt) <= 191
+        return $receipt !== ''
+            && strlen($receipt) <= 191
+            && preg_match('/[\x00-\x1F\x7F]/D', $receipt) !== 1
             ? $receipt
             : 'receipt-' . hash('sha256', $queue . "\0" . $receipt);
     }

@@ -27,10 +27,25 @@ final class RouteMap
             return $this->resolved[$class] = $this->routes[$class];
         }
 
-        foreach (class_parents($message) + class_implements($message) as $type) {
+        foreach (class_parents($message) as $type) {
             if (isset($this->routes[$type])) {
                 return $this->resolved[$class] = $this->routes[$type];
             }
+        }
+
+        $matched = $this->interfaceRoutes($message);
+        if ($matched !== []) {
+            $route = array_first($matched);
+            foreach ($matched as $candidate) {
+                if ($candidate != $route) {
+                    throw new AmbiguousRoute(sprintf(
+                        'Multiple mapped interfaces provide conflicting routes for "%s".',
+                        $class,
+                    ));
+                }
+            }
+
+            return $this->resolved[$class] = $route;
         }
 
         return $this->resolved[$class] = $this->default;
@@ -45,5 +60,20 @@ final class RouteMap
         ) {
             throw new \InvalidArgumentException('Route mappings require loadable types and Route values.');
         }
+    }
+
+    /** @return array<class-string, Route> */
+    private function interfaceRoutes(object $message): array
+    {
+        $matched = [];
+        $interfaces = class_implements($message);
+        sort($interfaces);
+        foreach ($interfaces as $type) {
+            if (isset($this->routes[$type])) {
+                $matched[$type] = $this->routes[$type];
+            }
+        }
+
+        return $matched;
     }
 }

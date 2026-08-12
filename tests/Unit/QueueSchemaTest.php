@@ -9,8 +9,10 @@ use Infocyph\Omnibus\Integration\DBLayer\QueueSchema;
 test('queue schema is complete for every supported database driver', function (string $driver): void {
     $statements = QueueSchema::statements($driver);
 
-    expect($statements)->toHaveCount(7)
+    expect($statements)->toHaveCount(8)
         ->and(implode("\n", $statements))->toContain('payload_kind')
+        ->toContain('dispatch_claim_token')
+        ->toContain("'handled'")
         ->toContain('CHECK')
         ->toContain('REFERENCES');
 })->with(['mysql', 'pgsql', 'sqlite']);

@@ -27,10 +27,25 @@ final class HandlerMap
             return $this->resolved[$class] = $this->handlers[$class];
         }
 
-        foreach (class_parents($message) + class_implements($message) as $type) {
+        foreach (class_parents($message) as $type) {
             if (isset($this->handlers[$type])) {
                 return $this->resolved[$class] = $this->handlers[$type];
             }
+        }
+
+        $matched = $this->interfaceHandlers($message);
+        if ($matched !== []) {
+            $handler = array_first($matched);
+            foreach ($matched as $candidate) {
+                if ($candidate !== $handler) {
+                    throw new AmbiguousHandler(sprintf(
+                        'Multiple mapped interfaces provide conflicting handlers for "%s".',
+                        $class,
+                    ));
+                }
+            }
+
+            return $this->resolved[$class] = $handler;
         }
 
         throw new HandlerNotFound(sprintf('No handler is registered for "%s".', $class));
@@ -45,5 +60,20 @@ final class HandlerMap
         ) {
             throw new \InvalidArgumentException('Handler mappings require loadable types and callables.');
         }
+    }
+
+    /** @return array<class-string, callable> */
+    private function interfaceHandlers(object $message): array
+    {
+        $matched = [];
+        $interfaces = class_implements($message);
+        sort($interfaces);
+        foreach ($interfaces as $type) {
+            if (isset($this->handlers[$type])) {
+                $matched[$type] = $this->handlers[$type];
+            }
+        }
+
+        return $matched;
     }
 }

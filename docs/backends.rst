@@ -35,7 +35,7 @@ No durable backend initializes unless it is explicitly constructed.
 DBLayer
 -------
 
-Install ``infocyph/dblayer`` and execute every statement returned by
+Install DBLayer 4 (``infocyph/dblayer:^4.0``) and execute every statement returned by
 ``QueueSchema::statements($driver)`` in an application migration. Supported
 drivers are ``mysql``, ``pgsql``, and ``sqlite``. The schema creates message,
 failure, workflow, and workflow-item tables with indexes, state checks, and a
@@ -49,8 +49,12 @@ workflow-item foreign key.
 
 Adapters never create or alter tables during dispatch.
 
-MySQL and PostgreSQL reservations use ``FOR UPDATE SKIP LOCKED``. SQLite uses
-its serialized writer transaction. A reservation receipt contains both row ID
+MySQL and PostgreSQL reservations and workflow claims use
+``FOR UPDATE SKIP LOCKED``. DBLayer 4 does not currently expose a managed
+``BEGIN IMMEDIATE`` transaction mode, so SQLite durable queue consumption and
+workflow coordination are explicitly restricted to one active writer process.
+Producers may remain concurrent. Do not add unmanaged PDO transaction commands
+around DBLayer. A reservation receipt contains both row ID
 and token; acknowledge, reject, and release are conditional on the current
 token. An expired stale worker cannot settle a newer reservation.
 
@@ -125,6 +129,10 @@ delayed delivery, workflow state, and terminal failures in one local database.
 It is appropriate for a single host or a workload whose processes share a
 reliable local filesystem. Use a server database when several hosts consume the
 same queue.
+
+Until DBLayer provides immediate-writer transactions, run one active SQLite
+consuming/coordinating writer. Use MySQL or PostgreSQL with ``SKIP LOCKED`` when
+several consumers or coordinators must run concurrently.
 
 ``InMemoryTransport`` requires no service but is process-local and intentionally
 non-durable. It is suitable for tests, same-process deferred work, and workloads

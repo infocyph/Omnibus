@@ -33,9 +33,9 @@ final readonly class CallbackMessageCodec implements MessageCodec
                 'Message codec aliases must contain between 1 and 200 bytes without control characters.',
             );
         }
-        if (!class_exists($messageType) && !interface_exists($messageType)) {
+        if (!class_exists($messageType) || !new \ReflectionClass($messageType)->isInstantiable()) {
             throw new \InvalidArgumentException(sprintf(
-                'Message codec type "%s" is not a loadable class or interface.',
+                'Message codec type "%s" must be a concrete loadable class.',
                 $messageType,
             ));
         }
@@ -68,12 +68,30 @@ final readonly class CallbackMessageCodec implements MessageCodec
             );
         }
 
-        return ($this->encoder)($message);
+        return self::validatePayload(($this->encoder)($message), $this->name);
     }
 
     /** @return class-string<T> */
     public function type(): string
     {
         return $this->messageType;
+    }
+
+    /**
+     * @param array<mixed, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private static function validatePayload(array $payload, string $name): array
+    {
+        foreach ($payload as $key => $_value) {
+            if (!is_string($key)) {
+                throw new \UnexpectedValueException(sprintf(
+                    'Codec "%s" must encode a string-keyed message map.',
+                    $name,
+                ));
+            }
+        }
+
+        return $payload;
     }
 }

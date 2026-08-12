@@ -87,6 +87,17 @@ test('durable lifecycle runs on each configured service database', function (str
             [new Envelope(new TestCommand('workflow'))],
             'work',
         );
+        $claim = $workflows->claimPending('01DRIVERMATRIX000000000000')[0];
+        $workflows->confirmDispatched(
+            '01DRIVERMATRIX000000000000',
+            $claim->item->itemId,
+            $claim->token,
+        );
+        $workflows->markHandled(
+            '01DRIVERMATRIX000000000000',
+            $claim->item->index,
+            $claim->item->itemId,
+        );
         $transition = $workflows->succeed('01DRIVERMATRIX000000000000', 0);
 
         expect($reservation->envelope()->message)->toEqual(new TestCommand($driver))
