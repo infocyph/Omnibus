@@ -32,7 +32,8 @@ The Omnibus suite covers:
 * multi-connection workflow claim, stale ownership, duplicate terminal, and
   aggregate completion behavior on live MySQL/PostgreSQL;
 * writer-affinity behavior with a deliberately lagging DBLayer read replica
-  when ``IC_SERVICE_REPLICA_DATABASE`` is configured;
+  when ``IC_SERVICE_REPLICA_DATABASE`` is configured; this exceptional topology
+  is an opt-in environment check and skips in the normal suite;
 * Redis Lua command boundaries and live Redis lifecycle when configured;
 * broker capability, malformed delivery, and over-delivery enforcement;
 * detached uniqueness, delayed retry lease refresh, overlap, rate limit,

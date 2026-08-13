@@ -59,6 +59,29 @@ transport when ordering, settlement, or replay semantics differ materially.
 The roadmap does not promise a provider until its client maturity, operational
 model, and delivery guarantees have been validated.
 
+Exceptional database topology tests
+-----------------------------------
+
+Lagging read replicas are an exceptional deployment topology rather than a
+requirement for ordinary Omnibus use. The current writer-affinity regression is
+therefore opt-in and runs only when ``IC_SERVICE_REPLICA_DATABASE`` identifies
+a deliberately stale database.
+
+A future infrastructure suite should add real replicated environments for:
+
+* controlled MySQL asynchronous replication lag;
+* controlled PostgreSQL streaming-replication lag;
+* writer and reader reconnect during queue and workflow settlement;
+* primary failover while claims or reservations are outstanding;
+* multiple readers at different replay positions;
+* proof that queue reservation, receipt settlement, workflow locking,
+  transitions, failure writes, and atomic workflow acknowledgement never make
+  mutation decisions from a replica.
+
+These tests should run in a dedicated opt-in or scheduled workflow because they
+require privileged multi-node service orchestration. Their absence should be
+reported as an environment skip, not as a failure of the normal package suite.
+
 Acceptance criteria
 -------------------
 
@@ -71,4 +94,6 @@ A future integration is releasable only when it:
 * survives redelivery, stale receipt, crash, reconnect, and rebalance tests;
 * passes live multi-worker integration and soak tests against supported server
   versions;
+* includes exceptional topology tests separately when replicas or failover are
+  part of the supported deployment model;
 * keeps handlers responsible for idempotent durable side effects.
