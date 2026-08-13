@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Envelope\Stamp;
 use Infocyph\Omnibus\Serialization\CallbackMessageCodec;
@@ -37,12 +38,16 @@ function omnibusSerializer(): JsonEnvelopeSerializer
 test('json serializer round trips only explicitly registered message types', function (): void {
     $serializer = omnibusSerializer();
     $payload = $serializer->encode(
-        new Envelope(new TestCommand('safe'), [new MessageIdStamp('01ABC')]),
+        new Envelope(new TestCommand('safe'), [
+            new MessageIdStamp('01ABC'),
+            new ChainStamp(str_repeat('w', 26), str_repeat('i', 26), 3),
+        ]),
     );
     $decoded = $serializer->decode($payload);
 
     expect($decoded->message)->toEqual(new TestCommand('safe'))
-        ->and($decoded->last(MessageIdStamp::class)?->id)->toBe('01ABC');
+        ->and($decoded->last(MessageIdStamp::class)?->id)->toBe('01ABC')
+        ->and($decoded->last(ChainStamp::class)?->itemId)->toBe(str_repeat('i', 26));
 });
 
 test('json serializer rejects unregistered external aliases', function (): void {
@@ -191,4 +196,35 @@ test('codec registration is concrete and encoder output is self-decodable', func
         ->toThrow(UnexpectedValueException::class)
         ->and(fn() => $invalidStamp->encode(new MessageIdStamp('id')))
         ->toThrow(UnexpectedValueException::class);
+});
+
+test('message codec recursively accepts only bounded JSON values', function (): void {
+    $value = ['map' => ['list' => [null, true, 1, 1.5, 'value']]];
+    $codec = static fn(mixed $payload): CallbackMessageCodec => new CallbackMessageCodec(
+        'recursive',
+        TestCommand::class,
+        static fn(TestCommand $message): array => ['payload' => $payload, 'message' => $message->value],
+        static fn(array $data): TestCommand => new TestCommand((string) ($data['message'] ?? '')),
+    );
+    $resource = fopen('php://memory', 'rb');
+    $deep = 'leaf';
+    for ($depth = 0; $depth < 600; $depth++) {
+        $deep = ['child' => $deep];
+    }
+
+    expect($codec($value)->encode(new TestCommand('valid'))['payload'])->toBe($value)
+        ->and(fn() => $codec(['nested' => new stdClass()])->encode(new TestCommand('object')))
+        ->toThrow(UnexpectedValueException::class)
+        ->and(fn() => $codec(['nested' => $resource])->encode(new TestCommand('resource')))
+        ->toThrow(UnexpectedValueException::class)
+        ->and(fn() => $codec(['nested' => [NAN, INF]])->encode(new TestCommand('float')))
+        ->toThrow(UnexpectedValueException::class)
+        ->and(fn() => $codec(['nested' => [1 => 'map']])->encode(new TestCommand('key')))
+        ->toThrow(UnexpectedValueException::class)
+        ->and(fn() => $codec($deep)->encode(new TestCommand('deep')))
+        ->toThrow(UnexpectedValueException::class);
+
+    if (is_resource($resource)) {
+        fclose($resource);
+    }
 });

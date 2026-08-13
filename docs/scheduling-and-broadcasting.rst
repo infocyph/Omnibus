@@ -31,7 +31,10 @@ Broadcasting
 
 ``Broadcast`` contains a bounded event name, one through 1000 ``Channel``
 objects, and a string-keyed payload. Event and channel names reject ASCII
-control characters. Presence channels must also be private.
+control characters. Presence channels must also be private. Payload validation
+first performs bounded JSON encoding, so cyclic or excessively deep structures
+fail safely, then enforces Omnibus JSON types and the configured encoded-byte
+limit. Objects, resources, and non-finite floats are rejected.
 
 ``Broadcaster`` is the provider boundary. ``CallbackBroadcaster`` adapts a
 provider SDK without introducing a hard dependency:

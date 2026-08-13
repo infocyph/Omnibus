@@ -25,15 +25,17 @@ interface WorkflowStore
     /** @param list<Envelope> $envelopes */
     public function createChain(string $id, array $envelopes, string $queue): void;
 
-    public function fail(string $id, int $index): WorkflowTransition;
+    public function fail(string $id, string $itemId, int $index): WorkflowTransition;
 
     public function find(string $id): ?WorkflowState;
 
-    public function itemStatus(string $id, int $index, ?string $itemId = null): WorkflowItemStatus;
+    public function findItemByMessageId(string $messageId): ?WorkflowItem;
 
-    public function markHandled(string $id, int $index, ?string $itemId = null): void;
+    public function itemStatus(string $id, string $itemId, int $index): WorkflowItemStatus;
+
+    public function markHandled(string $id, string $itemId, int $index): WorkflowItemStatus;
 
     public function releaseDispatchClaim(string $id, string $itemId, string $claimToken): void;
 
-    public function succeed(string $id, int $index): WorkflowTransition;
+    public function succeed(string $id, string $itemId, int $index): WorkflowTransition;
 }

@@ -83,15 +83,54 @@ final readonly class CallbackMessageCodec implements MessageCodec
      */
     private static function validatePayload(array $payload, string $name): array
     {
-        foreach ($payload as $key => $_value) {
+        try {
+            json_encode($payload, JSON_THROW_ON_ERROR, 512);
+        } catch (\JsonException $failure) {
+            throw new \UnexpectedValueException(
+                sprintf('Codec "%s" must encode bounded JSON-compatible data.', $name),
+                previous: $failure,
+            );
+        }
+        foreach ($payload as $key => $value) {
             if (!is_string($key)) {
                 throw new \UnexpectedValueException(sprintf(
                     'Codec "%s" must encode a string-keyed message map.',
                     $name,
                 ));
             }
+            self::validateValue($value, $name);
         }
 
         return $payload;
+    }
+
+    private static function validateValue(mixed $value, string $name): void
+    {
+        if (
+            $value === null
+            || is_bool($value)
+            || is_int($value)
+            || is_string($value)
+            || (is_float($value) && is_finite($value))
+        ) {
+            return;
+        }
+        if (!is_array($value)) {
+            throw new \UnexpectedValueException(sprintf(
+                'Codec "%s" must encode only JSON-compatible values.',
+                $name,
+            ));
+        }
+
+        $list = array_is_list($value);
+        foreach ($value as $key => $item) {
+            if (!$list && !is_string($key)) {
+                throw new \UnexpectedValueException(sprintf(
+                    'Codec "%s" message maps must use string keys.',
+                    $name,
+                ));
+            }
+            self::validateValue($item, $name);
+        }
     }
 }

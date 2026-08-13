@@ -19,3 +19,5 @@ var
 vendor
 /.cache
 /coverage
+.agents
+.codex

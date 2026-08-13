@@ -9,9 +9,12 @@ use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Transport\Reservation;
 use Infocyph\Omnibus\Transport\Transport;
+use Infocyph\Omnibus\Workflow\AtomicWorkflowTransport;
+use Infocyph\Omnibus\Workflow\WorkflowStore;
+use Infocyph\Omnibus\Workflow\WorkflowTransition;
 use Psr\Clock\ClockInterface;
 
-final readonly class ObservedTransport implements Transport
+final readonly class ObservedTransport implements AtomicWorkflowTransport, Transport
 {
     public function __construct(
         private Transport $inner,
@@ -28,6 +31,20 @@ final readonly class ObservedTransport implements Transport
     {
         $this->inner->acknowledge($reservation);
         $this->record('queue.acknowledged', 1, $this->attributes($reservation->queue));
+    }
+
+    public function acknowledgeWorkflow(
+        Reservation $reservation,
+        WorkflowStore $store,
+    ): WorkflowTransition {
+        if (!$this->inner instanceof AtomicWorkflowTransport) {
+            throw new \LogicException('The observed transport does not support atomic workflow settlement.');
+        }
+
+        $transition = $this->inner->acknowledgeWorkflow($reservation, $store);
+        $this->record('queue.acknowledged', 1, $this->attributes($reservation->queue));
+
+        return $transition;
     }
 
     public function receive(string $queue, int $limit = 1, float $visibilitySeconds = 60.0): iterable
@@ -102,6 +119,12 @@ final readonly class ObservedTransport implements Transport
         $this->record('queue.depth', $depth, $this->attributes($queue));
 
         return $depth;
+    }
+
+    public function supportsWorkflowStore(WorkflowStore $store): bool
+    {
+        return $this->inner instanceof AtomicWorkflowTransport
+            && $this->inner->supportsWorkflowStore($store);
     }
 
     /** @return array{transport:string,queue:string} */

@@ -52,6 +52,34 @@
             "Infocyph\\Omnibus\\Tests\\": "tests/"
         }
     },
+    "archive": {
+        "exclude": [
+            "/.agents",
+            "/.codex",
+            "/.github",
+            "/benchmarks",
+            "/docs",
+            "/examples",
+            "/tests",
+            "/vendor",
+            "/.editorconfig",
+            "/.gitattributes",
+            "/.gitignore",
+            "/.readthedocs.yaml",
+            "/captainhook.json",
+            "/composer.lock",
+            "/omnibus*.txt",
+            "/pest.xml",
+            "/phpbench.json",
+            "/phpcs.xml.dist",
+            "/phpstan.neon.dist",
+            "/phpunit.xml",
+            "/pint.json",
+            "/plan*.md",
+            "/psalm.xml",
+            "/rector.php"
+        ]
+    },
     "config": {
         "allow-plugins": {
             "ergebnis/composer-normalize": true,

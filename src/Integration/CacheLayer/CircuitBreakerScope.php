@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\Omnibus\Integration\CacheLayer;
 
+use Infocyph\CacheLayer\Cache\Lock\LockHandle;
 use Infocyph\CacheLayer\Cache\Lock\LockProviderInterface;
 use Infocyph\CacheLayer\Counter\AtomicCounterStoreInterface;
 use Infocyph\Omnibus\Consumer\ExecutionScope;
@@ -25,8 +26,14 @@ final readonly class CircuitBreakerScope implements ExecutionScope
         private int $failureThreshold = 5,
         private int $recoverySeconds = 30,
         private int $failureWindowSeconds = 60,
+        private int $probeLeaseSeconds = 300,
     ) {
-        if ($failureThreshold < 1 || $recoverySeconds < 1 || $failureWindowSeconds < 1) {
+        if (
+            $failureThreshold < 1
+            || $recoverySeconds < 1
+            || $failureWindowSeconds < 1
+            || $probeLeaseSeconds < 1
+        ) {
             throw new \InvalidArgumentException('Circuit-breaker threshold and windows must be positive.');
         }
         $this->key = \Closure::fromCallable($key);
@@ -40,22 +47,30 @@ final readonly class CircuitBreakerScope implements ExecutionScope
         try {
             $result = $this->inner->run($envelope, $handler);
         } catch (\Throwable $failure) {
-            $this->recordFailure($key, $probe);
+            try {
+                $this->recordFailure($key, $probe instanceof LockHandle);
+            } catch (\Throwable) {
+            }
+            $this->releaseProbe($probe);
 
             throw $failure;
         }
 
-        $this->withLock($key, function () use ($key): void {
-            $this->counters->delete($this->failureKey($key));
-            $this->counters->delete($this->openKey($key));
-        });
+        try {
+            $this->withLock($key, function () use ($key): void {
+                $this->counters->delete($this->failureKey($key));
+                $this->counters->delete($this->openKey($key));
+            });
+        } catch (\Throwable) {
+        }
+        $this->releaseProbe($probe);
 
         return $result;
     }
 
-    private function assertExecutionAllowed(string $key): bool
+    private function assertExecutionAllowed(string $key): ?LockHandle
     {
-        $probe = false;
+        $probe = null;
         $this->withLock($key, function () use ($key, &$probe): void {
             $openedAt = $this->counters->get($this->openKey($key));
             if ($openedAt === null) {
@@ -66,10 +81,14 @@ final readonly class CircuitBreakerScope implements ExecutionScope
                 throw new CircuitOpen(sprintf('Circuit "%s" is open.', $key));
             }
 
-            $this->counters->delete($this->failureKey($key));
-            $this->counters->delete($this->openKey($key));
-            $this->counters->increment($this->openKey($key), $now, $this->recoverySeconds);
-            $probe = true;
+            $probe = $this->locks->acquire(
+                $this->probeKey($key),
+                0.0,
+                (float) $this->probeLeaseSeconds,
+            );
+            if (!$probe instanceof LockHandle) {
+                throw new CircuitOpen(sprintf('Circuit "%s" recovery probe is active.', $key));
+            }
         });
 
         return $probe;
@@ -83,6 +102,11 @@ final readonly class CircuitBreakerScope implements ExecutionScope
     private function openKey(string $key): string
     {
         return $key . '.open';
+    }
+
+    private function probeKey(string $key): string
+    {
+        return $key . '.probe';
     }
 
     private function recordFailure(string $key, bool $probe): void
@@ -100,9 +124,21 @@ final readonly class CircuitBreakerScope implements ExecutionScope
             $this->counters->increment(
                 $this->openKey($key),
                 (int) $this->clock->now()->format('U'),
-                $this->recoverySeconds,
+                $this->recoverySeconds + (2 * $this->probeLeaseSeconds),
             );
         });
+    }
+
+    private function releaseProbe(?LockHandle $probe): void
+    {
+        if (!$probe instanceof LockHandle) {
+            return;
+        }
+
+        try {
+            $this->locks->release($probe);
+        } catch (\Throwable) {
+        }
     }
 
     /** @param callable():void $operation */

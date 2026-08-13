@@ -31,7 +31,9 @@ final readonly class DeadlineExecutionScope implements ExecutionScope
             $envelope->with(new CancellationStamp($token)),
             $handler,
         );
-        $token->throwIfCancellationRequested();
+        if ($token->isCancellationRequested()) {
+            throw new ExecutionTimedOutAfterExecution($deadline);
+        }
 
         return $result;
     }

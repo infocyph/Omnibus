@@ -39,9 +39,13 @@ Dispatch claims
 The store atomically changes eligible items from ``pending`` to
 ``dispatching`` and returns a token and expiry. A successful send confirms that
 token and changes the item to ``dispatched``. A send error releases the current
-token to ``pending``. Stale tokens cannot confirm or release a newer claim, and
-expired claims can be reclaimed. A chain claims one item; a batch is dispatched
-in bounded chunks of 100 until all of its maximum 1000 items are sent.
+token and every unattempted claim from the same chunk to ``pending``. Earlier
+successfully confirmed items remain ``dispatched``. Stale tokens cannot confirm
+or release a newer claim, and expired claims can be reclaimed. A chain claims
+one item; a batch is dispatched in bounded chunks of 100 until all of its
+maximum 1000 items are sent. ``WorkflowDispatchFailed`` exposes the durable
+workflow ID when initial sending fails, so recovery can call
+``dispatchPending()`` without recreating the workflow.
 
 Settlement boundary
 -------------------
@@ -65,6 +69,11 @@ transaction. With Redis, AMQP, or SQS and a database workflow store, no
 cross-system transaction exists. The ``handled`` marker narrows that unavoidable
 at-least-once boundary; Omnibus does not claim exactly-once processing.
 
+Settlement refuses ``pending``, ``dispatching``, and ``dispatched`` items before
+acknowledgement. Terminal ``succeeded``, ``failed``, and ``cancelled`` deliveries
+are duplicate queue cleanup only. Transparent uniqueness and telemetry
+decorators preserve DBLayer's atomic workflow settlement capability.
+
 Chains, batches, and cancellation
 ---------------------------------
 
@@ -74,11 +83,24 @@ unrelated already-dispatched items to finish after another item fails. Batch
 cancellation changes pending items to ``cancelled``; the execution scope also
 prevents a cancelled delivered item from running.
 
+Cancellation is cooperative: observing it before handler start prevents
+execution, but it neither preempts nor rolls back business work already
+running. If cancellation wins while a handler is running, the successful
+handler return observes the terminal state and is not classified as a retryable
+handler failure.
+
 Stores return ``WorkflowTransition`` facts describing which boundary was
 crossed now. These facts drive ``ChainCompleted``, ``ChainFailed``,
 ``BatchCompleted``, ``BatchFailed``, ``BatchFinalized``, and
 ``WorkflowCancelled`` once. Conditional item transitions and aggregate locking
 prevent terminal regression and counters exceeding the total.
+
+Lifecycle listeners are best effort after the durable transition. Listener
+failure never replays a completed handler; applications needing guaranteed
+notification should dispatch a dedicated durable message. A failure while
+dispatching the next chain item is instead reported as non-retryable
+``WorkflowPostSettlementFailure``: the current item is already settled and the
+pending next item is recovered with ``dispatchPending()``.
 
 Recovery
 --------
@@ -88,5 +110,10 @@ After a coordinator crash, wait for dispatch claims to expire and call
 or explicitly reconcile the ``handled`` item through the workflow transport.
 Generic ``FailureManager::retry()`` refuses ``ChainStamp`` and ``BatchStamp``;
 workflow recovery must preserve store state and claim semantics.
+
+Workflow items receive a stable ``MessageIdStamp`` before persistence and reuse
+it after claim expiry or ambiguous sending. Durable transports expose the same
+ID outside the encoded envelope, allowing a poison payload to be stored raw and
+correlated to its workflow item without decoding workflow stamps.
 
 See :ref:`durable-chains-and-batches` for a complete durable composition.

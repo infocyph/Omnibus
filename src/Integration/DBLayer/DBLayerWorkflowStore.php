@@ -9,6 +9,7 @@ use Infocyph\Omnibus\Clock\SystemClock;
 use Infocyph\Omnibus\Envelope\BatchStamp;
 use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
 use Infocyph\Omnibus\Transport\QueueName;
@@ -81,60 +82,14 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         float $leaseSeconds = 30.0,
     ): array {
         self::validateClaim($limit, $leaseSeconds);
-        $claims = $this->connection->transaction(function (Connection $connection) use (
-            $id,
-            $limit,
-            $leaseSeconds,
-        ): array {
-            $state = $this->required($id, true);
-            if (
-                $state->status === WorkflowStatus::Cancelled
-                || ($state->kind === 'chain' && $state->status === WorkflowStatus::Failed)
-            ) {
-                return [];
-            }
-
-            $now = Time::fromDate($this->clock->now());
-            $connection->update(
-                "UPDATE {$this->items} SET item_status = 'pending', dispatch_claim_token = NULL, dispatch_claim_until = NULL WHERE workflow_id = ? AND item_status = 'dispatching' AND dispatch_claim_until <= ?",
-                [$id, $now],
-            );
-            $resolvedLimit = $state->kind === 'chain' ? 1 : $limit;
-            $lock = match ($connection->getDriverName()) {
-                'mysql', 'pgsql' => ' FOR UPDATE SKIP LOCKED',
-                'sqlite' => '',
-                default => throw new \LogicException('Unsupported DBLayer workflow driver.'),
-            };
-            $rows = $connection->select(
-                "SELECT workflow_id, item_id, item_index, queue_name, payload FROM {$this->items} WHERE workflow_id = ? AND item_status = 'pending' ORDER BY item_index LIMIT {$resolvedLimit}{$lock}",
-                [$id],
-            );
-            if ($rows === []) {
-                return [];
-            }
-
-            $token = ULID::generateMonotonic();
-            $expiresAt = Time::add($now, $leaseSeconds);
-            $itemIds = [];
-            foreach ($rows as $row) {
-                $itemIds[] = self::string($row, 'item_id');
-            }
-            $placeholders = implode(', ', array_fill(0, count($itemIds), '?'));
-            $changed = $connection->update(
-                "UPDATE {$this->items} SET item_status = 'dispatching', dispatch_claim_token = ?, dispatch_claim_until = ? WHERE workflow_id = ? AND item_status = 'pending' AND item_id IN ({$placeholders})",
-                [$token, $expiresAt, $id, ...$itemIds],
-            );
-            if ($changed !== count($rows)) {
-                throw new \RuntimeException('Workflow dispatch claim changed an unexpected number of items.');
-            }
-
-            $resolved = [];
-            foreach ($rows as $row) {
-                $resolved[] = new WorkflowDispatchClaim($this->hydrateItem($row), $token, $expiresAt);
-            }
-
-            return $resolved;
-        });
+        $claims = $this->connection->transaction(
+            fn(Connection $connection): array => $this->claimPendingWithinTransaction(
+                $connection,
+                $id,
+                $limit,
+                $leaseSeconds,
+            ),
+        );
         if (!is_array($claims) || !array_is_list($claims)) {
             throw new \LogicException('DBLayer returned invalid workflow claims.');
         }
@@ -152,26 +107,31 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
 
     public function confirmDispatched(string $id, string $itemId, string $claimToken): void
     {
-        $this->connection->transaction(function (Connection $connection) use (
+        $confirmed = $this->connection->transaction(function (Connection $connection) use (
             $id,
             $itemId,
             $claimToken,
-        ): void {
+        ): bool {
             $changed = $connection->update(
                 "UPDATE {$this->items} SET item_status = 'dispatched', dispatch_claim_token = NULL, dispatch_claim_until = NULL WHERE workflow_id = ? AND item_id = ? AND item_status = 'dispatching' AND dispatch_claim_token = ?",
                 [$id, $itemId, $claimToken],
             );
             if ($changed !== 1) {
-                throw new \LogicException(sprintf(
-                    'Workflow item "%s" has a stale dispatch claim.',
-                    $itemId,
-                ));
+                return false;
             }
             $connection->update(
                 "UPDATE {$this->workflows} SET workflow_status = 'running' WHERE id = ? AND workflow_status = 'pending'",
                 [$id],
             );
+
+            return true;
         });
+        if ($confirmed !== true) {
+            throw new \LogicException(sprintf(
+                'Workflow item "%s" has a stale dispatch claim.',
+                $itemId,
+            ));
+        }
     }
 
     public function createBatch(string $id, array $envelopes, string $queue): void
@@ -184,17 +144,17 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         $this->create($id, 'chain', $envelopes, $queue);
     }
 
-    public function fail(string $id, int $index): WorkflowTransition
+    public function fail(string $id, string $itemId, int $index): WorkflowTransition
     {
-        return $this->stateTransaction(function (Connection $connection) use ($id, $index): WorkflowTransition {
+        return $this->stateTransaction(function (Connection $connection) use ($id, $itemId, $index): WorkflowTransition {
             $before = $this->required($id, true);
             if (in_array($before->status, [WorkflowStatus::Completed, WorkflowStatus::Cancelled], true)) {
                 return new WorkflowTransition($before);
             }
 
             $failed = $connection->update(
-                "UPDATE {$this->items} SET item_status = 'failed', dispatch_claim_token = NULL, dispatch_claim_until = NULL WHERE workflow_id = ? AND item_index = ? AND item_status IN ('pending', 'dispatching', 'dispatched')",
-                [$id, $index],
+                "UPDATE {$this->items} SET item_status = 'failed', dispatch_claim_token = NULL, dispatch_claim_until = NULL WHERE workflow_id = ? AND item_id = ? AND item_index = ? AND item_status IN ('pending', 'dispatching', 'dispatched')",
+                [$id, $itemId, $index],
             );
             if ($failed !== 1) {
                 return new WorkflowTransition($before);
@@ -232,39 +192,64 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         return isset($rows[0]) ? $this->hydrateState($rows[0]) : null;
     }
 
-    public function itemStatus(string $id, int $index, ?string $itemId = null): WorkflowItemStatus
+    public function findItemByMessageId(string $messageId): ?WorkflowItem
     {
-        $rows = $this->connection->select(
-            "SELECT item_id, item_status FROM {$this->items} WHERE workflow_id = ? AND item_index = ?",
-            [$id, $index],
+        $rows = $this->writerSelect(
+            "SELECT workflow_id, item_id, item_index, queue_name, payload FROM {$this->items} WHERE message_id = ?",
+            [$messageId],
+        );
+
+        return isset($rows[0]) ? $this->hydrateItem($rows[0]) : null;
+    }
+
+    public function itemStatus(string $id, string $itemId, int $index): WorkflowItemStatus
+    {
+        $rows = $this->writerSelect(
+            "SELECT item_id, item_status FROM {$this->items} WHERE workflow_id = ? AND item_id = ? AND item_index = ?",
+            [$id, $itemId, $index],
         );
         if (!isset($rows[0])) {
             throw new WorkflowNotFound(sprintf('Workflow item "%s:%d" was not found.', $id, $index));
-        }
-        if ($itemId !== null && self::string($rows[0], 'item_id') !== $itemId) {
-            throw new WorkflowInconsistentDelivery('Workflow item identity does not match its index.');
         }
 
         return self::status($rows[0]);
     }
 
-    public function markHandled(string $id, int $index, ?string $itemId = null): void
+    public function itemStatusForUpdate(string $id, string $itemId, int $index): WorkflowItemStatus
     {
-        $bindings = [$id, $index];
-        $identity = '';
-        if ($itemId !== null) {
-            $identity = ' AND item_id = ?';
-            $bindings[] = $itemId;
+        $lock = match ($this->connection->getDriverName()) {
+            'mysql', 'pgsql' => ' FOR UPDATE',
+            'sqlite' => '',
+            default => throw new \LogicException('Unsupported DBLayer workflow driver.'),
+        };
+        $rows = $this->writerSelect(
+            "SELECT item_status FROM {$this->items} WHERE workflow_id = ? AND item_id = ? AND item_index = ?{$lock}",
+            [$id, $itemId, $index],
+        );
+        if (!isset($rows[0])) {
+            throw new WorkflowNotFound(sprintf('Workflow item "%s:%d" was not found.', $id, $index));
         }
+
+        return self::status($rows[0]);
+    }
+
+    public function markHandled(string $id, string $itemId, int $index): WorkflowItemStatus
+    {
         $changed = $this->connection->update(
-            "UPDATE {$this->items} SET item_status = 'handled', handled_at = ? WHERE workflow_id = ? AND item_index = ?{$identity} AND item_status = 'dispatched'",
-            [Time::fromDate($this->clock->now()), ...$bindings],
+            "UPDATE {$this->items} SET item_status = 'handled', handled_at = ? WHERE workflow_id = ? AND item_id = ? AND item_index = ? AND item_status = 'dispatched'",
+            [Time::fromDate($this->clock->now()), $id, $itemId, $index],
         );
         if ($changed === 1) {
-            return;
+            return WorkflowItemStatus::Handled;
         }
-        if ($this->itemStatus($id, $index, $itemId) === WorkflowItemStatus::Handled) {
-            return;
+        $status = $this->itemStatus($id, $itemId, $index);
+        if (in_array($status, [
+            WorkflowItemStatus::Handled,
+            WorkflowItemStatus::Succeeded,
+            WorkflowItemStatus::Failed,
+            WorkflowItemStatus::Cancelled,
+        ], true)) {
+            return $status;
         }
 
         throw new WorkflowInconsistentDelivery(sprintf(
@@ -288,13 +273,13 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         }
     }
 
-    public function succeed(string $id, int $index): WorkflowTransition
+    public function succeed(string $id, string $itemId, int $index): WorkflowTransition
     {
-        return $this->stateTransaction(function (Connection $connection) use ($id, $index): WorkflowTransition {
+        return $this->stateTransaction(function (Connection $connection) use ($id, $itemId, $index): WorkflowTransition {
             $before = $this->required($id, true);
             $changed = $connection->update(
-                "UPDATE {$this->items} SET item_status = 'succeeded' WHERE workflow_id = ? AND item_index = ? AND item_status = 'handled'",
-                [$id, $index],
+                "UPDATE {$this->items} SET item_status = 'succeeded' WHERE workflow_id = ? AND item_id = ? AND item_index = ? AND item_status = 'handled'",
+                [$id, $itemId, $index],
             );
             if ($changed !== 1) {
                 return new WorkflowTransition($before);
@@ -374,6 +359,38 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         }
     }
 
+    /** @return list<WorkflowDispatchClaim> */
+    private function claimPendingWithinTransaction(
+        Connection $connection,
+        string $id,
+        int $limit,
+        float $leaseSeconds,
+    ): array {
+        $state = $this->required($id, true);
+        if (
+            $state->status === WorkflowStatus::Cancelled
+            || ($state->kind === 'chain' && $state->status === WorkflowStatus::Failed)
+        ) {
+            return [];
+        }
+
+        $now = Time::fromDate($this->clock->now());
+        $connection->update(
+            "UPDATE {$this->items} SET item_status = 'pending', dispatch_claim_token = NULL, dispatch_claim_until = NULL WHERE workflow_id = ? AND item_status = 'dispatching' AND dispatch_claim_until <= ?",
+            [$id, $now],
+        );
+        $rows = $this->pendingClaimRows($connection, $id, $state->kind, $limit);
+        if ($rows === []) {
+            return [];
+        }
+
+        $token = ULID::generateMonotonic();
+        $expiresAt = Time::add($now, $leaseSeconds);
+        $this->markRowsDispatching($connection, $id, $rows, $token, $expiresAt);
+
+        return $this->hydrateClaims($rows, $token, $expiresAt);
+    }
+
     /**
      * @param string $kind One of ``batch`` or ``chain``.
      * @param list<Envelope> $envelopes
@@ -400,12 +417,18 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
             $rows = [];
             foreach ($envelopes as $index => $envelope) {
                 $itemId = ULID::generateMonotonic();
+                $envelope = $envelope->without(ChainStamp::class, BatchStamp::class);
+                if (!$envelope->last(MessageIdStamp::class) instanceof MessageIdStamp) {
+                    $envelope = $envelope->with(new MessageIdStamp(ULID::generateMonotonic()));
+                }
                 $stamp = $kind === 'chain'
-                    ? new ChainStamp($id, $index)
+                    ? new ChainStamp($id, $itemId, $index)
                     : new BatchStamp($id, $itemId, $index);
                 $rows[] = [
                     'workflow_id' => $id,
                     'item_id' => $itemId,
+                    'message_id' => $envelope->last(MessageIdStamp::class)->id
+                        ?? throw new \LogicException('Workflow items must have a message ID.'),
                     'item_index' => $index,
                     'queue_name' => $queue,
                     'payload' => $this->serializer->encode($envelope->with($stamp)),
@@ -417,6 +440,20 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
             }
             $this->insertItems($connection, $rows);
         });
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return list<WorkflowDispatchClaim>
+     */
+    private function hydrateClaims(array $rows, string $token, int $expiresAt): array
+    {
+        $claims = [];
+        foreach ($rows as $row) {
+            $claims[] = new WorkflowDispatchClaim($this->hydrateItem($row), $token, $expiresAt);
+        }
+
+        return $claims;
     }
 
     /** @param array<string, mixed> $row */
@@ -467,6 +504,51 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         }
     }
 
+    /** @param list<array<string, mixed>> $rows */
+    private function markRowsDispatching(
+        Connection $connection,
+        string $id,
+        array $rows,
+        string $token,
+        int $expiresAt,
+    ): void {
+        $itemIds = [];
+        foreach ($rows as $row) {
+            $itemIds[] = self::string($row, 'item_id');
+        }
+        $placeholders = implode(', ', array_fill(0, count($itemIds), '?'));
+        $changed = $connection->update(
+            "UPDATE {$this->items} SET item_status = 'dispatching', dispatch_claim_token = ?, dispatch_claim_until = ? WHERE workflow_id = ? AND item_status = 'pending' AND item_id IN ({$placeholders})",
+            [$token, $expiresAt, $id, ...$itemIds],
+        );
+        if ($changed !== count($rows)) {
+            throw new \RuntimeException('Workflow dispatch claim changed an unexpected number of items.');
+        }
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function pendingClaimRows(
+        Connection $connection,
+        string $id,
+        string $kind,
+        int $limit,
+    ): array {
+        $resolvedLimit = $kind === 'chain' ? 1 : $limit;
+        $lock = match ($connection->getDriverName()) {
+            'mysql', 'pgsql' => ' FOR UPDATE SKIP LOCKED',
+            'sqlite' => '',
+            default => throw new \LogicException('Unsupported DBLayer workflow driver.'),
+        };
+        $chainPredecessor = $kind === 'chain'
+            ? " AND NOT EXISTS (SELECT 1 FROM {$this->items} AS earlier WHERE earlier.workflow_id = current_item.workflow_id AND earlier.item_index < current_item.item_index AND earlier.item_status <> 'succeeded')"
+            : '';
+
+        return array_values($connection->select(
+            "SELECT workflow_id, item_id, item_index, queue_name, payload FROM {$this->items} AS current_item WHERE workflow_id = ? AND item_status = 'pending'{$chainPredecessor} ORDER BY item_index LIMIT {$resolvedLimit}{$lock}",
+            [$id],
+        ));
+    }
+
     private function required(string $id, bool $forUpdate = false): WorkflowState
     {
         if (!$forUpdate) {
@@ -498,5 +580,23 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         }
 
         return $transition;
+    }
+
+    /**
+     * @param array<int|string, mixed> $bindings
+     * @return array<int, array<string, mixed>>
+     */
+    private function writerSelect(string $sql, array $bindings): array
+    {
+        $rows = [];
+        $this->connection->transaction(function (Connection $connection) use (
+            $sql,
+            $bindings,
+            &$rows,
+        ): void {
+            $rows = $connection->select($sql, $bindings);
+        });
+
+        return $rows;
     }
 }

@@ -16,10 +16,13 @@ use Infocyph\Omnibus\Failure\FailureRemovalAfterRetryFailed;
 use Infocyph\Omnibus\Failure\FailedMessage;
 use Infocyph\Omnibus\Failure\FailureNotFound;
 use Infocyph\Omnibus\Failure\FailureManager;
+use Infocyph\Omnibus\Failure\FailureRetryClaim;
+use Infocyph\Omnibus\Failure\FailureRetryClaimUnavailable;
 use Infocyph\Omnibus\Failure\FailureStore;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
 use Infocyph\Omnibus\Failure\UndecodableFailure;
 use Infocyph\Omnibus\Failure\WorkflowFailureRequiresRecovery;
+use Infocyph\Omnibus\Serialization\DecodeFailure;
 use Infocyph\Omnibus\Telemetry\ObservedExecutionScope;
 use Infocyph\Omnibus\Telemetry\ObservedTransport;
 use Infocyph\Omnibus\Telemetry\TelemetrySink;
@@ -62,6 +65,48 @@ test('failure manager retries decoded messages only after a successful send', fu
         ->toThrow(UndecodableFailure::class)
         ->and($manager->forget('raw'))->toBeTrue()
         ->and($manager->flush())->toBe(0);
+});
+
+test('failure retry claims exclude overlap, recover after expiry, and release after send failure', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $store = new InMemoryFailureStore($clock);
+    $failure = FailedMessage::decoded(
+        'claimed',
+        'work',
+        new Envelope(new TestCommand('retry')),
+        1,
+        $clock->now(),
+        RuntimeException::class,
+        'failed',
+    );
+    $store->add($failure);
+
+    $stale = $store->claimRetry('claimed', 1);
+    expect(fn() => $store->claimRetry('claimed', 1))
+        ->toThrow(FailureRetryClaimUnavailable::class);
+
+    $clock->advance('+2 seconds');
+    $current = $store->claimRetry('claimed', 1);
+    expect($store->releaseRetry($stale))->toBeFalse()
+        ->and($store->releaseRetry($current))->toBeTrue();
+
+    $failingSender = new class implements \Infocyph\Omnibus\Transport\Sender {
+        public function send(Envelope $envelope, string $queue): Envelope
+        {
+            throw new RuntimeException(sprintf(
+                'send unavailable for %s on %s',
+                $envelope->message::class,
+                $queue,
+            ));
+        }
+    };
+    $manager = new FailureManager($store);
+    expect(fn() => $manager->retry('claimed', $failingSender))
+        ->toThrow(RuntimeException::class, 'send unavailable');
+
+    $sent = $manager->retry('claimed', new RecordingSender());
+    expect($sent->message)->toEqual(new TestCommand('retry'))
+        ->and($store->find('claimed'))->toBeNull();
 });
 
 test('manual retry strips lifecycle state and rejects workflow replay', function (): void {
@@ -138,6 +183,15 @@ test('post-send failure removal is explicit and failure reasons are bounded', fu
             return 0;
         }
 
+        public function claimRetry(string $id, float $leaseSeconds = 30.0): FailureRetryClaim
+        {
+            return new FailureRetryClaim(
+                $this->failure,
+                'claim-'.$id,
+                (int) ceil($leaseSeconds),
+            );
+        }
+
         public function find(string $id): ?FailedMessage
         {
             return $id === $this->failure->id ? $this->failure : null;
@@ -148,9 +202,24 @@ test('post-send failure removal is explicit and failure reasons are bounded', fu
             return $before > $this->failure->failedAt ? 1 : 0;
         }
 
+        public function markRetrySent(FailureRetryClaim $claim): bool
+        {
+            return $claim->failure->id === $this->failure->id;
+        }
+
         public function remove(string $id): bool
         {
             return $id === $this->failure->id && false;
+        }
+
+        public function removeRetried(FailureRetryClaim $claim): bool
+        {
+            return $claim->token === '';
+        }
+
+        public function releaseRetry(FailureRetryClaim $claim): bool
+        {
+            return $claim->token !== '';
         }
     };
     $sender = new RecordingSender();
@@ -159,6 +228,32 @@ test('post-send failure removal is explicit and failure reasons are bounded', fu
         ->and(fn() => (new FailureManager($store))->retry('stuck', $sender))
         ->toThrow(FailureRemovalAfterRetryFailed::class)
         ->and($sender->count())->toBe(1);
+});
+
+test('failure inputs reject unsafe direct IDs and share one reason bound', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $reason = str_repeat('r', 20_000);
+    $decoded = new DecodeFailure('raw', JsonException::class, $reason);
+
+    expect(strlen($decoded->reason))->toBe(16_384)
+        ->and(fn() => FailedMessage::undecodable(
+            "unsafe\nid",
+            'work',
+            'raw',
+            1,
+            $clock->now(),
+            JsonException::class,
+            $reason,
+        ))->toThrow(InvalidArgumentException::class)
+        ->and(fn() => FailedMessage::undecodable(
+            str_repeat('i', 192),
+            'work',
+            'raw',
+            1,
+            $clock->now(),
+            JsonException::class,
+            $reason,
+        ))->toThrow(InvalidArgumentException::class);
 });
 
 test('telemetry decorators expose queue and execution measurements only when selected', function (): void {

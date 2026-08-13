@@ -26,7 +26,7 @@ Core stamps
    * - ``UniqueStamp``
      - Detached uniqueness lease identity and token.
    * - ``ChainStamp`` / ``BatchStamp``
-     - Durable workflow identity and item position.
+     - Exact durable ``(workflowId, itemId, index)`` identity.
    * - ``CancellationStamp``
      - Cooperative execution-deadline token.
    * - ``HandledStamp``

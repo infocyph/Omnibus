@@ -707,14 +707,18 @@ Failure inspection and replay
        );
    }
 
-   // Removes the failure only after the sender accepts the envelope.
-   $manager->retry($failureId, $queue);
+   // Claims atomically, sends once, then removes the sent failure.
+   $manager->retry($failureId, $queue, claimLeaseSeconds: 60);
 
    // Application-owned retention policy.
    $manager->prune(new DateTimeImmutable('-30 days'));
 
 Raw poison payloads cannot be retried until an appropriate codec is restored.
-Do not log payloads blindly; they may contain sensitive application data.
+Concurrent retries of one ID fail with ``FailureRetryClaimUnavailable``. A
+send failure releases its claim immediately, while a crashed retry operator's
+claim expires and can be reclaimed. Always retry through ``FailureManager``;
+do not bypass its claim lifecycle by sending the stored envelope directly. Do
+not log payloads blindly; they may contain sensitive application data.
 
 .. _dispatch-timing:
 
@@ -946,6 +950,10 @@ Pass ``$deadlineScope`` to ``Consumer``. This is cooperative cancellation: it
 cannot interrupt a blocking database driver, socket, extension call, or
 non-cooperative provider SDK. The worker host must enforce a larger hard
 process timeout.
+If the deadline is first observed after the handler returns,
+``ExecutionTimedOutAfterExecution`` is non-retryable because business effects
+may already be durable. A provider timeout thrown from inside the handler
+remains a separate application failure governed by the configured retry policy.
 
 .. _application-tests:
 

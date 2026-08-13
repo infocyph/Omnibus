@@ -6,7 +6,8 @@ Delivery lifecycle
 
 ``Sender``, ``Receiver``, and ``Transport`` define the queue boundary.
 Receivers reserve messages for a bounded visibility period and return
-``Reservation`` objects.
+``Reservation`` objects. Every reservation exposes its logical message ID
+separately from the encoded envelope, including when payload decoding fails.
 
 ``Consumer`` applies this order:
 
@@ -48,7 +49,9 @@ Retry policy
      - Float from 0.0 through 1.0.
 
 Failures implementing ``NonRetryableFailure`` bypass remaining retry capacity.
-``HandlerNotFound`` and ``WorkflowCancelled`` are non-retryable.
+``HandlerNotFound`` and post-handler timeout/lease-loss exceptions are
+non-retryable. ``WorkflowCancelled`` is a lifecycle event, not an execution
+failure.
 
 Poison payloads
 ---------------
@@ -56,14 +59,28 @@ Poison payloads
 Malformed JSON, oversized payloads, unknown aliases, and codec failures become
 poison reservations. The consumer stores the bounded raw payload and decode
 error, then rejects it. Poison work is not returned to the ready queue.
+Poison and unstamped terminal failure IDs use a direct 1..191-byte identifier
+without ASCII controls; unsafe provider receipts become
+``receipt-<sha256(queue NUL receipt)>``. Decode and handler failure reasons share
+the same 16384-byte bound.
 
 Failure management
 ------------------
 
-``FailureManager`` retries decoded failures only. It removes a record after the
-selected sender accepts the message. If send fails, the failure record remains.
-A raw failure stays inspectable until its codec is restored; it cannot be
-retried as an object.
+``FailureManager`` retries decoded failures only. It first acquires a bounded
+claim for the failure ID, preventing two operators from sending the same
+failure concurrently. If validation or sending fails, the claim is released;
+an abandoned claim can be reclaimed after expiry. After the sender accepts the
+message, the record is marked ``sent`` and conditionally removed. If removal
+fails, the ``sent`` state remains non-retryable and
+``FailureRemovalAfterRetryFailed`` exposes the accepted envelope. A raw failure
+stays inspectable until its codec is restored; it cannot be retried as an
+object.
+
+Set ``claimLeaseSeconds`` longer than the sender's ordinary maximum latency. As
+with queue visibility, reclaiming an expired claim favors crash recovery and
+can overlap a worker that exceeded its lease, so downstream message handling
+must remain idempotent.
 
 ``forget()``, ``flush()``, and ``prune()`` delegate to the selected failure
 store. Failure-list limits range from 1 through 1000.

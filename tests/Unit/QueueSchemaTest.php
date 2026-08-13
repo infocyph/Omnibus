@@ -11,6 +11,8 @@ test('queue schema is complete for every supported database driver', function (s
 
     expect($statements)->toHaveCount(8)
         ->and(implode("\n", $statements))->toContain('payload_kind')
+        ->toContain('retry_status')
+        ->toContain('retry_token')
         ->toContain('dispatch_claim_token')
         ->toContain("'handled'")
         ->toContain('CHECK')
@@ -31,6 +33,9 @@ test('sqlite schema executes and enforces durable-state constraints', function (
         'INSERT INTO omnibus_failures (id, queue_name, payload, payload_kind, payload_truncated, attempt, failed_at, failure_class, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         ['id', 'work', 'raw', 'invalid', 0, 1, 1, RuntimeException::class, 'reason'],
     ))->toThrow(RuntimeException::class)
+        ->and(fn() => $connection->insert(
+            "INSERT INTO omnibus_failures (id, queue_name, payload, payload_kind, payload_truncated, attempt, failed_at, failure_class, reason, retry_status) VALUES ('retry', 'work', 'raw', 'raw', 0, 1, 1, 'failure', 'reason', 'retrying')",
+        ))->toThrow(RuntimeException::class)
         ->and(fn() => $connection->insert(
             "INSERT INTO omnibus_workflow_items (workflow_id, item_id, item_index, queue_name, payload, item_status) VALUES ('missing', 'item', 0, 'work', '{}', 'pending')",
         ))->toThrow(RuntimeException::class);

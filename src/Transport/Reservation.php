@@ -13,12 +13,16 @@ final readonly class Reservation
         public string $receipt,
         public string $queue,
         public int $attempt,
+        public string $messageId,
         private ?Envelope $decodedEnvelope,
         private ?DecodeFailure $decodeFailure,
     ) {
         if (
             $receipt === ''
             || strlen($receipt) > 4_096
+            || $messageId === ''
+            || strlen($messageId) > 191
+            || preg_match('/[\x00-\x1F\x7F]/D', $messageId) === 1
             || $attempt < 1
             || (($decodedEnvelope === null) === ($decodeFailure === null))
         ) {
@@ -32,8 +36,9 @@ final readonly class Reservation
         string $queue,
         Envelope $envelope,
         int $attempt,
+        string $messageId,
     ): self {
-        return new self($receipt, $queue, $attempt, $envelope, null);
+        return new self($receipt, $queue, $attempt, $messageId, $envelope, null);
     }
 
     public static function undecodable(
@@ -41,8 +46,9 @@ final readonly class Reservation
         string $queue,
         DecodeFailure $failure,
         int $attempt,
+        string $messageId,
     ): self {
-        return new self($receipt, $queue, $attempt, null, $failure);
+        return new self($receipt, $queue, $attempt, $messageId, null, $failure);
     }
 
     public function decodingFailure(): ?DecodeFailure

@@ -34,7 +34,9 @@ Overlap protection
 runs, verifies ownership before returning, and releases in ``finally``. Configure
 ``normal handler duration < hard worker timeout < lock lease``. A post-handler
 check cannot make execution safe after a lease expires; Omnibus does not run a
-background heartbeat.
+background heartbeat. Lease loss detected after the handler returns is a
+dedicated non-retryable post-execution failure, preventing automatic replay of
+business work that may already be durable.
 
 Rate limits
 -----------
@@ -51,7 +53,11 @@ stores failure/open state in atomic counters. Once the failure threshold is
 reached, calls fail with ``CircuitOpen``. After the recovery window, exactly one
 caller owns the half-open probe while an open marker keeps concurrent callers
 out. Probe success closes the breaker; probe failure re-arms the recovery
-window.
+window. The open marker outlives both the recovery boundary and probe lease, so
+an expiring counter cannot accidentally look closed at half-open. Configure the
+probe lease longer than the maximum supported handler lifetime. Probe ownership
+expires after a crashed worker. Success cleanup and failure bookkeeping are
+best effort after handler execution and never replace the handler outcome.
 
 Policy exceptions enter the configured retry strategy. Applications can supply
 a strategy that assigns different attempt limits or delays to overlap,

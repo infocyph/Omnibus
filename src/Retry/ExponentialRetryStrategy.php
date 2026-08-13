@@ -31,18 +31,32 @@ final readonly class ExponentialRetryStrategy implements RetryStrategy
 
     public function delaySeconds(int $attempt): float
     {
-        $base = min(
-            $this->maximumDelaySeconds,
-            $this->initialDelaySeconds * ($this->multiplier ** max(0, $attempt - 1)),
-        );
+        if ($attempt < 1) {
+            throw new \InvalidArgumentException('Retry attempt must be positive.');
+        }
+        if ($this->initialDelaySeconds === 0.0 || $this->maximumDelaySeconds === 0.0) {
+            return 0.0;
+        }
+        if ($this->multiplier === 1.0 || $this->initialDelaySeconds >= $this->maximumDelaySeconds) {
+            $base = min($this->initialDelaySeconds, $this->maximumDelaySeconds);
+        } else {
+            $growthLog = ($attempt - 1) * log($this->multiplier);
+            $limitLog = log($this->maximumDelaySeconds) - log($this->initialDelaySeconds);
+            $base = $growthLog >= $limitLog
+                ? $this->maximumDelaySeconds
+                : min(
+                    $this->maximumDelaySeconds,
+                    exp(log($this->initialDelaySeconds) + $growthLog),
+                );
+        }
         if ($this->jitterRatio === 0.0 || $base === 0.0) {
             return $base;
         }
 
-        $spread = $base * $this->jitterRatio;
-        $offset = random_int(0, 1_000_000) / 1_000_000 * ($spread * 2.0) - $spread;
+        $factor = random_int(-1_000_000, 1_000_000) / 1_000_000;
+        $jittered = $base + ($base * $this->jitterRatio * $factor);
 
-        return max(0.0, min($this->maximumDelaySeconds, $base + $offset));
+        return max(0.0, min($this->maximumDelaySeconds, $jittered));
     }
 
     public function shouldRetry(\Throwable $failure, int $attempt): bool

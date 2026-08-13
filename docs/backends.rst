@@ -41,6 +41,12 @@ drivers are ``mysql``, ``pgsql``, and ``sqlite``. The schema creates message,
 failure, workflow, and workflow-item tables with indexes, state checks, and a
 workflow-item foreign key.
 
+The failure table includes the ``failed`` → ``retrying`` → ``sent`` claim
+lifecycle. Existing pre-release schemas must be recreated or explicitly
+migrated to add ``retry_status``, ``retry_token``, and ``retry_until`` before
+using ``FailureManager::retry()``. Adapters never perform schema migration at
+runtime.
+
 .. code-block:: php
 
    foreach (QueueSchema::statements('pgsql') as $statement) {

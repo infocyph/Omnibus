@@ -40,7 +40,9 @@ Soak tests
 ``composer soak:durable`` alternates SQLite consumers and verifies the durable
 queue drains without duplicate settlement.
 ``composer soak:workflow`` repeatedly claims, handles, and finalizes batches
-while checking aggregate reconciliation invariants.
+while injecting partial dispatch failure, claim expiry, handled redelivery,
+duplicate settlement, and terminal-listener failure. It reports reconciliation
+attempts/errors, duplicate handler executions, and terminal regressions.
 
 Database contention is an operational benchmark: test 2/4/8 consumers against
 10k and 100k+ mixed ready/delayed/reserved rows on the intended MySQL and
@@ -55,7 +57,17 @@ Run the harness for each service database, for example:
 .. code-block:: console
 
    composer benchmark:db-contention -- mysql 4 100000
-   composer benchmark:db-contention -- pgsql 8 100000
+   composer benchmark:db-contention -- pgsql 8 100000 candidate
+   composer benchmark:db-contention -- pgsql 8 100000 candidate-reclaim
+
+The optional fourth argument selects the current queue index, the
+``(queue_name, available_at, id)`` candidate, or that candidate plus
+``(queue_name, reserved_until)``. The harness seeds ready, delayed, actively
+reserved, expired-reservation, and old rows. Its JSON records receive calls,
+reservation count, total and mean receive latency, per-worker mean, p50/p95/p99,
+throughput, settlement anomalies, transaction statistics, and the backend's
+``EXPLAIN ANALYZE`` output. Run all three index sets at 10k, 100k, and 1m rows
+where practical before changing the production schema.
 
 Regression practice
 -------------------

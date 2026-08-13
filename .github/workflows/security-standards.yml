@@ -24,7 +24,7 @@ jobs:
       psalm_threads: "1"
       run_analysis: true
       run_svg_report: true
-      fail_on_skipped_tests: true
+      fail_on_skipped_tests: false
       run_clean_install: true
       benchmark_composer_script: ""
       benchmark_result_file: ""

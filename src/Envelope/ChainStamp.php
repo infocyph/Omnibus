@@ -8,10 +8,17 @@ final readonly class ChainStamp implements Stamp
 {
     public function __construct(
         public string $workflowId,
+        public string $itemId,
         public int $index,
     ) {
-        if ($workflowId === '' || strlen($workflowId) > 26 || $index < 0) {
-            throw new \InvalidArgumentException('Chain stamp requires a workflow ID and non-negative index.');
+        if (
+            $workflowId === ''
+            || strlen($workflowId) > 26
+            || $itemId === ''
+            || strlen($itemId) > 26
+            || $index < 0
+        ) {
+            throw new \InvalidArgumentException('Chain stamp requires workflow/item IDs and non-negative index.');
         }
     }
 }

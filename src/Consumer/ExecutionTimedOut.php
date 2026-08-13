@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\Omnibus\Consumer;
 
-final class ExecutionTimedOut extends \RuntimeException
+class ExecutionTimedOut extends \RuntimeException
 {
     public function __construct(public readonly \DateTimeImmutable $deadline)
     {

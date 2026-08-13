@@ -155,8 +155,8 @@ $workflowTransition = static function () use ($workflowMessages): void {
     $store->createBatch('benchmark', $workflowMessages(100), 'benchmark');
     foreach ($store->claimPending('benchmark', 100, 30) as $claim) {
         $store->confirmDispatched('benchmark', $claim->item->itemId, $claim->token);
-        $store->markHandled('benchmark', $claim->item->index, $claim->item->itemId);
-        $store->succeed('benchmark', $claim->item->index);
+        $store->markHandled('benchmark', $claim->item->itemId, $claim->item->index);
+        $store->succeed('benchmark', $claim->item->itemId, $claim->item->index);
     }
 };
 
