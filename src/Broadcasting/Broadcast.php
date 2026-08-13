@@ -31,15 +31,23 @@ final readonly class Broadcast
         foreach ($channels as $channel) {
             self::validateChannel($channel);
         }
-        self::validatePayload($payload);
-        $encoded = json_encode(
-            $payload,
-            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-            64,
-        );
+
+        try {
+            $encoded = json_encode(
+                $payload,
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+                64,
+            );
+        } catch (\JsonException $failure) {
+            throw new \InvalidArgumentException(
+                'Broadcast payload must be bounded JSON-compatible data.',
+                previous: $failure,
+            );
+        }
         if (strlen($encoded) > $maximumPayloadBytes) {
             throw new \LengthException('Broadcast payload exceeds the configured byte limit.');
         }
+        self::validatePayload($payload);
     }
 
     private static function validateChannel(mixed $channel): void

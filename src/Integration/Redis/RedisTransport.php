@@ -27,6 +27,7 @@ redis.call('ZREM', KEYS[1], ARGV[1])
 redis.call('HDEL', KEYS[2], ARGV[1])
 redis.call('HDEL', KEYS[3], ARGV[1])
 redis.call('HDEL', KEYS[4], ARGV[1])
+redis.call('HDEL', KEYS[5], ARGV[1])
 return 1
 LUA;
 
@@ -48,6 +49,8 @@ for _, id in ipairs(ids) do
     local payload = redis.call('HGET', KEYS[3], id)
     table.insert(result, payload or '')
     table.insert(result, tostring(attempt))
+    local messageId = redis.call('HGET', KEYS[6], id)
+    table.insert(result, messageId or '')
 end
 return result
 LUA;
@@ -63,6 +66,7 @@ LUA;
     private const string SEND = <<<'LUA'
 redis.call('HSET', KEYS[2], ARGV[1], ARGV[2])
 redis.call('HSET', KEYS[3], ARGV[1], 0)
+redis.call('HSET', KEYS[4], ARGV[1], ARGV[4])
 redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
 return 1
 LUA;
@@ -99,6 +103,7 @@ LUA;
             $keys['payloads'],
             $keys['attempts'],
             $keys['receipts'],
+            $keys['message_ids'],
         ], [$id, $token]);
         $this->assertChanged($changed, $reservation);
     }
@@ -115,28 +120,30 @@ LUA;
             $token,
             (string) $limit,
         ]);
-        if (!is_array($result) || count($result) % 3 !== 0) {
+        if (!is_array($result) || count($result) % 4 !== 0) {
             throw new \UnexpectedValueException('Redis returned a malformed reservation batch.');
         }
 
         $reservations = [];
-        for ($offset = 0, $count = count($result); $offset < $count; $offset += 3) {
+        for ($offset = 0, $count = count($result); $offset < $count; $offset += 4) {
             $id = self::scalarString($result[$offset] ?? null, 'message id');
             $payload = self::scalarString($result[$offset + 1] ?? null, 'payload');
             $attempt = self::positiveInt($result[$offset + 2] ?? null, 'attempt');
+            $messageId = self::scalarString($result[$offset + 3] ?? null, 'logical message id');
             $receipt = ReservationReceipt::encode($id, $token);
 
             try {
                 $envelope = $this->serializer
                     ->decode($payload)
                     ->with(new AttemptStamp($attempt));
-                $reservations[] = Reservation::decoded($receipt, $queue, $envelope, $attempt);
+                $reservations[] = Reservation::decoded($receipt, $queue, $envelope, $attempt, $messageId);
             } catch (\Throwable $failure) {
                 $reservations[] = Reservation::undecodable(
                     $receipt,
                     $queue,
                     DecodeFailure::fromThrowable($payload, $failure),
                     $attempt,
+                    $messageId,
                 );
             }
         }
@@ -180,6 +187,7 @@ LUA;
             $keys['ready'],
             $keys['payloads'],
             $keys['attempts'],
+            $keys['message_ids'],
         ], [
             ULID::generateMonotonic(),
             $this->serializer->encode($envelope),
@@ -187,6 +195,8 @@ LUA;
                 $this->microseconds(),
                 $delay instanceof DelayStamp ? $delay->seconds : 0.0,
             ),
+            $envelope->last(MessageIdStamp::class)->id
+                ?? throw new \LogicException('Queued envelopes must have a message ID.'),
         ]);
 
         return $envelope;
@@ -285,7 +295,7 @@ LUA;
         );
     }
 
-    /** @return array{ready:string,reserved:string,payloads:string,attempts:string,receipts:string} */
+    /** @return array{ready:string,reserved:string,payloads:string,attempts:string,receipts:string,message_ids:string} */
     private function keys(string $queue): array
     {
         $tag = sprintf('{%s:%s}', $this->prefix, $queue);
@@ -296,6 +306,7 @@ LUA;
             'payloads' => $tag . ':payloads',
             'attempts' => $tag . ':attempts',
             'receipts' => $tag . ':receipts',
+            'message_ids' => $tag . ':message_ids',
         ];
     }
 

@@ -23,6 +23,7 @@ test('settlement failures propagate without being treated as handler failures', 
         'default',
         new Envelope(new TestCommand('handled')),
         1,
+        'handled-message',
     );
     $receiver = new class($reservation) implements Receiver {
         public int $released = 0;
@@ -155,7 +156,7 @@ test('a missing handler is terminal even when retry capacity remains', function 
         ->and($failures->all()[0]->envelope?->message)->toBe($sent->message);
 });
 
-test('unsafe provider receipts use a stable bounded failure identifier', function (string $receipt): void {
+test('poison reservations prefer their stable message identity over unsafe provider receipts', function (string $receipt): void {
     $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
     $receiver = new class($receipt) implements Receiver {
         public function __construct(private readonly string $receipt) {}
@@ -174,6 +175,7 @@ test('unsafe provider receipts use a stable bounded failure identifier', functio
                     $queue,
                     new DecodeFailure('raw', JsonException::class, 'invalid'),
                     1,
+                    'poison-message',
                 ),
             ];
         }
@@ -199,10 +201,55 @@ test('unsafe provider receipts use a stable bounded failure identifier', functio
     $consumer->run(queue: 'provider');
     $failure = $failures->all()[0];
 
-    expect($failure->id)->toStartWith('receipt-')
+    expect($failure->id)->toBe('poison-message')
         ->and(strlen($failure->id))->toBeLessThanOrEqual(191)
         ->and($failure->payload)->toBe('raw');
 })->with([
     'oversized' => str_repeat('r', 2_000),
     'control character' => "unsafe\nreceipt",
 ]);
+
+test('decoded failures without a message stamp normalize unsafe provider receipts', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $receipt = "provider\nreceipt";
+    $receiver = new class($receipt) implements Receiver {
+        public function __construct(private readonly string $receipt) {}
+
+        public function acknowledge(Reservation $reservation): void {}
+
+        public function receive(string $queue, int $limit = 1, float $visibilitySeconds = 60): iterable
+        {
+            if ($limit < 1 || $visibilitySeconds <= 0) {
+                return [];
+            }
+
+            return [Reservation::decoded(
+                $this->receipt,
+                $queue,
+                new Envelope(new TestCommand('missing-handler')),
+                1,
+                'transport-correlation',
+            )];
+        }
+
+        public function reject(Reservation $reservation): void {}
+
+        public function release(Reservation $reservation, float $delaySeconds = 0): void {}
+
+        public function size(string $queue): int
+        {
+            return $queue === 'provider' ? 0 : 1;
+        }
+    };
+    $failures = new InMemoryFailureStore();
+    (new Consumer(
+        $receiver,
+        new HandlerMap([]),
+        new ExponentialRetryStrategy(),
+        $failures,
+        $clock,
+    ))->run('provider');
+
+    expect($failures->all()[0]->id)
+        ->toBe('receipt-'.hash('sha256', "provider\0".$receipt));
+});

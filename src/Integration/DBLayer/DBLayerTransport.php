@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\Omnibus\Integration\DBLayer;
 
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Exceptions\TransactionException;
 use Infocyph\Omnibus\Envelope\AttemptStamp;
 use Infocyph\Omnibus\Envelope\BatchStamp;
 use Infocyph\Omnibus\Envelope\ChainStamp;
@@ -20,6 +21,8 @@ use Infocyph\Omnibus\Transport\Reservation;
 use Infocyph\Omnibus\Transport\ReservationReceipt;
 use Infocyph\Omnibus\Transport\Transport;
 use Infocyph\Omnibus\Workflow\AtomicWorkflowTransport;
+use Infocyph\Omnibus\Workflow\WorkflowInconsistentDelivery;
+use Infocyph\Omnibus\Workflow\WorkflowItemStatus;
 use Infocyph\Omnibus\Workflow\WorkflowStore;
 use Infocyph\Omnibus\Workflow\WorkflowTransition;
 use Infocyph\UID\ULID;
@@ -55,23 +58,39 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
             throw new \LogicException('Atomic workflow settlement requires the same DBLayer connection.');
         }
 
-        $transition = $this->connection->transaction(function (Connection $connection) use (
-            $reservation,
-            $store,
-        ): WorkflowTransition {
-            $this->deleteReservation($reservation, $connection);
-            $envelope = $reservation->envelope();
-            $chain = $envelope->last(ChainStamp::class);
-            if ($chain instanceof ChainStamp) {
-                return $store->succeed($chain->workflowId, $chain->index);
-            }
-            $batch = $envelope->last(BatchStamp::class);
-            if ($batch instanceof BatchStamp) {
-                return $store->succeed($batch->workflowId, $batch->index);
+        try {
+            $transition = $this->connection->transaction(function (Connection $connection) use (
+                $reservation,
+                $store,
+            ): WorkflowTransition {
+                $envelope = $reservation->envelope();
+                $chain = $envelope->last(ChainStamp::class);
+                if ($chain instanceof ChainStamp) {
+                    $identity = [$chain->workflowId, $chain->itemId, $chain->index];
+                } else {
+                    $batch = $envelope->last(BatchStamp::class);
+                    if (!$batch instanceof BatchStamp) {
+                        throw new \LogicException('Atomic workflow settlement requires a workflow stamp.');
+                    }
+                    $identity = [$batch->workflowId, $batch->itemId, $batch->index];
+                }
+                if ($store->itemStatusForUpdate(...$identity) !== WorkflowItemStatus::Handled) {
+                    throw new WorkflowInconsistentDelivery(
+                        'Atomic workflow settlement requires a handled item.',
+                    );
+                }
+                $this->deleteReservation($reservation, $connection);
+
+                return $store->succeed(...$identity);
+            });
+        } catch (TransactionException $failure) {
+            $cause = $failure->getPrevious();
+            if ($cause instanceof WorkflowInconsistentDelivery || $cause instanceof InvalidReservation) {
+                throw $cause;
             }
 
-            throw new \LogicException('Atomic workflow settlement requires a workflow stamp.');
-        });
+            throw $failure;
+        }
         if (!$transition instanceof WorkflowTransition) {
             throw new \LogicException('DBLayer returned an invalid workflow settlement result.');
         }
@@ -86,7 +105,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         $reservedUntil = Time::add($now, $visibilitySeconds);
         $token = ULID::generateMonotonic();
 
-        /** @var list<array{id:mixed,payload:mixed,attempts:mixed}> $rows */
+        /** @var list<array{id:mixed,message_id:mixed,payload:mixed,attempts:mixed}> $rows */
         $rows = $this->connection->transaction(function (Connection $connection) use (
             $queue,
             $limit,
@@ -100,7 +119,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
                 default => throw new \LogicException('Unsupported DBLayer queue driver.'),
             };
             $rows = $connection->select(
-                "SELECT id, payload, attempts FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT {$limit}{$lock}",
+                "SELECT id, message_id, payload, attempts FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT {$limit}{$lock}",
                 [$queue, $now, $now],
             );
             if ($rows === []) {
@@ -124,6 +143,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         foreach ($rows as $row) {
             $id = self::rowString($row, 'id');
             $payload = self::rowString($row, 'payload');
+            $messageId = self::rowString($row, 'message_id');
             $attempt = self::rowInt($row, 'attempts') + 1;
             $receipt = ReservationReceipt::encode($id, $token);
 
@@ -131,13 +151,14 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
                 $envelope = $this->serializer
                     ->decode($payload)
                     ->with(new AttemptStamp($attempt));
-                $reservations[] = Reservation::decoded($receipt, $queue, $envelope, $attempt);
+                $reservations[] = Reservation::decoded($receipt, $queue, $envelope, $attempt, $messageId);
             } catch (\Throwable $failure) {
                 $reservations[] = Reservation::undecodable(
                     $receipt,
                     $queue,
                     DecodeFailure::fromThrowable($payload, $failure),
                     $attempt,
+                    $messageId,
                 );
             }
         }
@@ -177,9 +198,11 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         $delay = $envelope->last(DelayStamp::class);
         $now = $this->microseconds();
         $this->connection->insert(
-            "INSERT INTO {$this->table} (id, queue_name, payload, available_at, attempts, reserved_until, receipt, created_at) VALUES (?, ?, ?, ?, 0, NULL, NULL, ?)",
+            "INSERT INTO {$this->table} (id, message_id, queue_name, payload, available_at, attempts, reserved_until, receipt, created_at) VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, ?)",
             [
                 ULID::generateMonotonic(),
+                $envelope->last(MessageIdStamp::class)->id
+                    ?? throw new \LogicException('Queued envelopes must have a message ID.'),
                 $queue,
                 $this->serializer->encode($envelope),
                 Time::add(

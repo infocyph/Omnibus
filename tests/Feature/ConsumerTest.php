@@ -125,6 +125,7 @@ test('consumer rejects poison payloads once without invoking retry or handlers',
                     $queue,
                     new DecodeFailure('{broken', JsonException::class, 'Syntax error'),
                     1,
+                    'poison-1',
                 ),
             ];
         }

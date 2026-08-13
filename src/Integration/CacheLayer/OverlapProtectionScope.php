@@ -48,7 +48,10 @@ final readonly class OverlapProtectionScope implements ExecutionScope
         try {
             $result = $this->inner->run($envelope, $handler);
             if (!$this->locks->refresh($handle, $this->leaseSeconds)) {
-                throw new LeaseLost(sprintf('Message overlap lease "%s" was lost.', $logicalKey));
+                throw new OverlapLeaseLostAfterExecution(sprintf(
+                    'Message overlap lease "%s" was lost after execution.',
+                    $logicalKey,
+                ));
             }
 
             return $result;

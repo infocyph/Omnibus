@@ -58,3 +58,31 @@ test('broadcast payloads are recursively JSON-safe and byte bounded', function (
             maximumPayloadBytes: 16,
         ))->toThrow(LengthException::class);
 });
+
+test('broadcast recursion guards reject cyclic and excessively deep payloads', function (): void {
+    $self = [];
+    $self['self'] = &$self;
+    $left = [];
+    $right = ['left' => &$left];
+    $left['right'] = &$right;
+    $deep = 'leaf';
+    for ($depth = 0; $depth < 70; $depth++) {
+        $deep = ['child' => $deep];
+    }
+    $resource = fopen('php://memory', 'rb');
+
+    expect(fn() => new Broadcast('self', [new Channel('channel')], $self))
+        ->toThrow(InvalidArgumentException::class)
+        ->and(fn() => new Broadcast('mutual', [new Channel('channel')], $left))
+        ->toThrow(InvalidArgumentException::class)
+        ->and(fn() => new Broadcast('deep', [new Channel('channel')], ['deep' => $deep]))
+        ->toThrow(InvalidArgumentException::class)
+        ->and(fn() => new Broadcast('resource', [new Channel('channel')], ['value' => $resource]))
+        ->toThrow(InvalidArgumentException::class)
+        ->and(fn() => new Broadcast('infinity', [new Channel('channel')], ['value' => INF]))
+        ->toThrow(InvalidArgumentException::class);
+
+    if (is_resource($resource)) {
+        fclose($resource);
+    }
+});

@@ -33,16 +33,18 @@ function omnibusRedisSerializer(): JsonEnvelopeSerializer
 
 test('Redis transport uses atomic scripts for delivery lifecycle', function (): void {
     $payload = null;
+    $messageId = null;
     $commands = [];
     $client = new CallbackRedisClient(
-        static function (string $command, string ...$arguments) use (&$payload, &$commands): mixed {
+        static function (string $command, string ...$arguments) use (&$payload, &$messageId, &$commands): mixed {
             $commands[] = [$command, $arguments[1] ?? null];
             $script = $arguments[0] ?? '';
             if (str_contains($script, 'HINCRBY')) {
-                return ['row-1', $payload, '1'];
+                return ['row-1', $payload, '1', $messageId];
             }
             if (str_contains($script, 'HSET') && str_contains($script, 'ARGV[3]')) {
-                $payload = $arguments[6] ?? null;
+                $payload = $arguments[7] ?? null;
+                $messageId = $arguments[9] ?? null;
 
                 return 1;
             }
@@ -93,7 +95,7 @@ test('Redis transport rejects malformed and overflowing backend responses', func
 
 test('Redis transport surfaces missing payload hash entries as poison reservations', function (): void {
     $transport = new RedisTransport(
-        new CallbackRedisClient(static fn(): array => ['row-1', '', '1']),
+        new CallbackRedisClient(static fn(): array => ['row-1', '', '1', 'message-id']),
         omnibusRedisSerializer(),
         new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00')),
     );

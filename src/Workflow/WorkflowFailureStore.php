@@ -19,7 +19,11 @@ final readonly class WorkflowFailureStore implements FailureStore
         $this->inner->add($failure);
         if ($failure->envelope !== null) {
             $this->workflows->fail($failure->envelope);
+
+            return;
         }
+
+        $this->workflows->failMessage($failure->id);
     }
 
     public function all(int $limit = 100): array

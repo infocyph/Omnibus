@@ -82,10 +82,12 @@ final class CoreStampCodecs
                 ChainStamp::class,
                 static fn(ChainStamp $stamp): array => [
                     'workflow_id' => $stamp->workflowId,
+                    'item_id' => $stamp->itemId,
                     'index' => $stamp->index,
                 ],
                 static fn(array $data): ChainStamp => new ChainStamp(
                     self::string($data, 'workflow_id'),
+                    self::string($data, 'item_id'),
                     self::int($data, 'index'),
                 ),
             ),

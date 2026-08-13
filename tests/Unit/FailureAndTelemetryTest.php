@@ -20,6 +20,7 @@ use Infocyph\Omnibus\Failure\FailureStore;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
 use Infocyph\Omnibus\Failure\UndecodableFailure;
 use Infocyph\Omnibus\Failure\WorkflowFailureRequiresRecovery;
+use Infocyph\Omnibus\Serialization\DecodeFailure;
 use Infocyph\Omnibus\Telemetry\ObservedExecutionScope;
 use Infocyph\Omnibus\Telemetry\ObservedTransport;
 use Infocyph\Omnibus\Telemetry\TelemetrySink;
@@ -159,6 +160,32 @@ test('post-send failure removal is explicit and failure reasons are bounded', fu
         ->and(fn() => (new FailureManager($store))->retry('stuck', $sender))
         ->toThrow(FailureRemovalAfterRetryFailed::class)
         ->and($sender->count())->toBe(1);
+});
+
+test('failure inputs reject unsafe direct IDs and share one reason bound', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $reason = str_repeat('r', 20_000);
+    $decoded = new DecodeFailure('raw', JsonException::class, $reason);
+
+    expect(strlen($decoded->reason))->toBe(16_384)
+        ->and(fn() => FailedMessage::undecodable(
+            "unsafe\nid",
+            'work',
+            'raw',
+            1,
+            $clock->now(),
+            JsonException::class,
+            $reason,
+        ))->toThrow(InvalidArgumentException::class)
+        ->and(fn() => FailedMessage::undecodable(
+            str_repeat('i', 192),
+            'work',
+            'raw',
+            1,
+            $clock->now(),
+            JsonException::class,
+            $reason,
+        ))->toThrow(InvalidArgumentException::class);
 });
 
 test('telemetry decorators expose queue and execution measurements only when selected', function (): void {

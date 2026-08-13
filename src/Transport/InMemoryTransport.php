@@ -72,13 +72,17 @@ final class InMemoryTransport implements Transport
             $attempt = $item['attempt'] + 1;
             $receipt = ULID::generateMonotonic();
             $envelope = $item['envelope']->with(new AttemptStamp($attempt));
+            $messageId = $envelope->last(MessageIdStamp::class);
+            if (!$messageId instanceof MessageIdStamp) {
+                throw new \LogicException('Queued envelopes must have a message ID.');
+            }
             $this->reserved[$receipt] = [
                 'envelope' => $item['envelope'],
                 'queue' => $queue,
                 'expires_at' => $now + $visibilitySeconds,
                 'attempt' => $attempt,
             ];
-            $deliveries[] = Reservation::decoded($receipt, $queue, $envelope, $attempt);
+            $deliveries[] = Reservation::decoded($receipt, $queue, $envelope, $attempt, $messageId->id);
         }
         $this->queues[$queue] = $remaining;
 

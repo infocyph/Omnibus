@@ -23,7 +23,7 @@ test('broker transport preserves native batch and settlement boundaries', functi
         'work',
     );
     $backend->deliveries = [
-        new BrokerDelivery('delivery-1', $backend->sent[0]['payload'], 3),
+        new BrokerDelivery('delivery-1', $backend->sent[0]['id'], $backend->sent[0]['payload'], 3),
     ];
 
     $reservation = [...$transport->receive('work', 10)][0];
@@ -92,6 +92,6 @@ test('broker transport rejects provider over-delivery and invalid yielded values
     expect(fn() => [...$transport->receive('work', 1)])
         ->toThrow(UnexpectedValueException::class);
 })->with([
-    'over delivery' => new BrokerDelivery('receipt', '{}', 1),
+    'over delivery' => new BrokerDelivery('receipt', 'message-id', '{}', 1),
     'wrong value type' => 'not-a-delivery',
 ]);

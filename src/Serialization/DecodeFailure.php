@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Infocyph\Omnibus\Serialization;
 
+use Infocyph\Omnibus\Failure\FailureInput;
+
 final readonly class DecodeFailure
 {
-    private const int MAX_REASON_BYTES = 16_384;
-
     public string $payload;
 
     public string $reason;
@@ -28,9 +28,7 @@ final readonly class DecodeFailure
         $this->payload = $this->truncated
             ? substr($payload, 0, $maximumPayloadBytes)
             : $payload;
-        $this->reason = strlen($reason) > self::MAX_REASON_BYTES
-            ? substr($reason, 0, self::MAX_REASON_BYTES)
-            : $reason;
+        $this->reason = FailureInput::reason($reason);
     }
 
     public static function fromThrowable(

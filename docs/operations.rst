@@ -77,3 +77,15 @@ the handler. Inspect terminal ``failed`` workflows and choose a domain recovery
 operation. Generic failure retry refuses chain and batch stamps because a blind
 resend could violate the aggregate. Until failure-store retry claims are added,
 operators must serialize manual retry of a given non-workflow failure ID.
+Failure retry claiming is explicitly deferred to the next minor roadmap; this
+operational serialization rule remains required until that claim lifecycle is
+available.
+
+If initial workflow dispatch raises ``WorkflowDispatchFailed``, retain its
+``workflowId`` and call ``dispatchPending()`` after the sender recovers. If
+settlement raises ``WorkflowPostSettlementFailure``, do not replay the current
+handler: its reservation and item are already settled. Recover
+``dispatch-next`` by calling ``dispatchPending()`` for the reported workflow.
+Poison workflow payloads are correlated through durable message-ID metadata;
+inspect the raw failure and recover the terminal workflow as domain policy
+requires without attempting to decode stale workflow stamps.

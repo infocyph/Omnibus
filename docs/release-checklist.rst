@@ -15,7 +15,9 @@ Before tagging a stable release:
 #. Run ``composer benchmark``, ``composer soak:consumer``, and
    ``composer soak:durable`` and ``composer soak:workflow`` in a stable
    environment. Run the operational DB contention benchmark for configured
-   MySQL/PostgreSQL services.
+   MySQL/PostgreSQL services across current, candidate, and candidate-reclaim
+   indexes at 10k/100k/1m rows where practical. Review plans, scanned rows,
+   receive percentiles, lock/transaction statistics, and ACK throughput.
 #. Run ``composer dump-autoload --no-dev --classmap-authoritative`` and require
    ``vendor/autoload.php``.
 #. Build ``composer archive`` and inspect the archive contents.

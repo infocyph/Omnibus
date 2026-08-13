@@ -6,6 +6,7 @@ namespace Infocyph\Omnibus\Consumer;
 
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Failure\FailedMessage;
+use Infocyph\Omnibus\Failure\FailureInput;
 use Infocyph\Omnibus\Failure\FailureStore;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\Retry\RetryStrategy;
@@ -34,7 +35,7 @@ final readonly class Consumer
             $decodeFailure = $reservation->decodingFailure();
             if ($decodeFailure !== null) {
                 $this->failures->add(FailedMessage::undecodable(
-                    self::failureId($reservation->receipt, $reservation->queue),
+                    FailureInput::id($reservation->messageId, $reservation->queue, $reservation->receipt),
                     $reservation->queue,
                     $decodeFailure->payload,
                     $reservation->attempt,
@@ -51,8 +52,11 @@ final readonly class Consumer
             $envelope = $reservation->envelope();
 
             try {
-                $handler = $this->handlers->for($envelope->message);
-                $this->scope->run($envelope, $handler);
+                $this->scope->run(
+                    $envelope,
+                    fn(object $message, \Infocyph\Omnibus\Envelope\Envelope $delivery): mixed
+                        => ($this->handlers->for($message))($message, $delivery),
+                );
             } catch (\Throwable $exception) {
                 if ($this->retry->shouldRetry($exception, $reservation->attempt)) {
                     $this->receiver->release(
@@ -67,7 +71,7 @@ final readonly class Consumer
                 $messageIdStamp = $envelope->last(MessageIdStamp::class);
                 $messageId = $messageIdStamp instanceof MessageIdStamp
                     ? $messageIdStamp->id
-                    : $reservation->receipt;
+                    : FailureInput::id('', $reservation->queue, $reservation->receipt);
                 $this->failures->add(FailedMessage::decoded(
                     $messageId,
                     $reservation->queue,
@@ -88,14 +92,5 @@ final readonly class Consumer
         }
 
         return new ConsumerResult($received, $succeeded, $released, $failed);
-    }
-
-    private static function failureId(string $receipt, string $queue): string
-    {
-        return $receipt !== ''
-            && strlen($receipt) <= 191
-            && preg_match('/[\x00-\x1F\x7F]/D', $receipt) !== 1
-            ? $receipt
-            : 'receipt-' . hash('sha256', $queue . "\0" . $receipt);
     }
 }

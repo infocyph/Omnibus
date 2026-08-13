@@ -6,7 +6,8 @@ Delivery lifecycle
 
 ``Sender``, ``Receiver``, and ``Transport`` define the queue boundary.
 Receivers reserve messages for a bounded visibility period and return
-``Reservation`` objects.
+``Reservation`` objects. Every reservation exposes its logical message ID
+separately from the encoded envelope, including when payload decoding fails.
 
 ``Consumer`` applies this order:
 
@@ -48,7 +49,9 @@ Retry policy
      - Float from 0.0 through 1.0.
 
 Failures implementing ``NonRetryableFailure`` bypass remaining retry capacity.
-``HandlerNotFound`` and ``WorkflowCancelled`` are non-retryable.
+``HandlerNotFound`` and post-handler timeout/lease-loss exceptions are
+non-retryable. ``WorkflowCancelled`` is a lifecycle event, not an execution
+failure.
 
 Poison payloads
 ---------------
@@ -56,6 +59,10 @@ Poison payloads
 Malformed JSON, oversized payloads, unknown aliases, and codec failures become
 poison reservations. The consumer stores the bounded raw payload and decode
 error, then rejects it. Poison work is not returned to the ready queue.
+Poison and unstamped terminal failure IDs use a direct 1..191-byte identifier
+without ASCII controls; unsafe provider receipts become
+``receipt-<sha256(queue NUL receipt)>``. Decode and handler failure reasons share
+the same 16384-byte bound.
 
 Failure management
 ------------------

@@ -9,8 +9,6 @@ use Infocyph\Omnibus\Transport\QueueName;
 
 final readonly class FailedMessage
 {
-    private const int MAX_REASON_BYTES = 16_384;
-
     public string $reason;
 
     private function __construct(
@@ -27,6 +25,7 @@ final readonly class FailedMessage
         if (
             $id === ''
             || strlen($id) > 191
+            || preg_match('/[\x00-\x1F\x7F]/D', $id) === 1
             || $attempt < 1
             || $failureClass === ''
             || strlen($failureClass) > 255
@@ -35,9 +34,7 @@ final readonly class FailedMessage
             throw new \InvalidArgumentException('A failed message requires one decoded envelope or raw payload.');
         }
         QueueName::assert($queue);
-        $this->reason = strlen($reason) > self::MAX_REASON_BYTES
-            ? substr($reason, 0, self::MAX_REASON_BYTES)
-            : $reason;
+        $this->reason = FailureInput::reason($reason);
     }
 
     public static function decoded(

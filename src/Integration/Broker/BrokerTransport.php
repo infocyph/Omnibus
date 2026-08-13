@@ -62,6 +62,7 @@ class BrokerTransport implements Transport
                     $queue,
                     $envelope,
                     $delivery->attempt,
+                    $delivery->messageId,
                 );
             } catch (\Throwable $failure) {
                 $reservations[] = Reservation::undecodable(
@@ -69,6 +70,7 @@ class BrokerTransport implements Transport
                     $queue,
                     DecodeFailure::fromThrowable($delivery->payload, $failure),
                     $delivery->attempt,
+                    $delivery->messageId,
                 );
             }
         }

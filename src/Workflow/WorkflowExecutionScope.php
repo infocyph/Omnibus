@@ -23,12 +23,12 @@ final readonly class WorkflowExecutionScope implements ExecutionScope
             return $this->inner->run($envelope, $handler);
         }
 
-        [$workflowId, $index, $itemId] = $identity;
-        $status = $this->workflows->itemStatus($workflowId, $index, $itemId);
+        [$workflowId, $itemId, $index] = $identity;
+        $status = $this->workflows->itemStatus($workflowId, $itemId, $index);
 
         if ($status === WorkflowItemStatus::Dispatched) {
             $result = $this->inner->run($envelope, $handler);
-            $this->workflows->markHandled($workflowId, $index, $itemId);
+            $this->workflows->markHandled($workflowId, $itemId, $index);
 
             return $result;
         }
@@ -50,18 +50,18 @@ final readonly class WorkflowExecutionScope implements ExecutionScope
         ));
     }
 
-    /** @return array{string, int, string|null}|null */
+    /** @return array{string, string, int}|null */
     private static function identity(Envelope $envelope): ?array
     {
         $batch = $envelope->last(BatchStamp::class);
         if ($batch instanceof BatchStamp) {
-            return [$batch->workflowId, $batch->index, $batch->itemId];
+            return [$batch->workflowId, $batch->itemId, $batch->index];
         }
 
         $chain = $envelope->last(ChainStamp::class);
 
         return $chain instanceof ChainStamp
-            ? [$chain->workflowId, $chain->index, null]
+            ? [$chain->workflowId, $chain->itemId, $chain->index]
             : null;
     }
 }

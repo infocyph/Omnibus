@@ -32,7 +32,7 @@ test('durations reject overflow before timestamp arithmetic', function (): void 
 });
 
 test('reservation result failure and workflow invariants reject corrupt state', function (): void {
-    expect(fn() => Reservation::decoded('', 'work', new Envelope(new TestCommand('x')), 1))
+    expect(fn() => Reservation::decoded('', 'work', new Envelope(new TestCommand('x')), 1, 'message-id'))
         ->toThrow(InvalidArgumentException::class)
         ->and(fn() => new ConsumerResult(2, 1, 0, 0))
         ->toThrow(InvalidArgumentException::class)

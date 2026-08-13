@@ -946,6 +946,10 @@ Pass ``$deadlineScope`` to ``Consumer``. This is cooperative cancellation: it
 cannot interrupt a blocking database driver, socket, extension call, or
 non-cooperative provider SDK. The worker host must enforce a larger hard
 process timeout.
+If the deadline is first observed after the handler returns,
+``ExecutionTimedOutAfterExecution`` is non-retryable because business effects
+may already be durable. A provider timeout thrown from inside the handler
+remains a separate application failure governed by the configured retry policy.
 
 .. _application-tests:
 

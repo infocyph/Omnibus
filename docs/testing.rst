@@ -29,6 +29,10 @@ The Omnibus suite covers:
 * stale receipt rejection and visibility reclaim;
 * MySQL, PostgreSQL, and SQLite schema generation;
 * live MySQL/PostgreSQL lifecycle when service credentials are available;
+* multi-connection workflow claim, stale ownership, duplicate terminal, and
+  aggregate completion behavior on live MySQL/PostgreSQL;
+* writer-affinity behavior with a deliberately lagging DBLayer read replica
+  when ``IC_SERVICE_REPLICA_DATABASE`` is configured;
 * Redis Lua command boundaries and live Redis lifecycle when configured;
 * broker capability, malformed delivery, and over-delivery enforcement;
 * detached uniqueness, delayed retry lease refresh, overlap, rate limit,
