@@ -194,6 +194,11 @@ test('DBLayer workflow store persists chain progress and batch cancellation', fu
 
     $first = $store->claimPending('01CHAIN0000000000000000000', 100);
     expect($store->claimPending('01CHAIN0000000000000000000'))->toBe([]);
+    expect(fn() => $store->confirmDispatched(
+        '01CHAIN0000000000000000000',
+        $first[0]->item->itemId,
+        'stale-claim',
+    ))->toThrow(LogicException::class);
     $store->confirmDispatched(
         '01CHAIN0000000000000000000',
         $first[0]->item->itemId,

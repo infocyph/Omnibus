@@ -107,26 +107,31 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
 
     public function confirmDispatched(string $id, string $itemId, string $claimToken): void
     {
-        $this->connection->transaction(function (Connection $connection) use (
+        $confirmed = $this->connection->transaction(function (Connection $connection) use (
             $id,
             $itemId,
             $claimToken,
-        ): void {
+        ): bool {
             $changed = $connection->update(
                 "UPDATE {$this->items} SET item_status = 'dispatched', dispatch_claim_token = NULL, dispatch_claim_until = NULL WHERE workflow_id = ? AND item_id = ? AND item_status = 'dispatching' AND dispatch_claim_token = ?",
                 [$id, $itemId, $claimToken],
             );
             if ($changed !== 1) {
-                throw new \LogicException(sprintf(
-                    'Workflow item "%s" has a stale dispatch claim.',
-                    $itemId,
-                ));
+                return false;
             }
             $connection->update(
                 "UPDATE {$this->workflows} SET workflow_status = 'running' WHERE id = ? AND workflow_status = 'pending'",
                 [$id],
             );
+
+            return true;
         });
+        if ($confirmed !== true) {
+            throw new \LogicException(sprintf(
+                'Workflow item "%s" has a stale dispatch claim.',
+                $itemId,
+            ));
+        }
     }
 
     public function createBatch(string $id, array $envelopes, string $queue): void
