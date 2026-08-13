@@ -26,9 +26,9 @@ adapters, and provider-neutral broadcasts.
    scheduling-and-broadcasting
    operations
    integration
+   future-integrations
    testing
    performance
-   release-checklist
 
 Guarantee summary
 -----------------

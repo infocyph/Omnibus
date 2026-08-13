@@ -102,6 +102,24 @@ Workflows use expiring dispatch claims and a durable `handled` reconciliation
 state. Queue and workflow settlement can be atomic when DBLayer adapters share
 one connection; cross-system compositions remain at-least-once.
 
+## Future integrations
+
+This release is feature-frozen. A following release may add optional NATS
+JetStream and Kafka transports without changing Omnibus's role as the
+application-level message bus:
+
+- NATS JetStream through the broker boundary, mapping durable pull consumers,
+  ACK/NAK, delayed redelivery, and stable message IDs.
+- Kafka through a dedicated partition-aware transport with manual offset
+  settlement, consumer-group rebalance handling, partition keys, and durable
+  retry topics.
+- Additional brokers only where their native delivery guarantees can satisfy
+  Omnibus's explicit settlement contract.
+
+These integrations will remain optional and will not add broker clients to the
+core runtime dependencies. See [future integrations](docs/future-integrations.rst)
+for the intended boundaries and acceptance criteria.
+
 ## Quality checks
 
 ```bash

@@ -75,11 +75,14 @@ reclaimed by normal receive; expired ``dispatching`` claims are reclaimed by
 restore the queue/store dependency and reconcile settlement without replaying
 the handler. Inspect terminal ``failed`` workflows and choose a domain recovery
 operation. Generic failure retry refuses chain and batch stamps because a blind
-resend could violate the aggregate. Until failure-store retry claims are added,
-operators must serialize manual retry of a given non-workflow failure ID.
-Failure retry claiming is explicitly deferred to the next minor roadmap; this
-operational serialization rule remains required until that claim lifecycle is
-available.
+resend could violate the aggregate. Operators must use ``FailureManager``
+rather than sending a failure envelope directly. The manager atomically claims
+a failure before decoding and sending it. A concurrent retry of the same ID
+fails with ``FailureRetryClaimUnavailable``. Failed validation or sending
+releases the claim, an abandoned claim becomes available after its lease
+expires, and a successful send moves the record to ``sent`` before conditional
+removal. A ``sent`` record is never automatically reclaimed, so a removal
+failure cannot silently send the message again.
 
 If initial workflow dispatch raises ``WorkflowDispatchFailed``, retain its
 ``workflowId`` and call ``dispatchPending()`` after the sender recovers. If

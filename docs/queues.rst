@@ -67,10 +67,20 @@ the same 16384-byte bound.
 Failure management
 ------------------
 
-``FailureManager`` retries decoded failures only. It removes a record after the
-selected sender accepts the message. If send fails, the failure record remains.
-A raw failure stays inspectable until its codec is restored; it cannot be
-retried as an object.
+``FailureManager`` retries decoded failures only. It first acquires a bounded
+claim for the failure ID, preventing two operators from sending the same
+failure concurrently. If validation or sending fails, the claim is released;
+an abandoned claim can be reclaimed after expiry. After the sender accepts the
+message, the record is marked ``sent`` and conditionally removed. If removal
+fails, the ``sent`` state remains non-retryable and
+``FailureRemovalAfterRetryFailed`` exposes the accepted envelope. A raw failure
+stays inspectable until its codec is restored; it cannot be retried as an
+object.
+
+Set ``claimLeaseSeconds`` longer than the sender's ordinary maximum latency. As
+with queue visibility, reclaiming an expired claim favors crash recovery and
+can overlap a worker that exceeded its lease, so downstream message handling
+must remain idempotent.
 
 ``forget()``, ``flush()``, and ``prune()`` delegate to the selected failure
 store. Failure-list limits range from 1 through 1000.

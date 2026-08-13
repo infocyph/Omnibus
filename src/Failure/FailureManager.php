@@ -34,28 +34,62 @@ final readonly class FailureManager
         return $this->failures->prune($before);
     }
 
-    public function retry(string $id, Sender $sender, ?string $queue = null): Envelope
+    public function retry(
+        string $id,
+        Sender $sender,
+        ?string $queue = null,
+        float $claimLeaseSeconds = 30.0,
+    ): Envelope {
+        $claim = $this->failures->claimRetry($id, $claimLeaseSeconds);
+
+        try {
+            $replay = self::replay($claim->failure);
+        } catch (\Throwable $failure) {
+            $this->releaseQuietly($claim);
+
+            throw $failure;
+        }
+
+        try {
+            $sent = $sender->send($replay, $queue ?? $claim->failure->queue);
+        } catch (\Throwable $failure) {
+            $this->releaseQuietly($claim);
+
+            throw $failure;
+        }
+
+        try {
+            $removed = $this->failures->markRetrySent($claim)
+                && $this->failures->removeRetried($claim);
+        } catch (\Throwable $failure) {
+            throw new FailureRemovalAfterRetryFailed($id, $sent, $failure);
+        }
+        if (!$removed) {
+            throw new FailureRemovalAfterRetryFailed($id, $sent);
+        }
+
+        return $sent;
+    }
+
+    private static function replay(FailedMessage $failure): Envelope
     {
-        $failure = $this->failures->find($id)
-            ?? throw new FailureNotFound(sprintf('Failed message "%s" was not found.', $id));
         if (!$failure->envelope instanceof Envelope) {
             throw new UndecodableFailure(sprintf(
                 'Failed message "%s" cannot be retried until its payload codec is available.',
-                $id,
+                $failure->id,
             ));
         }
-
         if (
             $failure->envelope->last(ChainStamp::class) instanceof ChainStamp
             || $failure->envelope->last(BatchStamp::class) instanceof BatchStamp
         ) {
             throw new WorkflowFailureRequiresRecovery(sprintf(
                 'Failed workflow message "%s" requires workflow-specific recovery.',
-                $id,
+                $failure->id,
             ));
         }
 
-        $replay = $failure->envelope->without(
+        return $failure->envelope->without(
             AttemptStamp::class,
             EnqueuedAtStamp::class,
             UniqueStamp::class,
@@ -63,11 +97,14 @@ final readonly class FailureManager
             DelayStamp::class,
             HandledStamp::class,
         );
-        $sent = $sender->send($replay, $queue ?? $failure->queue);
-        if (!$this->failures->remove($id)) {
-            throw new FailureRemovalAfterRetryFailed($id, $sent);
-        }
+    }
 
-        return $sent;
+    private function releaseQuietly(FailureRetryClaim $claim): void
+    {
+        try {
+            $this->failures->releaseRetry($claim);
+        } catch (\Throwable) {
+            // Retry validation/send failure remains the primary failure.
+        }
     }
 }

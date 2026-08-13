@@ -10,6 +10,7 @@ use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Failure\FailedMessage;
+use Infocyph\Omnibus\Failure\FailureRetryClaimUnavailable;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerFailureStore;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerTransport;
@@ -62,7 +63,7 @@ function omnibusDatabaseQueue(): array
     return [
         $connection,
         new DBLayerTransport($connection, $serializer, $clock),
-        new DBLayerFailureStore($connection, $serializer),
+        new DBLayerFailureStore($connection, $serializer, clock: $clock),
         $clock,
         $serializer,
     ];
@@ -153,6 +154,34 @@ test('DBLayer failure store round trips decoded and raw failures and prunes by t
         ->and($failures->find('decoded-1'))->toBeNull()
         ->and($failures->remove('raw-1'))->toBeTrue()
         ->and($failures->clear())->toBe(0);
+});
+
+test('DBLayer failure retry claims exclude concurrent retries and recover after expiry', function (): void {
+    [, , $failures, $clock] = omnibusDatabaseQueue();
+    $failures->add(FailedMessage::decoded(
+        'retry-claim',
+        'work',
+        new Envelope(new TestCommand('retry')),
+        1,
+        $clock->now(),
+        RuntimeException::class,
+        'failed',
+    ));
+
+    $stale = $failures->claimRetry('retry-claim', 1);
+    expect(fn() => $failures->claimRetry('retry-claim', 1))
+        ->toThrow(FailureRetryClaimUnavailable::class);
+
+    $clock->advance('+2 seconds');
+    $current = $failures->claimRetry('retry-claim', 1);
+
+    expect($failures->releaseRetry($stale))->toBeFalse()
+        ->and($failures->markRetrySent($stale))->toBeFalse()
+        ->and($failures->markRetrySent($current))->toBeTrue()
+        ->and(fn() => $failures->claimRetry('retry-claim', 1))
+        ->toThrow(FailureRetryClaimUnavailable::class)
+        ->and($failures->removeRetried($current))->toBeTrue()
+        ->and($failures->find('retry-claim'))->toBeNull();
 });
 
 test('DBLayer workflow store persists chain progress and batch cancellation', function (): void {

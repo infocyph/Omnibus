@@ -6,6 +6,7 @@ use Infocyph\Omnibus\Consumer\Consumer;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Failure\FailedMessage;
 use Infocyph\Omnibus\Failure\FailureStore;
+use Infocyph\Omnibus\Failure\FailureRetryClaim;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\Retry\ExponentialRetryStrategy;
@@ -101,6 +102,15 @@ test('terminal failure persistence precedes destructive rejection', function ():
             return 0;
         }
 
+        public function claimRetry(string $id, float $leaseSeconds = 30.0): FailureRetryClaim
+        {
+            throw new LogicException(sprintf(
+                'Retry of "%s" for %.1f seconds is not used by this fixture.',
+                $id,
+                $leaseSeconds,
+            ));
+        }
+
         public function find(string $id): ?FailedMessage
         {
             return $id === '' ? throw new InvalidArgumentException() : null;
@@ -111,9 +121,24 @@ test('terminal failure persistence precedes destructive rejection', function ():
             return $before->getTimestamp() > 0 ? 0 : 1;
         }
 
+        public function markRetrySent(FailureRetryClaim $claim): bool
+        {
+            return $claim->token === '';
+        }
+
         public function remove(string $id): bool
         {
             return $id === 'present';
+        }
+
+        public function removeRetried(FailureRetryClaim $claim): bool
+        {
+            return $claim->token === '';
+        }
+
+        public function releaseRetry(FailureRetryClaim $claim): bool
+        {
+            return $claim->token === '';
         }
     };
     $consumer = new Consumer(
