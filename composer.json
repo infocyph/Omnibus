@@ -27,7 +27,7 @@
         "psr/event-dispatcher": "^1.0"
     },
     "require-dev": {
-        "infocyph/cachelayer": "^3.1",
+        "infocyph/cachelayer": "^3.1.1",
         "infocyph/dblayer": "^4.0",
         "infocyph/phpforge": "dev-main@dev"
     },
