@@ -22,7 +22,7 @@
     ],
     "require": {
         "php": "^8.4",
-        "infocyph/uid": "^4.3",
+        "infocyph/uid": "^5.0",
         "psr/clock": "^1.0",
         "psr/event-dispatcher": "^1.0"
     },
