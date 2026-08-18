@@ -6,16 +6,22 @@ namespace Infocyph\Omnibus\Consumer;
 
 final class WorkerPool
 {
-    private bool $stopRequested = false;
-
     /** @var array<int,int> */
     private array $children = [];
 
+    private bool $stopRequested = false;
+
+    /** @var \Closure(int):Worker */
+    private readonly \Closure $workerFactory;
+
     /**
-     * @param callable(int):Worker $workerFactory Factory invoked in the child after fork.
+     * The factory is invoked in each child after fork. Create database,
+     * Redis, broker and other process-bound resources inside that factory.
+     *
+     * @param callable(int):Worker $workerFactory
      */
     public function __construct(
-        private readonly \Closure $workerFactory,
+        callable $workerFactory,
         private readonly int $concurrency = 1,
         private readonly int $maximumRestarts = 5,
         private readonly float $restartBackoffSeconds = 0.25,
@@ -29,23 +35,14 @@ final class WorkerPool
         if (!is_finite($restartBackoffSeconds) || $restartBackoffSeconds < 0.0) {
             throw new \InvalidArgumentException('Worker restart backoff must be finite and non-negative.');
         }
+
+        $this->workerFactory = \Closure::fromCallable($workerFactory);
     }
 
-    /**
-     * @param callable(int):Worker $workerFactory
-     */
-    public static function create(
-        callable $workerFactory,
-        int $concurrency = 1,
-        int $maximumRestarts = 5,
-        float $restartBackoffSeconds = 0.25,
-    ): self {
-        return new self(
-            \Closure::fromCallable($workerFactory),
-            $concurrency,
-            $maximumRestarts,
-            $restartBackoffSeconds,
-        );
+    public function requestStop(): void
+    {
+        $this->stopRequested = true;
+        $this->signalChildren(SIGTERM);
     }
 
     public function run(): void
@@ -71,8 +68,10 @@ final class WorkerPool
                 continue;
             }
 
-            $cleanExit = pcntl_wifexited($status) && pcntl_wexitstatus($status) === 0;
-            if ($cleanExit) {
+            if (pcntl_wifexited($status) && pcntl_wexitstatus($status) === 0) {
+                $restarts[$slot] = 0;
+                $this->spawn($slot);
+
                 continue;
             }
 
@@ -91,17 +90,13 @@ final class WorkerPool
         }
     }
 
-    public function requestStop(): void
-    {
-        $this->stopRequested = true;
-        $this->signalChildren(SIGTERM);
-    }
-
     private function assertSupported(): void
     {
         foreach (['pcntl_fork', 'pcntl_wait', 'pcntl_signal', 'posix_kill'] as $function) {
             if (!function_exists($function)) {
-                throw new \RuntimeException('WorkerPool requires ext-pcntl and ext-posix on a Unix-like runtime.');
+                throw new \RuntimeException(
+                    'WorkerPool requires ext-pcntl and ext-posix on a Unix-like runtime.',
+                );
             }
         }
     }
