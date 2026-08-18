@@ -49,6 +49,38 @@ test('worker respects message bounds without prefetch overshoot', function (): v
         ->and($transport->size('work'))->toBe(1);
 });
 
+test('worker restores parent signal handlers after execution', function (): void {
+    if (!function_exists('pcntl_signal_get_handler')) {
+        $this->markTestSkipped('Worker signal restoration requires ext-pcntl.');
+    }
+
+    $previous = pcntl_signal_get_handler(15);
+    $handler = static function (): void {};
+    pcntl_signal(15, $handler);
+
+    try {
+        $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+        $transport = new InMemoryTransport($clock);
+        $transport->send(new Envelope(new TestCommand('one')), 'work');
+        $worker = new Worker(
+            new Consumer(
+                $transport,
+                new HandlerMap([TestCommand::class => static function (): void {}]),
+                new ExponentialRetryStrategy(),
+                new InMemoryFailureStore(),
+                $clock,
+            ),
+            new WorkerOptions(queue: 'work', maxMessages: 1),
+        );
+
+        $worker->run();
+
+        expect(pcntl_signal_get_handler(15))->toBe($handler);
+    } finally {
+        pcntl_signal(15, $previous);
+    }
+});
+
 test('worker options reject unsafe bounds', function (): void {
     expect(fn() => new WorkerOptions(prefetch: 0))->toThrow(InvalidArgumentException::class)
         ->and(fn() => new WorkerOptions(visibilitySeconds: 0))->toThrow(InvalidArgumentException::class)
