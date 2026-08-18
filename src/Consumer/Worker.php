@@ -46,10 +46,8 @@ final class Worker
 
             if ($idleSleep > 0.0) {
                 usleep((int) round($this->jittered($idleSleep) * 1_000_000));
+                $idleSleep = min($this->options->maxIdleSleepSeconds, $idleSleep * 2.0);
             }
-            $idleSleep = $idleSleep === 0.0
-                ? $this->options->maxIdleSleepSeconds
-                : min($this->options->maxIdleSleepSeconds, $idleSleep * 2.0);
         }
     }
 
@@ -73,8 +71,12 @@ final class Worker
         }
 
         pcntl_async_signals(true);
-        pcntl_signal(SIGTERM, fn(): bool => $this->stopRequested = true);
-        pcntl_signal(SIGINT, fn(): bool => $this->stopRequested = true);
+        pcntl_signal(SIGTERM, function (): void {
+            $this->stopRequested = true;
+        });
+        pcntl_signal(SIGINT, function (): void {
+            $this->stopRequested = true;
+        });
     }
 
     private function shouldStop(int $startedAt, int $processed): bool
