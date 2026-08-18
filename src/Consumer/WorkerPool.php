@@ -50,6 +50,7 @@ final class WorkerPool
         $this->assertSupported();
         $this->registerSignals();
 
+        $fatal = null;
         $restarts = array_fill(0, $this->concurrency, 0);
         for ($slot = 0; $slot < $this->concurrency; $slot++) {
             $this->spawn($slot);
@@ -76,6 +77,7 @@ final class WorkerPool
             }
 
             if ($restarts[$slot] >= $this->maximumRestarts) {
+                $fatal = sprintf('Worker slot %d exhausted its restart budget.', $slot);
                 $this->stopRequested = true;
                 $this->signalChildren(SIGTERM);
 
@@ -87,6 +89,10 @@ final class WorkerPool
                 usleep((int) round($this->restartBackoffSeconds * $restarts[$slot] * 1_000_000));
             }
             $this->spawn($slot);
+        }
+
+        if ($fatal !== null) {
+            throw new \RuntimeException($fatal);
         }
     }
 
