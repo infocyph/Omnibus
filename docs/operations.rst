@@ -10,9 +10,9 @@ primitive and never creates concurrency itself.
 
 ``Worker`` adds a long-running loop around one ``Consumer``. ``WorkerOptions``
 controls queue, prefetch, visibility, idle backoff and jitter, optional
-message/runtime/memory recycling limits, and graceful SIGTERM/SIGINT handling.
-Prefetch and concurrency are independent: prefetch bounds one receive call;
-concurrency is the number of worker processes.
+message/runtime/absolute-memory/memory-growth recycling limits, and graceful
+SIGTERM/SIGINT handling. Prefetch and concurrency are independent: prefetch
+bounds one receive call; concurrency is the number of worker processes.
 
 ``WorkerPool`` is an optional Unix/Linux fixed-process supervisor. It requires
 ``ext-pcntl`` and ``ext-posix``. The pool keeps the configured concurrency
@@ -23,7 +23,9 @@ signals the remaining children to stop.
 The worker factory is invoked only after ``fork()``. Create PDO/DBLayer,
 Redis/Valkey, AMQP, SQS and other process-bound resources inside that factory.
 Do not capture or initialize live network/database resources in the parent and
-then fork them into workers.
+then fork them into workers. The child also resets the pool's inherited signal
+handlers before constructing the worker, so worker-level signal policy starts
+from a clean process state.
 
 Example::
 
@@ -43,6 +45,7 @@ Example::
                 maxMessages: 10_000,
                 maxRuntimeSeconds: 3600,
                 memoryLimitBytes: 256 * 1024 * 1024,
+                maxMemoryGrowthBytes: 64 * 1024 * 1024,
             ));
         },
         concurrency: 4,
@@ -50,11 +53,13 @@ Example::
 
     $pool->run();
 
-``maxMessages``, ``maxRuntimeSeconds`` and ``memoryLimitBytes`` are per-worker
-recycling limits. When a pooled worker exits cleanly because one of these
-limits is reached, the pool starts a fresh child for that slot. Use ``Worker``
-directly when the process itself should terminate instead of being recycled by
-an in-process pool.
+``maxMessages``, ``maxRuntimeSeconds``, ``memoryLimitBytes`` and
+``maxMemoryGrowthBytes`` are per-worker recycling limits. The absolute memory
+limit protects the process ceiling; the growth limit detects a worker that
+keeps accumulating memory relative to its post-bootstrap baseline. When a
+pooled worker exits cleanly because one of these limits is reached, the pool
+starts a fresh child for that slot. Use ``Worker`` directly when the process
+itself should terminate instead of being recycled by an in-process pool.
 
 External Supervisor, systemd, Docker, Kubernetes or another process manager is
 still the preferred production supervisor when available. In that deployment,
