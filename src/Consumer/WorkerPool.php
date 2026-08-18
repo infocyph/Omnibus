@@ -53,6 +53,9 @@ final class WorkerPool
     {
         $this->assertSupported();
         $this->registerSignals();
+        if ($this->stopRequested) {
+            return;
+        }
 
         try {
             $this->supervise();
@@ -105,7 +108,7 @@ final class WorkerPool
         }
 
         foreach (array_keys($this->children) as $pid) {
-            @posix_kill($pid, $signal);
+            posix_kill($pid, $signal);
         }
     }
 
@@ -141,7 +144,7 @@ final class WorkerPool
     {
         $fatal = null;
         $restarts = array_fill(0, $this->concurrency, 0);
-        for ($slot = 0; $slot < $this->concurrency; $slot++) {
+        for ($slot = 0; $slot < $this->concurrency && !$this->stopRequested; $slot++) {
             $this->spawn($slot);
         }
 
@@ -160,7 +163,9 @@ final class WorkerPool
 
             if (pcntl_wifexited($status) && pcntl_wexitstatus($status) === 0) {
                 $restarts[$slot] = 0;
-                $this->spawn($slot);
+                if (!$this->stopRequested) {
+                    $this->spawn($slot);
+                }
 
                 continue;
             }
@@ -177,7 +182,9 @@ final class WorkerPool
             if ($this->restartBackoffSeconds > 0.0) {
                 usleep((int) round($this->restartBackoffSeconds * $restarts[$slot] * 1_000_000));
             }
-            $this->spawn($slot);
+            if (!$this->stopRequested) {
+                $this->spawn($slot);
+            }
         }
 
         if ($fatal !== null) {
