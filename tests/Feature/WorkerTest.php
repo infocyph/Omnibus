@@ -53,7 +53,8 @@ test('worker options reject unsafe bounds', function (): void {
     expect(fn() => new WorkerOptions(prefetch: 0))->toThrow(InvalidArgumentException::class)
         ->and(fn() => new WorkerOptions(visibilitySeconds: 0))->toThrow(InvalidArgumentException::class)
         ->and(fn() => new WorkerOptions(idleJitterRatio: 1.1))->toThrow(InvalidArgumentException::class)
-        ->and(fn() => new WorkerOptions(maxMessages: 0))->toThrow(InvalidArgumentException::class);
+        ->and(fn() => new WorkerOptions(maxMessages: 0))->toThrow(InvalidArgumentException::class)
+        ->and(fn() => new WorkerOptions(maxMemoryGrowthBytes: 0))->toThrow(InvalidArgumentException::class);
 });
 
 test('worker pool validates process limits before execution', function (): void {
