@@ -120,6 +120,9 @@ final class WorkerPool
         }
         if ($pid > 0) {
             $this->children[$pid] = $slot;
+            if ($this->stopRequested) {
+                posix_kill($pid, self::SIGNAL_TERMINATE);
+            }
 
             return;
         }
