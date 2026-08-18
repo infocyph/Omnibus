@@ -34,12 +34,12 @@
     "suggest": {
         "ext-memcached": "Optional for Memcached-backed uniqueness and overlap leases.",
         "ext-msgpack": "One option for a CallbackEnvelopeSerializer binary codec.",
-        "ext-pcntl": "Required by the optional Unix/Linux process worker pool.",
-        "ext-posix": "Required by the optional process worker pool for signal forwarding.",
+        "ext-pcntl": "Required only for the built-in process-based WorkerPool.",
+        "ext-posix": "Required only for WorkerPool process signalling.",
         "ext-redis": "Required by the native Redis/Valkey transport.",
         "aws/aws-sdk-php": "One option for implementing the native SQS backend boundary.",
         "infocyph/cachelayer": "Required for Omnibus CacheLayer coordination integrations; tested with CacheLayer 3.1.",
-        "infocyph/dblayer": "Required for Omnibus database queue, workflow, failure-store and after-commit integrations; tested with DBLayer 4.0.1+.",
+        "infocyph/dblayer": "Required for database queue, workflow, failure-store and after-commit integrations; parallel SQLite consumers require DBLayer 4.0.1 or newer.",
         "php-amqplib/php-amqplib": "One option for implementing the native AMQP backend boundary."
     },
     "minimum-stability": "stable",
