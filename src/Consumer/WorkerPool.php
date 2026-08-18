@@ -101,6 +101,7 @@ final class WorkerPool
         foreach ([
             'pcntl_async_signals',
             'pcntl_fork',
+            'pcntl_get_last_error',
             'pcntl_signal',
             'pcntl_signal_get_handler',
             'pcntl_wait',
@@ -113,6 +114,24 @@ final class WorkerPool
                 );
             }
         }
+    }
+
+    private function consumeChildExit(int $pid, int $status, array &$restarts): ?string
+    {
+        $slot = $this->children[$pid] ?? null;
+        unset($this->children[$pid]);
+        if ($slot === null || $this->stopRequested) {
+            return null;
+        }
+
+        if (pcntl_wifexited($status) && pcntl_wexitstatus($status) === 0) {
+            $restarts[$slot] = 0;
+            $this->spawn($slot);
+
+            return null;
+        }
+
+        return $this->restartCrashedWorker($slot, $restarts);
     }
 
     private function drainChildren(): void
@@ -172,6 +191,23 @@ final class WorkerPool
     {
         pcntl_signal(self::SIGNAL_TERMINATE, SIG_DFL);
         pcntl_signal(self::SIGNAL_INTERRUPT, SIG_DFL);
+    }
+
+    private function restartCrashedWorker(int $slot, array &$restarts): ?string
+    {
+        if ($restarts[$slot] >= $this->maximumRestarts) {
+            return sprintf('Worker slot %d exhausted its restart budget.', $slot);
+        }
+
+        $restarts[$slot]++;
+        if ($this->restartBackoffSeconds > 0.0) {
+            usleep((int) round($this->restartBackoffSeconds * $restarts[$slot] * 1_000_000));
+        }
+        if (!$this->stopRequested) {
+            $this->spawn($slot);
+        }
+
+        return null;
     }
 
     private function restoreSignals(): void
@@ -248,34 +284,9 @@ final class WorkerPool
                 continue;
             }
 
-            $slot = $this->children[$pid] ?? null;
-            unset($this->children[$pid]);
-            if ($slot === null || $this->stopRequested) {
-                continue;
-            }
-
-            if (pcntl_wifexited($status) && pcntl_wexitstatus($status) === 0) {
-                $restarts[$slot] = 0;
-                if (!$this->stopRequested) {
-                    $this->spawn($slot);
-                }
-
-                continue;
-            }
-
-            if ($restarts[$slot] >= $this->maximumRestarts) {
-                $fatal = sprintf('Worker slot %d exhausted its restart budget.', $slot);
+            $fatal = $this->consumeChildExit($pid, $status, $restarts);
+            if ($fatal !== null) {
                 $this->requestStop();
-
-                continue;
-            }
-
-            $restarts[$slot]++;
-            if ($this->restartBackoffSeconds > 0.0) {
-                usleep((int) round($this->restartBackoffSeconds * $restarts[$slot] * 1_000_000));
-            }
-            if (!$this->stopRequested) {
-                $this->spawn($slot);
             }
         }
 
