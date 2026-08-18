@@ -28,10 +28,6 @@ use Infocyph\Omnibus\Workflow\WorkflowTransition;
 use Infocyph\UID\ULID;
 use Psr\Clock\ClockInterface;
 
-/**
- * SQLite deployments must use one active consuming writer because DBLayer 4.0
- * does not expose an immediate-writer transaction mode.
- */
 final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transport
 {
     private string $table;
@@ -82,7 +78,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
                 $this->deleteReservation($reservation, $connection);
 
                 return $store->succeed(...$identity);
-            });
+            }, 3);
         } catch (TransactionException $failure) {
             $cause = $failure->getPrevious();
             if ($cause instanceof WorkflowInconsistentDelivery || $cause instanceof InvalidReservation) {
@@ -137,7 +133,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
             );
 
             return $rows;
-        });
+        }, 3);
 
         $reservations = [];
         foreach ($rows as $row) {
