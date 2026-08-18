@@ -36,6 +36,7 @@ only when their adapters are constructed.
 - Explicit, cached route, handler, listener, codec, transport, and factory maps
 - Direct synchronous handlers and ordered PSR-14 events
 - In-memory, DBLayer, Redis/Valkey, AMQP, and SQS transport boundaries
+- Bounded consumers, long-running workers, and optional fixed process concurrency
 - Conditional reservation settlement and visibility-based crash recovery
 - Bounded retries, poison-payload capture, and durable failure management
 - Safe versioned JSON envelopes with allow-listed aliases and strict limits
@@ -88,8 +89,12 @@ $routes = new RouteMap([
 ]);
 ```
 
-`Consumer::run()` performs one bounded receive call. Any application loop,
-scheduler, process manager, or CLI can invoke it directly.
+`Consumer::run()` performs one bounded receive call. `Worker` provides the
+long-running loop for one process. On Unix/Linux, optional `WorkerPool` uses
+`ext-pcntl` and `ext-posix` for fixed process concurrency; construct PDO,
+Redis/Valkey, AMQP, SQS, and other process-bound resources inside its worker
+factory after fork. External Supervisor, systemd, Docker, or Kubernetes remains
+the preferred production supervisor when available.
 
 ## Delivery semantics
 
