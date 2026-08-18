@@ -116,6 +116,7 @@ final class WorkerPool
         }
     }
 
+    /** @param array<int,int> $restarts */
     private function consumeChildExit(int $pid, int $status, array &$restarts): ?string
     {
         $slot = $this->children[$pid] ?? null;
@@ -193,6 +194,7 @@ final class WorkerPool
         pcntl_signal(self::SIGNAL_INTERRUPT, SIG_DFL);
     }
 
+    /** @param array<int,int> $restarts */
     private function restartCrashedWorker(int $slot, array &$restarts): ?string
     {
         if ($restarts[$slot] >= $this->maximumRestarts) {
@@ -266,6 +268,7 @@ final class WorkerPool
     private function supervise(): void
     {
         $fatal = null;
+        /** @var array<int,int> $restarts */
         $restarts = array_fill(0, $this->concurrency, 0);
         for ($slot = 0; $slot < $this->concurrency && !$this->stopRequested; $slot++) {
             $this->spawn($slot);
@@ -284,7 +287,7 @@ final class WorkerPool
                 continue;
             }
 
-            $fatal = $this->consumeChildExit($pid, $status, $restarts);
+            $fatal = $this->consumeChildExit($pid, (int) $status, $restarts);
             if ($fatal !== null) {
                 $this->requestStop();
             }
