@@ -94,6 +94,7 @@ test('worker pool force kills a child that ignores graceful shutdown', function 
     $pool = new WorkerPool(
         static function (int $slot): Worker {
             if ($slot === 0) {
+                usleep(100_000);
                 throw new RuntimeException('trigger-pool-stop');
             }
 
@@ -126,7 +127,9 @@ test('worker pool force kills a child that ignores graceful shutdown', function 
     expect(fn() => $pool->run())
         ->toThrow(RuntimeException::class, 'exhausted its restart budget');
 
-    expect((hrtime(true) - $startedAt) / 1_000_000_000)->toBeLessThan(2.0);
+    $elapsed = (hrtime(true) - $startedAt) / 1_000_000_000;
+    expect($elapsed)->toBeGreaterThanOrEqual(0.12)
+        ->and($elapsed)->toBeLessThan(2.0);
 });
 
 test('worker pool restores parent signal handlers after execution', function (): void {
