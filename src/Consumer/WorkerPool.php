@@ -101,6 +101,12 @@ final class WorkerPool
         pcntl_signal(self::SIGNAL_INTERRUPT, fn(): null => $this->stopFromSignal());
     }
 
+    private function resetSignalsForChild(): void
+    {
+        pcntl_signal(self::SIGNAL_TERMINATE, SIG_DFL);
+        pcntl_signal(self::SIGNAL_INTERRUPT, SIG_DFL);
+    }
+
     private function signalChildren(int $signal): void
     {
         if (!function_exists('posix_kill')) {
@@ -126,6 +132,8 @@ final class WorkerPool
 
             return;
         }
+
+        $this->resetSignalsForChild();
 
         try {
             $worker = ($this->workerFactory)($slot);
