@@ -6,6 +6,10 @@ namespace Infocyph\Omnibus\Consumer;
 
 final class WorkerPool
 {
+    private const int SIGNAL_INTERRUPT = 2;
+
+    private const int SIGNAL_TERMINATE = 15;
+
     /** @var array<int,int> */
     private array $children = [];
 
@@ -42,7 +46,7 @@ final class WorkerPool
     public function requestStop(): void
     {
         $this->stopRequested = true;
-        $this->signalChildren(SIGTERM);
+        $this->signalChildren(self::SIGNAL_TERMINATE);
     }
 
     public function run(): void
@@ -50,49 +54,14 @@ final class WorkerPool
         $this->assertSupported();
         $this->registerSignals();
 
-        $fatal = null;
-        $restarts = array_fill(0, $this->concurrency, 0);
-        for ($slot = 0; $slot < $this->concurrency; $slot++) {
-            $this->spawn($slot);
-        }
+        try {
+            $this->supervise();
+        } catch (\Throwable $failure) {
+            $this->stopRequested = true;
+            $this->signalChildren(self::SIGNAL_TERMINATE);
+            $this->reapChildren();
 
-        while ($this->children !== []) {
-            $status = 0;
-            $pid = pcntl_wait($status);
-            if ($pid <= 0) {
-                continue;
-            }
-
-            $slot = $this->children[$pid] ?? null;
-            unset($this->children[$pid]);
-            if ($slot === null || $this->stopRequested) {
-                continue;
-            }
-
-            if (pcntl_wifexited($status) && pcntl_wexitstatus($status) === 0) {
-                $restarts[$slot] = 0;
-                $this->spawn($slot);
-
-                continue;
-            }
-
-            if ($restarts[$slot] >= $this->maximumRestarts) {
-                $fatal = sprintf('Worker slot %d exhausted its restart budget.', $slot);
-                $this->stopRequested = true;
-                $this->signalChildren(SIGTERM);
-
-                continue;
-            }
-
-            $restarts[$slot]++;
-            if ($this->restartBackoffSeconds > 0.0) {
-                usleep((int) round($this->restartBackoffSeconds * $restarts[$slot] * 1_000_000));
-            }
-            $this->spawn($slot);
-        }
-
-        if ($fatal !== null) {
-            throw new \RuntimeException($fatal);
+            throw $failure;
         }
     }
 
@@ -107,15 +76,34 @@ final class WorkerPool
         }
     }
 
+    private function reapChildren(): void
+    {
+        while ($this->children !== []) {
+            $status = 0;
+            $pid = pcntl_wait($status);
+            if ($pid <= 0) {
+                $this->children = [];
+
+                return;
+            }
+
+            unset($this->children[$pid]);
+        }
+    }
+
     private function registerSignals(): void
     {
         pcntl_async_signals(true);
-        pcntl_signal(SIGTERM, fn(): null => $this->stopFromSignal());
-        pcntl_signal(SIGINT, fn(): null => $this->stopFromSignal());
+        pcntl_signal(self::SIGNAL_TERMINATE, fn(): null => $this->stopFromSignal());
+        pcntl_signal(self::SIGNAL_INTERRUPT, fn(): null => $this->stopFromSignal());
     }
 
     private function signalChildren(int $signal): void
     {
+        if (!function_exists('posix_kill')) {
+            return;
+        }
+
         foreach (array_keys($this->children) as $pid) {
             @posix_kill($pid, $signal);
         }
@@ -147,5 +135,53 @@ final class WorkerPool
         $this->requestStop();
 
         return null;
+    }
+
+    private function supervise(): void
+    {
+        $fatal = null;
+        $restarts = array_fill(0, $this->concurrency, 0);
+        for ($slot = 0; $slot < $this->concurrency; $slot++) {
+            $this->spawn($slot);
+        }
+
+        while ($this->children !== []) {
+            $status = 0;
+            $pid = pcntl_wait($status);
+            if ($pid <= 0) {
+                continue;
+            }
+
+            $slot = $this->children[$pid] ?? null;
+            unset($this->children[$pid]);
+            if ($slot === null || $this->stopRequested) {
+                continue;
+            }
+
+            if (pcntl_wifexited($status) && pcntl_wexitstatus($status) === 0) {
+                $restarts[$slot] = 0;
+                $this->spawn($slot);
+
+                continue;
+            }
+
+            if ($restarts[$slot] >= $this->maximumRestarts) {
+                $fatal = sprintf('Worker slot %d exhausted its restart budget.', $slot);
+                $this->stopRequested = true;
+                $this->signalChildren(self::SIGNAL_TERMINATE);
+
+                continue;
+            }
+
+            $restarts[$slot]++;
+            if ($this->restartBackoffSeconds > 0.0) {
+                usleep((int) round($this->restartBackoffSeconds * $restarts[$slot] * 1_000_000));
+            }
+            $this->spawn($slot);
+        }
+
+        if ($fatal !== null) {
+            throw new \RuntimeException($fatal);
+        }
     }
 }
