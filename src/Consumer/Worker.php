@@ -10,6 +10,11 @@ final class Worker
 
     private const int SIGNAL_TERMINATE = 15;
 
+    /** @var array<int,callable|int> */
+    private array $previousSignalHandlers = [];
+
+    private ?bool $previousAsyncSignals = null;
+
     private bool $stopRequested = false;
 
     public function __construct(
@@ -25,34 +30,39 @@ final class Worker
     public function run(): void
     {
         $this->registerSignals();
-        $startedAt = hrtime(true);
-        $startedMemory = memory_get_usage(true);
-        $processed = 0;
-        $idleSleep = $this->options->idleSleepSeconds;
 
-        while (!$this->shouldStop($startedAt, $startedMemory, $processed)) {
-            $limit = $this->options->prefetch;
-            if ($this->options->maxMessages !== null) {
-                $limit = min($limit, $this->options->maxMessages - $processed);
+        try {
+            $startedAt = hrtime(true);
+            $startedMemory = memory_get_usage(true);
+            $processed = 0;
+            $idleSleep = $this->options->idleSleepSeconds;
+
+            while (!$this->shouldStop($startedAt, $startedMemory, $processed)) {
+                $limit = $this->options->prefetch;
+                if ($this->options->maxMessages !== null) {
+                    $limit = min($limit, $this->options->maxMessages - $processed);
+                }
+
+                $result = $this->consumer->run(
+                    $this->options->queue,
+                    $limit,
+                    $this->options->visibilitySeconds,
+                );
+                $processed += $result->received;
+
+                if ($result->received > 0) {
+                    $idleSleep = $this->options->idleSleepSeconds;
+
+                    continue;
+                }
+
+                if ($idleSleep > 0.0) {
+                    usleep((int) round($this->jittered($idleSleep) * 1_000_000));
+                    $idleSleep = min($this->options->maxIdleSleepSeconds, $idleSleep * 2.0);
+                }
             }
-
-            $result = $this->consumer->run(
-                $this->options->queue,
-                $limit,
-                $this->options->visibilitySeconds,
-            );
-            $processed += $result->received;
-
-            if ($result->received > 0) {
-                $idleSleep = $this->options->idleSleepSeconds;
-
-                continue;
-            }
-
-            if ($idleSleep > 0.0) {
-                usleep((int) round($this->jittered($idleSleep) * 1_000_000));
-                $idleSleep = min($this->options->maxIdleSleepSeconds, $idleSleep * 2.0);
-            }
+        } finally {
+            $this->restoreSignals();
         }
     }
 
@@ -71,10 +81,19 @@ final class Worker
 
     private function registerSignals(): void
     {
-        if (!$this->options->handleSignals || !function_exists('pcntl_signal')) {
+        if (
+            !$this->options->handleSignals
+            || !function_exists('pcntl_async_signals')
+            || !function_exists('pcntl_signal')
+            || !function_exists('pcntl_signal_get_handler')
+        ) {
             return;
         }
 
+        foreach ([self::SIGNAL_TERMINATE, self::SIGNAL_INTERRUPT] as $signal) {
+            $this->previousSignalHandlers[$signal] = pcntl_signal_get_handler($signal);
+        }
+        $this->previousAsyncSignals = pcntl_async_signals();
         pcntl_async_signals(true);
         pcntl_signal(self::SIGNAL_TERMINATE, function (): void {
             $this->stopRequested = true;
@@ -82,6 +101,19 @@ final class Worker
         pcntl_signal(self::SIGNAL_INTERRUPT, function (): void {
             $this->stopRequested = true;
         });
+    }
+
+    private function restoreSignals(): void
+    {
+        foreach ($this->previousSignalHandlers as $signal => $handler) {
+            pcntl_signal($signal, $handler);
+        }
+        $this->previousSignalHandlers = [];
+
+        if ($this->previousAsyncSignals !== null) {
+            pcntl_async_signals($this->previousAsyncSignals);
+            $this->previousAsyncSignals = null;
+        }
     }
 
     private function shouldStop(int $startedAt, int $startedMemory, int $processed): bool
