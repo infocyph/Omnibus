@@ -96,6 +96,15 @@ final class WorkerPool
         return hrtime(true) / 1_000_000_000;
     }
 
+    private static function waitStatus(mixed $status): int
+    {
+        if (!is_int($status)) {
+            throw new \UnexpectedValueException('pcntl_wait() returned an invalid child status.');
+        }
+
+        return $status;
+    }
+
     private function assertSupported(): void
     {
         foreach ([
@@ -287,7 +296,7 @@ final class WorkerPool
                 continue;
             }
 
-            $fatal = $this->consumeChildExit($pid, (int) $status, $restarts);
+            $fatal = $this->consumeChildExit($pid, self::waitStatus($status), $restarts);
             if ($fatal !== null) {
                 $this->requestStop();
             }
