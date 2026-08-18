@@ -8,10 +8,21 @@ final class WorkerPool
 {
     private const int SIGNAL_INTERRUPT = 2;
 
+    private const int SIGNAL_KILL = 9;
+
     private const int SIGNAL_TERMINATE = 15;
 
     /** @var array<int,int> */
     private array $children = [];
+
+    private bool $killEscalated = false;
+
+    /** @var array<int,callable|int> */
+    private array $previousSignalHandlers = [];
+
+    private ?bool $previousAsyncSignals = null;
+
+    private ?float $shutdownDeadline = null;
 
     private bool $stopRequested = false;
 
@@ -29,6 +40,7 @@ final class WorkerPool
         private readonly int $concurrency = 1,
         private readonly int $maximumRestarts = 5,
         private readonly float $restartBackoffSeconds = 0.25,
+        private readonly float $shutdownGraceSeconds = 30.0,
     ) {
         if ($concurrency < 1 || $concurrency > 256) {
             throw new \InvalidArgumentException('Worker concurrency must be between 1 and 256.');
@@ -39,13 +51,20 @@ final class WorkerPool
         if (!is_finite($restartBackoffSeconds) || $restartBackoffSeconds < 0.0) {
             throw new \InvalidArgumentException('Worker restart backoff must be finite and non-negative.');
         }
+        if (!is_finite($shutdownGraceSeconds) || $shutdownGraceSeconds <= 0.0) {
+            throw new \InvalidArgumentException('Worker shutdown grace must be positive and finite.');
+        }
 
         $this->workerFactory = \Closure::fromCallable($workerFactory);
     }
 
     public function requestStop(): void
     {
-        $this->stopRequested = true;
+        if (!$this->stopRequested) {
+            $this->stopRequested = true;
+            $this->shutdownDeadline = self::monotonicSeconds() + $this->shutdownGraceSeconds;
+        }
+
         $this->signalChildren(self::SIGNAL_TERMINATE);
     }
 
@@ -53,24 +72,41 @@ final class WorkerPool
     {
         $this->assertSupported();
         $this->registerSignals();
-        if ($this->stopRequested) {
-            return;
-        }
 
         try {
-            $this->supervise();
-        } catch (\Throwable $failure) {
-            $this->stopRequested = true;
-            $this->signalChildren(self::SIGNAL_TERMINATE);
-            $this->reapChildren();
+            if ($this->stopRequested) {
+                return;
+            }
 
-            throw $failure;
+            try {
+                $this->supervise();
+            } catch (\Throwable $failure) {
+                $this->requestStop();
+                $this->drainChildren();
+
+                throw $failure;
+            }
+        } finally {
+            $this->restoreSignals();
         }
+    }
+
+    private static function monotonicSeconds(): float
+    {
+        return hrtime(true) / 1_000_000_000;
     }
 
     private function assertSupported(): void
     {
-        foreach (['pcntl_fork', 'pcntl_wait', 'pcntl_signal', 'posix_kill'] as $function) {
+        foreach ([
+            'pcntl_async_signals',
+            'pcntl_fork',
+            'pcntl_signal',
+            'pcntl_signal_get_handler',
+            'pcntl_wait',
+            'pcntl_waitpid',
+            'posix_kill',
+        ] as $function) {
             if (!function_exists($function)) {
                 throw new \RuntimeException(
                     'WorkerPool requires ext-pcntl and ext-posix on a Unix-like runtime.',
@@ -79,26 +115,57 @@ final class WorkerPool
         }
     }
 
-    private function reapChildren(): void
+    private function drainChildren(): void
     {
         while ($this->children !== []) {
             $status = 0;
-            $pid = pcntl_wait($status);
-            if ($pid <= 0) {
+            $pid = pcntl_waitpid(-1, $status, WNOHANG);
+            if ($pid > 0) {
+                unset($this->children[$pid]);
+
+                continue;
+            }
+            if ($pid === -1) {
+                if (defined('PCNTL_EINTR') && pcntl_get_last_error() === PCNTL_EINTR) {
+                    continue;
+                }
+
                 $this->children = [];
 
                 return;
             }
 
-            unset($this->children[$pid]);
+            $this->escalateShutdownIfNeeded();
+            if ($this->children !== []) {
+                usleep(10_000);
+            }
         }
+    }
+
+    private function escalateShutdownIfNeeded(): void
+    {
+        if (
+            !$this->stopRequested
+            || $this->killEscalated
+            || $this->shutdownDeadline === null
+            || self::monotonicSeconds() < $this->shutdownDeadline
+        ) {
+            return;
+        }
+
+        $this->killEscalated = true;
+        $this->signalChildren(self::SIGNAL_KILL);
     }
 
     private function registerSignals(): void
     {
+        foreach ([self::SIGNAL_TERMINATE, self::SIGNAL_INTERRUPT] as $signal) {
+            $this->previousSignalHandlers[$signal] = pcntl_signal_get_handler($signal);
+        }
+        $this->previousAsyncSignals = pcntl_async_signals();
         pcntl_async_signals(true);
-        pcntl_signal(self::SIGNAL_TERMINATE, fn(): null => $this->stopFromSignal());
-        pcntl_signal(self::SIGNAL_INTERRUPT, fn(): null => $this->stopFromSignal());
+        pcntl_signal(self::SIGNAL_TERMINATE, fn(): null => $this->stopFromSignal(), false);
+        pcntl_signal(self::SIGNAL_INTERRUPT, fn(): null => $this->stopFromSignal(), false);
     }
 
     private function resetSignalsForChild(): void
@@ -107,12 +174,21 @@ final class WorkerPool
         pcntl_signal(self::SIGNAL_INTERRUPT, SIG_DFL);
     }
 
+    private function restoreSignals(): void
+    {
+        foreach ($this->previousSignalHandlers as $signal => $handler) {
+            pcntl_signal($signal, $handler);
+        }
+        $this->previousSignalHandlers = [];
+
+        if ($this->previousAsyncSignals !== null) {
+            pcntl_async_signals($this->previousAsyncSignals);
+            $this->previousAsyncSignals = null;
+        }
+    }
+
     private function signalChildren(int $signal): void
     {
-        if (!function_exists('posix_kill')) {
-            return;
-        }
-
         foreach (array_keys($this->children) as $pid) {
             posix_kill($pid, $signal);
         }
@@ -160,6 +236,12 @@ final class WorkerPool
         }
 
         while ($this->children !== []) {
+            if ($this->stopRequested) {
+                $this->drainChildren();
+
+                break;
+            }
+
             $status = 0;
             $pid = pcntl_wait($status);
             if ($pid <= 0) {
@@ -183,8 +265,7 @@ final class WorkerPool
 
             if ($restarts[$slot] >= $this->maximumRestarts) {
                 $fatal = sprintf('Worker slot %d exhausted its restart budget.', $slot);
-                $this->stopRequested = true;
-                $this->signalChildren(self::SIGNAL_TERMINATE);
+                $this->requestStop();
 
                 continue;
             }
