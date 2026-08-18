@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\Omnibus\Integration\DBLayer;
 
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Driver\Support\DriverProfile;
 use Infocyph\DBLayer\Exceptions\TransactionException;
 use Infocyph\Omnibus\Envelope\AttemptStamp;
 use Infocyph\Omnibus\Envelope\BatchStamp;
@@ -30,6 +31,10 @@ use Psr\Clock\ClockInterface;
 
 final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transport
 {
+    private const int SETTLEMENT_ATTEMPTS = 3;
+
+    private const int SETTLEMENT_BACKOFF_US = 100_000;
+
     private string $table;
 
     public function __construct(
@@ -43,7 +48,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
 
     public function acknowledge(Reservation $reservation): void
     {
-        $this->deleteReservation($reservation, $this->connection);
+        $this->retryMutation(fn(): null => $this->deleteReservation($reservation, $this->connection));
     }
 
     public function acknowledgeWorkflow(
@@ -173,7 +178,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
             throw new \InvalidArgumentException('Release delay must be a finite non-negative number.');
         }
         [$id, $token] = $this->receipt($reservation);
-        $changed = $this->connection->update(
+        $changed = $this->retryMutation(fn(): int => $this->connection->update(
             "UPDATE {$this->table} SET available_at = ?, reserved_until = NULL, receipt = NULL WHERE id = ? AND queue_name = ? AND receipt = ?",
             [
                 Time::add($this->microseconds(), $delaySeconds),
@@ -181,7 +186,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
                 $reservation->queue,
                 $token,
             ],
-        );
+        ));
         $this->assertChanged($changed, $reservation);
     }
 
@@ -283,7 +288,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         }
     }
 
-    private function deleteReservation(Reservation $reservation, Connection $connection): void
+    private function deleteReservation(Reservation $reservation, Connection $connection): null
     {
         [$id, $token] = $this->receipt($reservation);
         $deleted = $connection->delete(
@@ -291,6 +296,8 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
             [$id, $reservation->queue, $token],
         );
         $this->assertChanged($deleted, $reservation);
+
+        return null;
     }
 
     private function microseconds(): int
@@ -302,5 +309,32 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
     private function receipt(Reservation $reservation): array
     {
         return ReservationReceipt::decode($reservation->receipt);
+    }
+
+    /**
+     * @template TResult
+     * @param callable():TResult $operation
+     * @return TResult
+     */
+    private function retryMutation(callable $operation): mixed
+    {
+        $driver = $this->connection->getDriverName();
+
+        return $this->connection->withQueryRetryPolicy(
+            static function (\Throwable $failure, int $attempt, string $sql, array $bindings) use ($driver): bool {
+                unset($sql, $bindings);
+                if (
+                    $attempt >= self::SETTLEMENT_ATTEMPTS
+                    || !DriverProfile::causedByRetryableTransactionError($driver, $failure)
+                ) {
+                    return false;
+                }
+
+                usleep(self::SETTLEMENT_BACKOFF_US * $attempt);
+
+                return true;
+            },
+            $operation,
+        );
     }
 }
