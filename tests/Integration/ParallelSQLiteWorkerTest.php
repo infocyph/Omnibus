@@ -74,7 +74,7 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
         $connection->disconnect();
         unset($transport, $connection);
 
-        foreach ($reports as $worker => $report) {
+        foreach ($reports as $report) {
             $pid = pcntl_fork();
             if ($pid === -1) {
                 throw new RuntimeException('Unable to fork a parallel SQLite test consumer.');
@@ -165,7 +165,9 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
         $verificationConnection->disconnect();
     } finally {
         foreach ($children as $pid) {
-            posix_kill($pid, 15);
+            if (function_exists('posix_kill')) {
+                posix_kill($pid, 15);
+            }
             pcntl_waitpid($pid, $status);
         }
         foreach ($reports as $report) {
