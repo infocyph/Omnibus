@@ -127,11 +127,27 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
             }
         }
 
-        foreach ($children as $pid) {
+        foreach ($children as $index => $pid) {
             $status = 0;
             pcntl_waitpid($pid, $status);
-            expect(pcntl_wifexited($status))->toBeTrue()
-                ->and(pcntl_wexitstatus($status))->toBe(0);
+            $exitCode = pcntl_wifexited($status) ? pcntl_wexitstatus($status) : null;
+            if ($exitCode !== 0) {
+                $detail = 'no child report was written';
+                $report = $reports[$index] ?? null;
+                if (is_string($report) && is_file($report)) {
+                    $decoded = json_decode((string) file_get_contents($report), true);
+                    if (is_array($decoded) && is_string($decoded['error'] ?? null)) {
+                        $detail = $decoded['error'];
+                    }
+                }
+
+                throw new RuntimeException(sprintf(
+                    'Parallel SQLite child %d exited with %s: %s',
+                    $pid,
+                    $exitCode === null ? 'a signal' : 'code ' . $exitCode,
+                    $detail,
+                ));
+            }
         }
         $children = [];
 
@@ -168,6 +184,7 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
             if (function_exists('posix_kill')) {
                 posix_kill($pid, 15);
             }
+            $status = 0;
             pcntl_waitpid($pid, $status);
         }
         foreach ($reports as $report) {
