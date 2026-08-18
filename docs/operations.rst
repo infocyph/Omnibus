@@ -18,7 +18,8 @@ bounds one receive call; concurrency is the number of worker processes.
 ``ext-pcntl`` and ``ext-posix``. The pool keeps the configured concurrency
 stable, replaces cleanly recycled workers, and respawns crashed workers with a
 bounded linear backoff. Exhausting the crash restart budget fails the pool and
-signals the remaining children to stop.
+signals the remaining children to stop. Parent signal handlers are scoped to
+``WorkerPool::run()`` and restored before it returns or rethrows.
 
 The worker factory is invoked only after ``fork()``. Create PDO/DBLayer,
 Redis/Valkey, AMQP, SQS and other process-bound resources inside that factory.
@@ -49,6 +50,9 @@ Example::
             ));
         },
         concurrency: 4,
+        maximumRestarts: 5,
+        restartBackoffSeconds: 0.25,
+        shutdownGraceSeconds: 30,
     );
 
     $pool->run();
@@ -61,11 +65,19 @@ pooled worker exits cleanly because one of these limits is reached, the pool
 starts a fresh child for that slot. Use ``Worker`` directly when the process
 itself should terminate instead of being recycled by an in-process pool.
 
+Pool shutdown is bounded. SIGTERM or SIGINT asks children to stop cooperatively,
+then the parent reaps them until ``shutdownGraceSeconds`` expires. Any remaining
+children receive SIGKILL and are reaped before the pool returns. This prevents a
+standalone pool from waiting forever on a handler blocked in native database,
+network, filesystem, SDK, or extension code. The default grace period is 30
+seconds.
+
 External Supervisor, systemd, Docker, Kubernetes or another process manager is
 still the preferred production supervisor when available. In that deployment,
 run one ``Worker`` per managed process and let the external supervisor own
-process count and restart policy. ``WorkerPool`` exists for standalone PHP
-runtimes that need built-in fixed parallelism without another service.
+process count, restart policy, graceful-stop timeout, and hard termination.
+``WorkerPool`` exists for standalone PHP runtimes that need built-in fixed
+parallelism without another service.
 
 The in-memory transport is process-local and therefore does not become shared
 by using ``WorkerPool``. Parallel workers require a durable/shared transport
@@ -80,8 +92,9 @@ reservation transactions.
 
 Set visibility longer than ordinary handler execution. The cooperative
 ``DeadlineExecutionScope`` adds ``CancellationStamp`` and checks the deadline
-after execution, but cannot interrupt blocking PHP code. Hard termination
-belongs to the host or external process supervisor.
+after execution, but cannot interrupt blocking PHP code. ``Worker`` itself
+remains cooperative; hard termination belongs to ``WorkerPool`` or the external
+process supervisor.
 
 After-response dispatch
 -----------------------
