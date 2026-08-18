@@ -18,6 +18,7 @@ final readonly class WorkerOptions
         public ?int $maxMessages = null,
         public ?float $maxRuntimeSeconds = null,
         public ?int $memoryLimitBytes = null,
+        public ?int $maxMemoryGrowthBytes = null,
         public bool $handleSignals = true,
     ) {
         QueueName::assert($queue);
@@ -45,6 +46,9 @@ final readonly class WorkerOptions
         }
         if ($memoryLimitBytes !== null && $memoryLimitBytes < 1) {
             throw new \InvalidArgumentException('Worker memory limit must be at least 1 byte when configured.');
+        }
+        if ($maxMemoryGrowthBytes !== null && $maxMemoryGrowthBytes < 1) {
+            throw new \InvalidArgumentException('Worker memory growth limit must be at least 1 byte when configured.');
         }
     }
 }
