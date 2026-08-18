@@ -26,10 +26,11 @@ final class Worker
     {
         $this->registerSignals();
         $startedAt = hrtime(true);
+        $startedMemory = memory_get_usage(true);
         $processed = 0;
         $idleSleep = $this->options->idleSleepSeconds;
 
-        while (!$this->shouldStop($startedAt, $processed)) {
+        while (!$this->shouldStop($startedAt, $startedMemory, $processed)) {
             $limit = $this->options->prefetch;
             if ($this->options->maxMessages !== null) {
                 $limit = min($limit, $this->options->maxMessages - $processed);
@@ -83,7 +84,7 @@ final class Worker
         });
     }
 
-    private function shouldStop(int $startedAt, int $processed): bool
+    private function shouldStop(int $startedAt, int $startedMemory, int $processed): bool
     {
         if ($this->stopRequested) {
             return true;
@@ -98,7 +99,12 @@ final class Worker
             return true;
         }
 
-        return $this->options->memoryLimitBytes !== null
-            && memory_get_usage(true) >= $this->options->memoryLimitBytes;
+        $currentMemory = memory_get_usage(true);
+        if ($this->options->memoryLimitBytes !== null && $currentMemory >= $this->options->memoryLimitBytes) {
+            return true;
+        }
+
+        return $this->options->maxMemoryGrowthBytes !== null
+            && $currentMemory - $startedMemory >= $this->options->maxMemoryGrowthBytes;
     }
 }
