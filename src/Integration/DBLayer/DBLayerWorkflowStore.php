@@ -26,8 +26,7 @@ use Infocyph\UID\ULID;
 use Psr\Clock\ClockInterface;
 
 /**
- * Durable workflow state. SQLite deployments must use one active workflow
- * coordinator/consumer writer because DBLayer 4.0 has no immediate-writer mode.
+ * Durable workflow state using DBLayer-owned transaction and locking semantics.
  */
 final readonly class DBLayerWorkflowStore implements WorkflowStore
 {
@@ -89,6 +88,7 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
                 $limit,
                 $leaseSeconds,
             ),
+            3,
         );
         if (!is_array($claims) || !array_is_list($claims)) {
             throw new \LogicException('DBLayer returned invalid workflow claims.');
@@ -125,7 +125,7 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
             );
 
             return true;
-        });
+        }, 3);
         if ($confirmed !== true) {
             throw new \LogicException(sprintf(
                 'Workflow item "%s" has a stale dispatch claim.',
@@ -439,7 +439,7 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
                 ];
             }
             $this->insertItems($connection, $rows);
-        });
+        }, 3);
     }
 
     /**
@@ -574,7 +574,7 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
     /** @param callable(Connection):WorkflowTransition $operation */
     private function stateTransaction(callable $operation): WorkflowTransition
     {
-        $transition = $this->connection->transaction($operation);
+        $transition = $this->connection->transaction($operation, 3);
         if (!$transition instanceof WorkflowTransition) {
             throw new \LogicException('DBLayer returned an invalid workflow transaction result.');
         }
@@ -595,7 +595,7 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
             &$rows,
         ): void {
             $rows = $connection->select($sql, $bindings);
-        });
+        }, 3);
 
         return $rows;
     }
