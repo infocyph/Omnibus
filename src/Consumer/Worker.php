@@ -26,9 +26,14 @@ final class Worker
         $idleSleep = $this->options->idleSleepSeconds;
 
         while (!$this->shouldStop($startedAt, $processed)) {
+            $limit = $this->options->prefetch;
+            if ($this->options->maxMessages !== null) {
+                $limit = min($limit, $this->options->maxMessages - $processed);
+            }
+
             $result = $this->consumer->run(
                 $this->options->queue,
-                $this->options->prefetch,
+                $limit,
                 $this->options->visibilitySeconds,
             );
             $processed += $result->received;
@@ -42,10 +47,9 @@ final class Worker
             if ($idleSleep > 0.0) {
                 usleep((int) round($this->jittered($idleSleep) * 1_000_000));
             }
-            $idleSleep = min(
-                $this->options->maxIdleSleepSeconds,
-                max($this->options->idleSleepSeconds, $idleSleep * 2.0),
-            );
+            $idleSleep = $idleSleep === 0.0
+                ? $this->options->maxIdleSleepSeconds
+                : min($this->options->maxIdleSleepSeconds, $idleSleep * 2.0);
         }
     }
 
