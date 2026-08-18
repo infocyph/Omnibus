@@ -57,9 +57,29 @@ test('worker options reject unsafe bounds', function (): void {
 });
 
 test('worker pool validates process limits before execution', function (): void {
-    $factory = static fn(int $slot): Worker => throw new LogicException((string) $slot);
+    $factory = static function (int $slot): Worker {
+        throw new LogicException((string) $slot);
+    };
 
     expect(fn() => new WorkerPool($factory, concurrency: 0))->toThrow(InvalidArgumentException::class)
         ->and(fn() => new WorkerPool($factory, maximumRestarts: -1))->toThrow(InvalidArgumentException::class)
         ->and(fn() => new WorkerPool($factory, restartBackoffSeconds: -1))->toThrow(InvalidArgumentException::class);
+});
+
+test('worker pool stops after the bounded crash restart budget', function (): void {
+    if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
+        $this->markTestSkipped('WorkerPool requires ext-pcntl and ext-posix.');
+    }
+
+    $pool = new WorkerPool(
+        static function (int $slot): Worker {
+            throw new RuntimeException('crash-' . $slot);
+        },
+        concurrency: 1,
+        maximumRestarts: 1,
+        restartBackoffSeconds: 0,
+    );
+
+    expect(fn() => $pool->run())
+        ->toThrow(RuntimeException::class, 'exhausted its restart budget');
 });
