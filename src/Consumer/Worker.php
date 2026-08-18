@@ -6,6 +6,10 @@ namespace Infocyph\Omnibus\Consumer;
 
 final class Worker
 {
+    private const int SIGNAL_INTERRUPT = 2;
+
+    private const int SIGNAL_TERMINATE = 15;
+
     private bool $stopRequested = false;
 
     public function __construct(
@@ -71,10 +75,10 @@ final class Worker
         }
 
         pcntl_async_signals(true);
-        pcntl_signal(SIGTERM, function (): void {
+        pcntl_signal(self::SIGNAL_TERMINATE, function (): void {
             $this->stopRequested = true;
         });
-        pcntl_signal(SIGINT, function (): void {
+        pcntl_signal(self::SIGNAL_INTERRUPT, function (): void {
             $this->stopRequested = true;
         });
     }
