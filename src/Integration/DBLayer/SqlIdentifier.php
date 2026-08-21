@@ -15,10 +15,14 @@ final class SqlIdentifier
             }
         }
 
-        $quote = $driver === 'mysql' ? '`' : '"';
+        [$open, $close] = match ($driver) {
+            'mysql', 'mariadb' => ['`', '`'],
+            'mssql' => ['[', ']'],
+            default => ['"', '"'],
+        };
 
         return implode('.', array_map(
-            static fn(string $segment): string => $quote . $segment . $quote,
+            static fn(string $segment): string => $open . $segment . $close,
             $segments,
         ));
     }
