@@ -11,6 +11,7 @@ use Infocyph\Omnibus\Integration\DBLayer\DBLayerFailureStore;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerTransport;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerWorkflowStore;
 use Infocyph\Omnibus\Integration\DBLayer\QueueSchema;
+use Infocyph\Omnibus\Integration\DBLayer\SqlIdentifier;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 use Infocyph\Omnibus\Tests\Fixtures\TestSerializer;
@@ -63,9 +64,59 @@ function omnibusServiceDatabase(string $driver): ?array
     if ($driver === 'mssql') {
         $config['encrypt'] = true;
         $config['trust_server_certificate'] = true;
+        omnibusEnsureMssqlDatabase($config);
     }
 
     return $config;
+}
+
+/** @param array<string, mixed> $config */
+function omnibusEnsureMssqlDatabase(array $config): void
+{
+    $database = $config['database'] ?? null;
+    if (!is_string($database) || $database === '') {
+        throw new LogicException('The MSSQL service database name is required.');
+    }
+    $quotedDatabase = SqlIdentifier::quote($database, 'mssql');
+
+    $adminConfig = $config;
+    $adminConfig['database'] = 'master';
+    $connection = new Connection(ConnectionConfig::fromArray($adminConfig));
+    $lockName = 'omnibus-test-database-' . hash('sha256', $database);
+    $locked = false;
+
+    try {
+        $connection->statement(
+            <<<'SQL'
+            SET NOCOUNT ON;
+            DECLARE @lock_result int;
+            EXEC @lock_result = sys.sp_getapplock
+                @Resource = ?,
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Session',
+                @LockTimeout = 30000;
+            IF @lock_result < 0
+                THROW 51000, 'Failed to lock MSSQL test database initialization.', 1;
+            SQL,
+            [$lockName],
+        );
+        $locked = true;
+
+        if ($connection->scalar('SELECT DB_ID(?)', [$database]) === null) {
+            $connection->statement(sprintf('CREATE DATABASE %s', $quotedDatabase));
+        }
+    } finally {
+        try {
+            if ($locked) {
+                $connection->statement(
+                    'EXEC sys.sp_releaseapplock @Resource = ?, @LockOwner = \'Session\'',
+                    [$lockName],
+                );
+            }
+        } finally {
+            $connection->disconnect();
+        }
+    }
 }
 
 test('durable lifecycle runs on each configured service database', function (string $driver): void {
