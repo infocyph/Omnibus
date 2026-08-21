@@ -217,15 +217,15 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
 
     public function itemStatusForUpdate(string $id, string $itemId, int $index): WorkflowItemStatus
     {
-        $lock = match ($this->connection->getDriverName()) {
-            'mysql', 'pgsql' => ' FOR UPDATE',
-            'sqlite' => '',
+        $sql = match ($this->connection->getDriverName()) {
+            'mysql' => "SELECT item_status FROM {$this->items} WHERE workflow_id = ? AND item_id = ? AND item_index = ? FOR UPDATE",
+            'mariadb' => "SELECT item_status FROM {$this->items} WHERE workflow_id = ? AND item_id = ? AND item_index = ? FOR UPDATE",
+            'pgsql' => "SELECT item_status FROM {$this->items} WHERE workflow_id = ? AND item_id = ? AND item_index = ? FOR UPDATE",
+            'sqlite' => "SELECT item_status FROM {$this->items} WHERE workflow_id = ? AND item_id = ? AND item_index = ?",
+            'mssql' => "SELECT item_status FROM {$this->items} WITH (UPDLOCK, ROWLOCK) WHERE workflow_id = ? AND item_id = ? AND item_index = ?",
             default => throw new \LogicException('Unsupported DBLayer workflow driver.'),
         };
-        $rows = $this->writerSelect(
-            "SELECT item_status FROM {$this->items} WHERE workflow_id = ? AND item_id = ? AND item_index = ?{$lock}",
-            [$id, $itemId, $index],
-        );
+        $rows = $this->writerSelect($sql, [$id, $itemId, $index]);
         if (!isset($rows[0])) {
             throw new WorkflowNotFound(sprintf('Workflow item "%s:%d" was not found.', $id, $index));
         }
@@ -534,19 +534,19 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         int $limit,
     ): array {
         $resolvedLimit = $kind === 'chain' ? 1 : $limit;
-        $lock = match ($connection->getDriverName()) {
-            'mysql', 'pgsql' => ' FOR UPDATE SKIP LOCKED',
-            'sqlite' => '',
-            default => throw new \LogicException('Unsupported DBLayer workflow driver.'),
-        };
         $chainPredecessor = $kind === 'chain'
             ? " AND NOT EXISTS (SELECT 1 FROM {$this->items} AS earlier WHERE earlier.workflow_id = current_item.workflow_id AND earlier.item_index < current_item.item_index AND earlier.item_status <> 'succeeded')"
             : '';
+        $sql = match ($connection->getDriverName()) {
+            'mysql' => "SELECT workflow_id, item_id, item_index, queue_name, payload FROM {$this->items} AS current_item WHERE workflow_id = ? AND item_status = 'pending'{$chainPredecessor} ORDER BY item_index LIMIT {$resolvedLimit} FOR UPDATE SKIP LOCKED",
+            'mariadb' => "SELECT workflow_id, item_id, item_index, queue_name, payload FROM {$this->items} AS current_item WHERE workflow_id = ? AND item_status = 'pending'{$chainPredecessor} ORDER BY item_index LIMIT {$resolvedLimit} FOR UPDATE SKIP LOCKED",
+            'pgsql' => "SELECT workflow_id, item_id, item_index, queue_name, payload FROM {$this->items} AS current_item WHERE workflow_id = ? AND item_status = 'pending'{$chainPredecessor} ORDER BY item_index LIMIT {$resolvedLimit} FOR UPDATE SKIP LOCKED",
+            'sqlite' => "SELECT workflow_id, item_id, item_index, queue_name, payload FROM {$this->items} AS current_item WHERE workflow_id = ? AND item_status = 'pending'{$chainPredecessor} ORDER BY item_index LIMIT {$resolvedLimit}",
+            'mssql' => "SELECT TOP ({$resolvedLimit}) workflow_id, item_id, item_index, queue_name, payload FROM {$this->items} AS current_item WITH (UPDLOCK, READPAST, ROWLOCK) WHERE workflow_id = ? AND item_status = 'pending'{$chainPredecessor} ORDER BY item_index",
+            default => throw new \LogicException('Unsupported DBLayer workflow driver.'),
+        };
 
-        return array_values($connection->select(
-            "SELECT workflow_id, item_id, item_index, queue_name, payload FROM {$this->items} AS current_item WHERE workflow_id = ? AND item_status = 'pending'{$chainPredecessor} ORDER BY item_index LIMIT {$resolvedLimit}{$lock}",
-            [$id],
-        ));
+        return array_values($connection->select($sql, [$id]));
     }
 
     private function required(string $id, bool $forUpdate = false): WorkflowState
@@ -556,15 +556,15 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
                 ?? throw new WorkflowNotFound(sprintf('Workflow "%s" was not found.', $id));
         }
 
-        $lock = match ($this->connection->getDriverName()) {
-            'mysql', 'pgsql' => ' FOR UPDATE',
-            'sqlite' => '',
+        $sql = match ($this->connection->getDriverName()) {
+            'mysql' => "SELECT id, kind, workflow_status, total, succeeded, failed, cancelled FROM {$this->workflows} WHERE id = ? FOR UPDATE",
+            'mariadb' => "SELECT id, kind, workflow_status, total, succeeded, failed, cancelled FROM {$this->workflows} WHERE id = ? FOR UPDATE",
+            'pgsql' => "SELECT id, kind, workflow_status, total, succeeded, failed, cancelled FROM {$this->workflows} WHERE id = ? FOR UPDATE",
+            'sqlite' => "SELECT id, kind, workflow_status, total, succeeded, failed, cancelled FROM {$this->workflows} WHERE id = ?",
+            'mssql' => "SELECT id, kind, workflow_status, total, succeeded, failed, cancelled FROM {$this->workflows} WITH (UPDLOCK, ROWLOCK) WHERE id = ?",
             default => throw new \LogicException('Unsupported DBLayer workflow driver.'),
         };
-        $rows = $this->connection->select(
-            "SELECT id, kind, workflow_status, total, succeeded, failed, cancelled FROM {$this->workflows} WHERE id = ?{$lock}",
-            [$id],
-        );
+        $rows = $this->connection->select($sql, [$id]);
 
         return isset($rows[0])
             ? $this->hydrateState($rows[0])
