@@ -65,12 +65,16 @@ Exceptional database topology tests
 Lagging read replicas are an exceptional deployment topology rather than a
 requirement for ordinary Omnibus use. The current writer-affinity regression is
 therefore opt-in and runs only when ``IC_SERVICE_REPLICA_DATABASE`` identifies
-a deliberately stale database.
+a deliberately stale database. The dedicated ``replica-affinity`` CI job runs
+this deterministic check against empty MySQL, MariaDB, and PostgreSQL databases;
+it does not represent physical replication or failover coverage.
 
 A future infrastructure suite should add real replicated environments for:
 
 * controlled MySQL asynchronous replication lag;
+* controlled MariaDB asynchronous replication lag;
 * controlled PostgreSQL streaming-replication lag;
+* controlled SQL Server availability-group replica lag;
 * writer and reader reconnect during queue and workflow settlement;
 * primary failover while claims or reservations are outstanding;
 * multiple readers at different replay positions;

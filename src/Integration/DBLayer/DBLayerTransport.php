@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\Omnibus\Integration\DBLayer;
 
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Driver\Support\DriverProfile;
 use Infocyph\DBLayer\Exceptions\TransactionException;
 use Infocyph\Omnibus\Envelope\AttemptStamp;
 use Infocyph\Omnibus\Envelope\BatchStamp;
@@ -28,12 +29,16 @@ use Infocyph\Omnibus\Workflow\WorkflowTransition;
 use Infocyph\UID\ULID;
 use Psr\Clock\ClockInterface;
 
-/**
- * SQLite deployments must use one active consuming writer because DBLayer 4.0
- * does not expose an immediate-writer transaction mode.
- */
 final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transport
 {
+    private const int SETTLEMENT_ATTEMPTS = 3;
+
+    private const int SETTLEMENT_BACKOFF_US = 100_000;
+
+    private const int TRANSACTION_ATTEMPTS = 3;
+
+    private const int TRANSACTION_JITTER_US = 50_000;
+
     private string $table;
 
     public function __construct(
@@ -47,7 +52,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
 
     public function acknowledge(Reservation $reservation): void
     {
-        $this->deleteReservation($reservation, $this->connection);
+        $this->retryMutation(fn(): null => $this->deleteReservation($reservation, $this->connection));
     }
 
     public function acknowledgeWorkflow(
@@ -59,7 +64,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         }
 
         try {
-            $transition = $this->connection->transaction(function (Connection $connection) use (
+            $transition = $this->retryTransaction(function (Connection $connection) use (
                 $reservation,
                 $store,
             ): WorkflowTransition {
@@ -91,9 +96,6 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
 
             throw $failure;
         }
-        if (!$transition instanceof WorkflowTransition) {
-            throw new \LogicException('DBLayer returned an invalid workflow settlement result.');
-        }
 
         return $transition;
     }
@@ -106,22 +108,14 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         $token = ULID::generateMonotonic();
 
         /** @var list<array{id:mixed,message_id:mixed,payload:mixed,attempts:mixed}> $rows */
-        $rows = $this->connection->transaction(function (Connection $connection) use (
+        $rows = $this->retryTransaction(function (Connection $connection) use (
             $queue,
             $limit,
             $now,
             $reservedUntil,
             $token,
         ): array {
-            $lock = match ($connection->getDriverName()) {
-                'mysql', 'pgsql' => ' FOR UPDATE SKIP LOCKED',
-                'sqlite' => '',
-                default => throw new \LogicException('Unsupported DBLayer queue driver.'),
-            };
-            $rows = $connection->select(
-                "SELECT id, message_id, payload, attempts FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT {$limit}{$lock}",
-                [$queue, $now, $now],
-            );
+            $rows = $this->selectReservableRows($connection, $queue, $limit, $now);
             if ($rows === []) {
                 return [];
             }
@@ -177,7 +171,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
             throw new \InvalidArgumentException('Release delay must be a finite non-negative number.');
         }
         [$id, $token] = $this->receipt($reservation);
-        $changed = $this->connection->update(
+        $changed = $this->retryMutation(fn(): int => $this->connection->update(
             "UPDATE {$this->table} SET available_at = ?, reserved_until = NULL, receipt = NULL WHERE id = ? AND queue_name = ? AND receipt = ?",
             [
                 Time::add($this->microseconds(), $delaySeconds),
@@ -185,7 +179,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
                 $reservation->queue,
                 $token,
             ],
-        );
+        ));
         $this->assertChanged($changed, $reservation);
     }
 
@@ -287,7 +281,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         }
     }
 
-    private function deleteReservation(Reservation $reservation, Connection $connection): void
+    private function deleteReservation(Reservation $reservation, Connection $connection): null
     {
         [$id, $token] = $this->receipt($reservation);
         $deleted = $connection->delete(
@@ -295,6 +289,8 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
             [$id, $reservation->queue, $token],
         );
         $this->assertChanged($deleted, $reservation);
+
+        return null;
     }
 
     private function microseconds(): int
@@ -306,5 +302,78 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
     private function receipt(Reservation $reservation): array
     {
         return ReservationReceipt::decode($reservation->receipt);
+    }
+
+    /**
+     * @template TResult
+     * @param callable():TResult $operation
+     * @return TResult
+     */
+    private function retryMutation(callable $operation): mixed
+    {
+        $driver = $this->connection->getDriverName();
+
+        return $this->connection->withQueryRetryPolicy(
+            static function (\Throwable $failure, int $attempt, string $sql, array $bindings) use ($driver): bool {
+                unset($sql, $bindings);
+                if (
+                    $attempt >= self::SETTLEMENT_ATTEMPTS
+                    || !DriverProfile::causedByRetryableTransactionError($driver, $failure)
+                ) {
+                    return false;
+                }
+
+                usleep(self::SETTLEMENT_BACKOFF_US * $attempt + random_int(0, self::TRANSACTION_JITTER_US));
+
+                return true;
+            },
+            $operation,
+        );
+    }
+
+    /**
+     * @template TResult
+     * @param callable(Connection):TResult $operation
+     * @return TResult
+     */
+    private function retryTransaction(callable $operation): mixed
+    {
+        for ($attempt = 1; $attempt <= self::TRANSACTION_ATTEMPTS; $attempt++) {
+            try {
+                return $this->connection->transaction($operation, 3);
+            } catch (TransactionException $failure) {
+                if (
+                    $attempt >= self::TRANSACTION_ATTEMPTS
+                    || !DriverProfile::causedByRetryableTransactionError(
+                        $this->connection->getDriverName(),
+                        $failure,
+                    )
+                ) {
+                    throw $failure;
+                }
+
+                usleep(self::SETTLEMENT_BACKOFF_US * $attempt + random_int(0, self::TRANSACTION_JITTER_US));
+            }
+        }
+
+        throw new \LogicException('DBLayer transaction retry exhausted without a result.');
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function selectReservableRows(Connection $connection, string $queue, int $limit, int $now): array
+    {
+        $driver = $connection->getDriverName();
+        $bindings = [$queue, $now, $now];
+
+        $sql = match ($driver) {
+            'mysql' => "SELECT id, message_id, payload, attempts FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT {$limit} FOR UPDATE SKIP LOCKED",
+            'mariadb' => "SELECT id, message_id, payload, attempts FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT {$limit} FOR UPDATE SKIP LOCKED",
+            'pgsql' => "SELECT id, message_id, payload, attempts FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT {$limit} FOR UPDATE SKIP LOCKED",
+            'sqlite' => "SELECT id, message_id, payload, attempts FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT {$limit}",
+            'mssql' => "SELECT TOP ({$limit}) id, message_id, payload, attempts FROM {$this->table} WITH (UPDLOCK, READPAST, ROWLOCK) WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id",
+            default => throw new \LogicException('Unsupported DBLayer queue driver.'),
+        };
+
+        return array_values($connection->select($sql, $bindings));
     }
 }

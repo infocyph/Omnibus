@@ -17,7 +17,7 @@ test('queue schema is complete for every supported database driver', function (s
         ->toContain("'handled'")
         ->toContain('CHECK')
         ->toContain('REFERENCES');
-})->with(['mysql', 'pgsql', 'sqlite']);
+})->with(['mysql', 'mariadb', 'pgsql', 'mssql', 'sqlite']);
 
 test('sqlite schema executes and enforces durable-state constraints', function (): void {
     $connection = new Connection(ConnectionConfig::fromArray([

@@ -293,7 +293,8 @@ Construct the producer and one bounded consumer operation:
    $failures = new FailureManager($failureStore);
 
 Use a file path on reliable local storage. SQLite is a single-host option; use
-MySQL or PostgreSQL when several hosts consume the same queue.
+MySQL, MariaDB, PostgreSQL, or SQL Server when several hosts consume the same
+queue.
 
 .. _redis-or-valkey-transport:
 

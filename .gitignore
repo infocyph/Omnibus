@@ -21,3 +21,4 @@ vendor
 /coverage
 .agents
 .codex
+/graphify-out

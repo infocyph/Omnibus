@@ -70,9 +70,10 @@ final readonly class DBLayerFailureStore implements FailureStore
         if ($limit < 1 || $limit > 1_000) {
             throw new \InvalidArgumentException('Failure list limit must be between 1 and 1000.');
         }
-        $rows = $this->connection->select(
-            "SELECT id, queue_name, payload, payload_kind, payload_truncated, attempt, failed_at, failure_class, reason FROM {$this->table} ORDER BY failed_at DESC, id LIMIT {$limit}",
-        );
+        $select = $this->connection->getDriverName() === 'mssql'
+            ? "SELECT TOP ({$limit}) id, queue_name, payload, payload_kind, payload_truncated, attempt, failed_at, failure_class, reason FROM {$this->table} ORDER BY failed_at DESC, id"
+            : "SELECT id, queue_name, payload, payload_kind, payload_truncated, attempt, failed_at, failure_class, reason FROM {$this->table} ORDER BY failed_at DESC, id LIMIT {$limit}";
+        $rows = $this->connection->select($select);
 
         return array_values(array_map($this->hydrate(...), $rows));
     }

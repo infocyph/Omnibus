@@ -17,30 +17,79 @@ jobs:
       contents: read
     with:
       php_versions: '["8.4","8.5"]'
-      dependency_versions: '["prefer-lowest","prefer-stable"]'
-      php_extensions: "memcached, pdo, pdo_mysql, pdo_pgsql, pdo_sqlite, redis"
-      composer_flags: ""
-      phpstan_memory_limit: "1G"
-      psalm_threads: "1"
-      run_analysis: true
-      run_svg_report: true
+      php_extensions: "memcached, pdo, pdo_mysql, pdo_pgsql, pdo_sqlite, redis, pdo_sqlsrv"
       fail_on_skipped_tests: false
-      run_clean_install: true
-      benchmark_composer_script: ""
-      benchmark_result_file: ""
-      benchmark_baseline_file: ""
-      benchmark_max_regression_percent: 2
-      benchmark_stable_environment: false
-      enable_redis_service: true
-      enable_valkey_service: true
-      enable_memcached_service: true
-      enable_postgres_service: true
-      enable_mysql_service: true
-      enable_scylladb_service: false
-      enable_elasticsearch_service: false
-      enable_mongodb_service: false
+      integration_services: '["mysql","mariadb","postgres","mssql","sqlite","redis","valkey","memcached"]'
+      service_topologies: '{}'
       service_db_name: "phpforge"
       service_db_user: "phpforge"
-      service_db_password: "phpforge"
-      artifact_retention_days: 61
+      service_password: "Phpforge_123!"
 
+  replica-affinity:
+    name: "Replica writer affinity"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      PHPFORGE_SERVICE_DATABASE: "phpforge"
+      PHPFORGE_SERVICE_USERNAME: "phpforge"
+      PHPFORGE_SERVICE_PASSWORD: "Phpforge_123!"
+      IC_SERVICE_DATABASE: "phpforge"
+      IC_SERVICE_USERNAME: "phpforge"
+      IC_SERVICE_PASSWORD: "Phpforge_123!"
+      IC_SERVICE_REPLICA_DATABASE: "phpforge_lagging"
+    steps:
+      - name: "Check out repository"
+        uses: actions/checkout@v7
+
+      - name: "Set up PHP"
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: "pdo_mysql, pdo_pgsql"
+          coverage: none
+
+      - name: "Install dependencies"
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: "Start database services"
+        run: >-
+          docker compose
+          --file vendor/infocyph/phpforge/resources/services/compose.yml
+          --profile mysql
+          --profile mariadb
+          --profile postgres
+          up --detach --wait
+
+      - name: "Create deliberately stale databases"
+        run: |
+          docker compose --file vendor/infocyph/phpforge/resources/services/compose.yml \
+            exec --no-TTY --env MYSQL_PWD="$PHPFORGE_SERVICE_PASSWORD" mysql \
+            mysql --user=root \
+            --execute="CREATE DATABASE phpforge_lagging; GRANT ALL PRIVILEGES ON phpforge_lagging.* TO 'phpforge'@'%';"
+          docker compose --file vendor/infocyph/phpforge/resources/services/compose.yml \
+            exec --no-TTY --env MYSQL_PWD="$PHPFORGE_SERVICE_PASSWORD" mariadb \
+            mariadb --user=root \
+            --execute="CREATE DATABASE phpforge_lagging; GRANT ALL PRIVILEGES ON phpforge_lagging.* TO 'phpforge'@'%';"
+          docker compose --file vendor/infocyph/phpforge/resources/services/compose.yml \
+            exec --no-TTY postgres psql --username=phpforge --dbname=postgres \
+            --command="CREATE DATABASE phpforge_lagging OWNER phpforge;"
+
+      - name: "Verify writer-affine mutations"
+        run: >-
+          php vendor/bin/pest
+          --configuration vendor/infocyph/phpforge/resources/pest.xml
+          --bootstrap vendor/autoload.php
+          tests/Integration/DurableDriverMatrixTest.php
+          --filter "mutation decisions remain writer-affine"
+
+      - name: "Stop database services"
+        if: always()
+        run: >-
+          docker compose
+          --file vendor/infocyph/phpforge/resources/services/compose.yml
+          --profile mysql
+          --profile mariadb
+          --profile postgres
+          down --volumes

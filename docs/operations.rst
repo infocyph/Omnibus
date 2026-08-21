@@ -1,25 +1,102 @@
 Consumer operations and telemetry
 =================================
 
-Host-owned process lifecycle
-----------------------------
+Consumer and worker lifecycle
+-----------------------------
 
 ``ConsumerTask`` accepts one immutable ``ConsumeRequest`` and performs one
-bounded consumer call. It does not loop, fork, scale, handle signals, write PID
-files, supervise subprocesses, or terminate workers.
+bounded consumer call. ``Consumer::run()`` remains the smallest execution
+primitive and never creates concurrency itself.
 
-A long-running host should:
+``Worker`` adds a long-running loop around one ``Consumer``. ``WorkerOptions``
+controls queue, prefetch, visibility, idle backoff and jitter, optional
+message/runtime/absolute-memory/memory-growth recycling limits, and graceful
+SIGTERM/SIGINT handling. Prefetch and concurrency are independent: prefetch
+bounds one receive call; concurrency is the number of worker processes.
 
-* create application dependencies once;
-* create or reset a per-message scope for each handler;
-* call the bounded consumer repeatedly;
-* stop on its own signal, memory, message-count, or time policy;
-* allow visibility timeout to recover work after an unclean exit.
+``WorkerPool`` is an optional Unix/Linux fixed-process supervisor. It requires
+``ext-pcntl`` and ``ext-posix``. The pool keeps the configured concurrency
+stable, replaces cleanly recycled workers, and respawns crashed workers with a
+bounded linear backoff. Exhausting the crash restart budget fails the pool and
+signals the remaining children to stop. Parent signal handlers are scoped to
+``WorkerPool::run()`` and restored before it returns or rethrows.
+
+The worker factory is invoked only after ``fork()``. Create PDO/DBLayer,
+Redis/Valkey, AMQP, SQS and other process-bound resources inside that factory.
+Do not capture or initialize live network/database resources in the parent and
+then fork them into workers. The child also resets the pool's inherited signal
+handlers before constructing the worker, so worker-level signal policy starts
+from a clean process state.
+
+Example::
+
+    use Infocyph\Omnibus\Consumer\Worker;
+    use Infocyph\Omnibus\Consumer\WorkerOptions;
+    use Infocyph\Omnibus\Consumer\WorkerPool;
+
+    $pool = new WorkerPool(
+        workerFactory: static function (int $slot): Worker {
+            // Build DBLayer/Redis/AMQP/SQS connections here, after fork.
+            $consumer = buildConsumerForProcess($slot);
+
+            return new Worker($consumer, new WorkerOptions(
+                queue: 'default',
+                prefetch: 1,
+                visibilitySeconds: 60,
+                maxMessages: 10_000,
+                maxRuntimeSeconds: 3600,
+                memoryLimitBytes: 256 * 1024 * 1024,
+                maxMemoryGrowthBytes: 64 * 1024 * 1024,
+            ));
+        },
+        concurrency: 4,
+        maximumRestarts: 5,
+        restartBackoffSeconds: 0.25,
+        shutdownGraceSeconds: 30,
+    );
+
+    $pool->run();
+
+``maxMessages``, ``maxRuntimeSeconds``, ``memoryLimitBytes`` and
+``maxMemoryGrowthBytes`` are per-worker recycling limits. The absolute memory
+limit protects the process ceiling; the growth limit detects a worker that
+keeps accumulating memory relative to its post-bootstrap baseline. When a
+pooled worker exits cleanly because one of these limits is reached, the pool
+starts a fresh child for that slot. Use ``Worker`` directly when the process
+itself should terminate instead of being recycled by an in-process pool.
+
+Pool shutdown is bounded. SIGTERM or SIGINT asks children to stop cooperatively,
+then the parent reaps them until ``shutdownGraceSeconds`` expires. Any remaining
+children receive SIGKILL and are reaped before the pool returns. This prevents a
+standalone pool from waiting forever on a handler blocked in native database,
+network, filesystem, SDK, or extension code. The default grace period is 30
+seconds.
+
+External Supervisor, systemd, Docker, Kubernetes or another process manager is
+still the preferred production supervisor when available. In that deployment,
+run one ``Worker`` per managed process and let the external supervisor own
+process count, restart policy, graceful-stop timeout, and hard termination.
+``WorkerPool`` exists for standalone PHP runtimes that need built-in fixed
+parallelism without another service.
+
+The in-memory transport is process-local and therefore does not become shared
+by using ``WorkerPool``. Parallel workers require a durable/shared transport
+such as DBLayer, Redis/Valkey, AMQP or SQS.
+
+DBLayer integrations are tested against DBLayer 4.1. MySQL, MariaDB,
+PostgreSQL, SQLite and Microsoft SQL Server use their own DBLayer driver paths;
+Omnibus keeps vendor-specific claim/locking syntax inside the DBLayer adapter
+rather than exposing database knobs through the worker API. SQLite parallel
+consumers rely on DBLayer-owned transaction semantics and writer acquisition;
+queue claim and atomic workflow-settlement transactions use DBLayer retries to
+absorb short writer contention. Keep these transactions short and keep handler
+execution outside reservation transactions.
 
 Set visibility longer than ordinary handler execution. The cooperative
 ``DeadlineExecutionScope`` adds ``CancellationStamp`` and checks the deadline
-after execution, but cannot interrupt blocking PHP code. Hard termination
-belongs to the host process.
+after execution, but cannot interrupt blocking PHP code. ``Worker`` itself
+remains cooperative; hard termination belongs to ``WorkerPool`` or the external
+process supervisor.
 
 After-response dispatch
 -----------------------
