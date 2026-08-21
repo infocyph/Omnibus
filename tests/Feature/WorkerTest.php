@@ -118,6 +118,53 @@ test('worker pool stops after the bounded crash restart budget', function (): vo
         ->toThrow(RuntimeException::class, 'exhausted its restart budget');
 });
 
+test('worker pool replaces cleanly recycled workers without consuming the crash budget', function (): void {
+    if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
+        $this->markTestSkipped('WorkerPool requires ext-pcntl and ext-posix.');
+    }
+
+    $counter = tempnam(sys_get_temp_dir(), 'omnibus-worker-recycle-');
+    if ($counter === false) {
+        throw new RuntimeException('Unable to allocate a worker recycle counter.');
+    }
+    file_put_contents($counter, '0');
+
+    try {
+        $pool = new WorkerPool(
+            static function () use ($counter): Worker {
+                $cycle = (int) file_get_contents($counter) + 1;
+                file_put_contents($counter, (string) $cycle, LOCK_EX);
+                if ($cycle > 2) {
+                    throw new RuntimeException('end-recycle-test');
+                }
+
+                $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+                $transport = new InMemoryTransport($clock);
+                $transport->send(new Envelope(new TestCommand((string) $cycle)), 'work');
+
+                return new Worker(
+                    new Consumer(
+                        $transport,
+                        new HandlerMap([TestCommand::class => static function (): void {}]),
+                        new ExponentialRetryStrategy(),
+                        new InMemoryFailureStore(),
+                        $clock,
+                    ),
+                    new WorkerOptions(queue: 'work', maxMessages: 1, handleSignals: false),
+                );
+            },
+            maximumRestarts: 0,
+            restartBackoffSeconds: 0,
+        );
+
+        expect(fn() => $pool->run())
+            ->toThrow(RuntimeException::class, 'exhausted its restart budget');
+        expect(file_get_contents($counter))->toBe('3');
+    } finally {
+        unlink($counter);
+    }
+});
+
 test('worker pool force kills a child that ignores graceful shutdown', function (): void {
     if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
         $this->markTestSkipped('WorkerPool requires ext-pcntl and ext-posix.');

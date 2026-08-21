@@ -120,8 +120,8 @@ application-level message bus:
   retry topics.
 - Additional brokers only where their native delivery guarantees can satisfy
   Omnibus's explicit settlement contract.
-- Expanded opt-in infrastructure tests for real MySQL/PostgreSQL replica lag,
-  reconnect, and failover behavior.
+- Expanded opt-in infrastructure tests for real MySQL, MariaDB, PostgreSQL,
+  and SQL Server replica lag, reconnect, and failover behavior.
 
 These integrations will remain optional and will not add broker clients to the
 core runtime dependencies. See [future integrations](docs/future-integrations.rst)

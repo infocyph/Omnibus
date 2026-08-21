@@ -35,6 +35,10 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
 
     private const int SETTLEMENT_BACKOFF_US = 100_000;
 
+    private const int TRANSACTION_ATTEMPTS = 3;
+
+    private const int TRANSACTION_JITTER_US = 50_000;
+
     private string $table;
 
     public function __construct(
@@ -60,7 +64,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         }
 
         try {
-            $transition = $this->connection->transaction(function (Connection $connection) use (
+            $transition = $this->retryTransaction(function (Connection $connection) use (
                 $reservation,
                 $store,
             ): WorkflowTransition {
@@ -83,7 +87,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
                 $this->deleteReservation($reservation, $connection);
 
                 return $store->succeed(...$identity);
-            }, 3);
+            });
         } catch (TransactionException $failure) {
             $cause = $failure->getPrevious();
             if ($cause instanceof WorkflowInconsistentDelivery || $cause instanceof InvalidReservation) {
@@ -91,9 +95,6 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
             }
 
             throw $failure;
-        }
-        if (!$transition instanceof WorkflowTransition) {
-            throw new \LogicException('DBLayer returned an invalid workflow settlement result.');
         }
 
         return $transition;
@@ -107,7 +108,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         $token = ULID::generateMonotonic();
 
         /** @var list<array{id:mixed,message_id:mixed,payload:mixed,attempts:mixed}> $rows */
-        $rows = $this->connection->transaction(function (Connection $connection) use (
+        $rows = $this->retryTransaction(function (Connection $connection) use (
             $queue,
             $limit,
             $now,
@@ -130,7 +131,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
             );
 
             return $rows;
-        }, 3);
+        });
 
         $reservations = [];
         foreach ($rows as $row) {
@@ -322,12 +323,40 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
                     return false;
                 }
 
-                usleep(self::SETTLEMENT_BACKOFF_US * $attempt);
+                usleep(self::SETTLEMENT_BACKOFF_US * $attempt + random_int(0, self::TRANSACTION_JITTER_US));
 
                 return true;
             },
             $operation,
         );
+    }
+
+    /**
+     * @template TResult
+     * @param callable(Connection):TResult $operation
+     * @return TResult
+     */
+    private function retryTransaction(callable $operation): mixed
+    {
+        for ($attempt = 1; $attempt <= self::TRANSACTION_ATTEMPTS; $attempt++) {
+            try {
+                return $this->connection->transaction($operation, 3);
+            } catch (TransactionException $failure) {
+                if (
+                    $attempt >= self::TRANSACTION_ATTEMPTS
+                    || !DriverProfile::causedByRetryableTransactionError(
+                        $this->connection->getDriverName(),
+                        $failure,
+                    )
+                ) {
+                    throw $failure;
+                }
+
+                usleep(self::SETTLEMENT_BACKOFF_US * $attempt + random_int(0, self::TRANSACTION_JITTER_US));
+            }
+        }
+
+        throw new \LogicException('DBLayer transaction retry exhausted without a result.');
     }
 
     /** @return list<array<string, mixed>> */

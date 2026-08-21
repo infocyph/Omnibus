@@ -12,22 +12,22 @@ final class WorkerPool
 
     private const int SIGNAL_TERMINATE = 15;
 
+    /** @var \Closure(int):Worker */
+    private readonly \Closure $workerFactory;
+
     /** @var array<int,int> */
     private array $children = [];
 
     private bool $killEscalated = false;
 
+    private ?bool $previousAsyncSignals = null;
+
     /** @var array<int,callable|int> */
     private array $previousSignalHandlers = [];
-
-    private ?bool $previousAsyncSignals = null;
 
     private ?float $shutdownDeadline = null;
 
     private bool $stopRequested = false;
-
-    /** @var \Closure(int):Worker */
-    private readonly \Closure $workerFactory;
 
     /**
      * The factory is invoked in each child after fork. Create database,
@@ -113,6 +113,7 @@ final class WorkerPool
             'pcntl_get_last_error',
             'pcntl_signal',
             'pcntl_signal_get_handler',
+            'pcntl_sigprocmask',
             'pcntl_wait',
             'pcntl_waitpid',
             'posix_kill',
@@ -134,7 +135,10 @@ final class WorkerPool
             return null;
         }
 
-        if (pcntl_wifexited($status) && pcntl_wexitstatus($status) === 0) {
+        $cleanExit = pcntl_wifexited($status) && pcntl_wexitstatus($status) === 0;
+        $cleanSignal = pcntl_wifsignaled($status)
+            && pcntl_wtermsig($status) === self::SIGNAL_TERMINATE;
+        if ($cleanExit || $cleanSignal) {
             $restarts[$slot] = 0;
             $this->spawn($slot);
 
@@ -193,14 +197,17 @@ final class WorkerPool
         }
         $this->previousAsyncSignals = pcntl_async_signals();
         pcntl_async_signals(true);
-        pcntl_signal(self::SIGNAL_TERMINATE, fn(): null => $this->stopFromSignal(), false);
-        pcntl_signal(self::SIGNAL_INTERRUPT, fn(): null => $this->stopFromSignal(), false);
+        pcntl_signal(self::SIGNAL_TERMINATE, $this->stopFromSignal(...), false);
+        pcntl_signal(self::SIGNAL_INTERRUPT, $this->stopFromSignal(...), false);
     }
 
     private function resetSignalsForChild(): void
     {
         pcntl_signal(self::SIGNAL_TERMINATE, SIG_DFL);
         pcntl_signal(self::SIGNAL_INTERRUPT, SIG_DFL);
+        if (!pcntl_sigprocmask(SIG_UNBLOCK, [self::SIGNAL_TERMINATE, self::SIGNAL_INTERRUPT])) {
+            throw new \RuntimeException('Unable to unblock Omnibus worker child signals.');
+        }
     }
 
     /** @param array<int,int> $restarts */
@@ -256,14 +263,13 @@ final class WorkerPool
             return;
         }
 
-        $this->resetSignalsForChild();
-
         try {
+            $this->resetSignalsForChild();
             $worker = ($this->workerFactory)($slot);
             $worker->run();
-            exit(0);
+            $this->terminateChild(self::SIGNAL_TERMINATE);
         } catch (\Throwable) {
-            exit(1);
+            $this->terminateChild(self::SIGNAL_KILL);
         }
     }
 
@@ -304,6 +310,18 @@ final class WorkerPool
 
         if ($fatal !== null) {
             throw new \RuntimeException($fatal);
+        }
+    }
+
+    private function terminateChild(int $signal): never
+    {
+        $pid = getmypid();
+        if (!is_int($pid) || !posix_kill($pid, $signal)) {
+            throw new \RuntimeException('Unable to terminate Omnibus worker child process.');
+        }
+
+        while (true) {
+            usleep(10_000);
         }
     }
 }

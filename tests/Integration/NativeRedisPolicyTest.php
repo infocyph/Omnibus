@@ -13,28 +13,33 @@ use Infocyph\Omnibus\Integration\CacheLayer\RateLimitExceeded;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 
-test('native Redis counters execute rate-limit and circuit-breaker policies', function (): void {
+test('native Redis-compatible counters execute rate-limit and circuit-breaker policies', function (
+    string $backend,
+    string $hostVariable,
+    string $portVariable,
+    string $passwordVariable,
+): void {
     if (!extension_loaded('redis') || !class_exists(Redis::class)) {
         test()->markTestSkipped('The redis extension is unavailable.');
 
         return;
     }
-    $host = getenv('IC_REDIS_HOST');
-    $port = getenv('IC_REDIS_PORT');
+    $host = getenv($hostVariable);
+    $port = getenv($portVariable);
     if (!is_string($host) || $host === '' || !is_string($port) || $port === '') {
-        test()->markTestSkipped('The Redis service is not configured.');
+        test()->markTestSkipped(sprintf('The %s service is not configured.', $backend));
 
         return;
     }
 
     $redis = new Redis();
     $redis->connect($host, (int) $port, 3);
-    $password = getenv('IC_REDIS_PASSWORD');
+    $password = getenv($passwordVariable);
     if (is_string($password) && $password !== '') {
         $redis->auth($password);
     }
 
-    $namespace = 'omnibus_policy_'.getmypid();
+    $namespace = 'omnibus_'.$backend.'_policy_'.getmypid();
     $counters = AtomicCounters::redis($namespace, client: $redis);
     $locks = new RedisLockProvider($redis, $namespace.':locks:');
     $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
@@ -76,4 +81,7 @@ test('native Redis counters execute rate-limit and circuit-breaker policies', fu
         ->toBe('recovered');
 
     $redis->close();
-});
+})->with([
+    'redis' => ['redis', 'IC_REDIS_HOST', 'IC_REDIS_PORT', 'IC_REDIS_PASSWORD'],
+    'valkey' => ['valkey', 'IC_VALKEY_HOST', 'IC_VALKEY_PORT', 'IC_VALKEY_PASSWORD'],
+]);

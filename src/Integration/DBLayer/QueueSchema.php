@@ -50,12 +50,6 @@ final class QueueSchema
     }
 
     /** @return list<string> */
-    private static function mysqlStatements(string $queue, string $failure, string $workflow, string $workflowItem, string $queueIndex, string $failedIndex, string $workflowItemIndex, string $workflowClaimIndex): array
-    {
-        return self::mysqlFamilyStatements($queue, $failure, $workflow, $workflowItem, $queueIndex, $failedIndex, $workflowItemIndex, $workflowClaimIndex);
-    }
-
-    /** @return list<string> */
     private static function mysqlFamilyStatements(string $queue, string $failure, string $workflow, string $workflowItem, string $queueIndex, string $failedIndex, string $workflowItemIndex, string $workflowClaimIndex): array
     {
         return [
@@ -68,6 +62,12 @@ final class QueueSchema
             "CREATE INDEX {$workflowItemIndex} ON {$workflowItem} (workflow_id, item_status, item_index)",
             "CREATE INDEX {$workflowClaimIndex} ON {$workflowItem} (workflow_id, item_status, dispatch_claim_until, item_index)",
         ];
+    }
+
+    /** @return list<string> */
+    private static function mysqlStatements(string $queue, string $failure, string $workflow, string $workflowItem, string $queueIndex, string $failedIndex, string $workflowItemIndex, string $workflowClaimIndex): array
+    {
+        return self::mysqlFamilyStatements($queue, $failure, $workflow, $workflowItem, $queueIndex, $failedIndex, $workflowItemIndex, $workflowClaimIndex);
     }
 
     /** @return list<string> */

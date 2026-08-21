@@ -30,9 +30,27 @@ function omnibusParallelSQLiteSerializer(): JsonEnvelopeSerializer
     );
 }
 
+function omnibusTerminateParallelSQLiteChild(int $signal): never
+{
+    pcntl_sigprocmask(SIG_UNBLOCK, [$signal]);
+    $pid = getmypid();
+    if (!is_int($pid) || !posix_kill($pid, $signal)) {
+        throw new RuntimeException('Unable to terminate a parallel SQLite test child.');
+    }
+
+    while (true) {
+        usleep(10_000);
+    }
+}
+
 test('parallel SQLite consumers reserve every message exactly once', function (): void {
-    if (!function_exists('pcntl_fork') || !function_exists('pcntl_waitpid')) {
-        $this->markTestSkipped('Parallel SQLite integration requires ext-pcntl.');
+    if (
+        !function_exists('pcntl_fork')
+        || !function_exists('pcntl_sigprocmask')
+        || !function_exists('pcntl_waitpid')
+        || !function_exists('posix_kill')
+    ) {
+        $this->markTestSkipped('Parallel SQLite integration requires ext-pcntl and ext-posix.');
     }
     if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
         $this->markTestSkipped('Parallel SQLite integration requires pdo_sqlite.');
@@ -117,13 +135,13 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
 
                 $workerConnection->disconnect();
                 file_put_contents($report, json_encode(['handled' => $handled], JSON_THROW_ON_ERROR));
-                exit(0);
+                omnibusTerminateParallelSQLiteChild(15);
             } catch (Throwable $failure) {
                 file_put_contents(
                     $report,
                     json_encode(['error' => $failure->getMessage()], JSON_THROW_ON_ERROR),
                 );
-                exit(1);
+                omnibusTerminateParallelSQLiteChild(9);
             }
         }
 
@@ -131,7 +149,8 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
             $status = 0;
             pcntl_waitpid($pid, $status);
             $exitCode = pcntl_wifexited($status) ? pcntl_wexitstatus($status) : null;
-            if ($exitCode !== 0) {
+            $cleanSignal = pcntl_wifsignaled($status) && pcntl_wtermsig($status) === 15;
+            if ($exitCode !== 0 && !$cleanSignal) {
                 $detail = 'no child report was written';
                 $report = $reports[$index] ?? null;
                 if (is_string($report) && is_file($report)) {

@@ -10,10 +10,10 @@ final class Worker
 
     private const int SIGNAL_TERMINATE = 15;
 
+    private ?bool $previousAsyncSignals = null;
+
     /** @var array<int,callable|int> */
     private array $previousSignalHandlers = [];
-
-    private ?bool $previousAsyncSignals = null;
 
     private bool $stopRequested = false;
 

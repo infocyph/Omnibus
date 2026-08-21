@@ -45,12 +45,14 @@ duplicate settlement, and terminal-listener failure. It reports reconciliation
 attempts/errors, duplicate handler executions, and terminal regressions.
 
 Database contention is an operational benchmark: test 2/4/8 consumers against
-10k and 100k+ mixed ready/delayed/reserved rows on the intended MySQL and
-PostgreSQL versions. Capture messages/s, reservation latency, lock waits,
-duplicate settlements, stale-settlement rejection, and ``EXPLAIN ANALYZE`` for
-``(queue_name, available_at, reserved_until)`` versus candidate ready/reclaim
-indexes. SQLite remains restricted to one active consuming writer until DBLayer
-offers a managed immediate-writer transaction.
+10k and 100k+ mixed ready/delayed/reserved rows on the intended MySQL, MariaDB,
+PostgreSQL, and SQL Server versions. Capture messages/s, reservation latency,
+lock waits, duplicate settlements, stale-settlement rejection, and query plans
+for ``(queue_name, available_at, reserved_until)`` versus candidate
+ready/reclaim indexes. Also test SQLite at the process count intended for the
+single-host deployment: DBLayer retries short writer contention, but SQLite
+still serializes writes and should not be treated as a server-database
+throughput substitute.
 
 Run the harness for each service database, for example:
 

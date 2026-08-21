@@ -62,6 +62,7 @@
             "/benchmarks",
             "/docs",
             "/examples",
+            "/graphify-out",
             "/tests",
             "/vendor",
             "/.editorconfig",

@@ -70,7 +70,9 @@ a deliberately stale database.
 A future infrastructure suite should add real replicated environments for:
 
 * controlled MySQL asynchronous replication lag;
+* controlled MariaDB asynchronous replication lag;
 * controlled PostgreSQL streaming-replication lag;
+* controlled SQL Server availability-group replica lag;
 * writer and reader reconnect during queue and workflow settlement;
 * primary failover while claims or reservations are outstanding;
 * multiple readers at different replay positions;
