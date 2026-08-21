@@ -23,26 +23,49 @@ use Infocyph\Omnibus\Workflow\WorkflowTransport;
 /** @return array<string, mixed>|null */
 function omnibusServiceDatabase(string $driver): ?array
 {
-    if (!in_array($driver, PDO::getAvailableDrivers(), true)) {
+    $pdoDriver = match ($driver) {
+        'mysql', 'mariadb' => 'mysql',
+        'pgsql' => 'pgsql',
+        'mssql' => 'sqlsrv',
+        default => $driver,
+    };
+    if (!in_array($pdoDriver, PDO::getAvailableDrivers(), true)) {
         return null;
     }
 
     $database = getenv('IC_SERVICE_DATABASE');
-    $username = getenv('IC_SERVICE_USERNAME');
-    $password = getenv('IC_SERVICE_PASSWORD');
-    if (!is_string($database) || $database === '' || !is_string($username) || $username === '') {
+    $serviceUsername = getenv('IC_SERVICE_USERNAME');
+    $servicePassword = getenv('IC_SERVICE_PASSWORD');
+    if (!is_string($database) || $database === '') {
         return null;
     }
 
-    return [
+    $username = $driver === 'mssql' ? getenv('IC_MSSQL_USER') : $serviceUsername;
+    $password = $driver === 'mssql' ? getenv('IC_MSSQL_PASSWORD') : $servicePassword;
+    if (!is_string($username) || $username === '') {
+        return null;
+    }
+
+    $config = [
         'driver' => $driver,
         'host' => '127.0.0.1',
-        'port' => $driver === 'mysql' ? 3306 : 5432,
+        'port' => match ($driver) {
+            'mysql' => 3306,
+            'mariadb' => 3308,
+            'pgsql' => 5432,
+            'mssql' => 1433,
+            default => 0,
+        },
         'database' => $database,
         'username' => $username,
         'password' => is_string($password) ? $password : '',
-        'options' => [PDO::ATTR_TIMEOUT => 3],
     ];
+    if ($driver === 'mssql') {
+        $config['encrypt'] = true;
+        $config['trust_server_certificate'] = true;
+    }
+
+    return $config;
 }
 
 test('durable lifecycle runs on each configured service database', function (string $driver): void {
@@ -120,7 +143,7 @@ test('durable lifecycle runs on each configured service database', function (str
             $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
         }
     }
-})->with(['mysql', 'pgsql']);
+})->with(['mysql', 'mariadb', 'pgsql', 'mssql']);
 
 test('mutation decisions remain writer-affine with a deliberately lagging replica', function (string $driver): void {
     $config = omnibusServiceDatabase($driver);
@@ -207,7 +230,7 @@ test('mutation decisions remain writer-affine with a deliberately lagging replic
             $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
         }
     }
-})->with(['mysql', 'pgsql']);
+})->with(['mysql', 'mariadb', 'pgsql']);
 
 test('workflow claims and terminal transitions remain coherent across service connections', function (string $driver): void {
     $config = omnibusServiceDatabase($driver);
@@ -301,4 +324,4 @@ test('workflow claims and terminal transitions remain coherent across service co
             $first->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
         }
     }
-})->with(['mysql', 'pgsql']);
+})->with(['mysql', 'mariadb', 'pgsql', 'mssql']);
