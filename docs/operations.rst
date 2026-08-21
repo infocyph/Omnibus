@@ -83,12 +83,14 @@ The in-memory transport is process-local and therefore does not become shared
 by using ``WorkerPool``. Parallel workers require a durable/shared transport
 such as DBLayer, Redis/Valkey, AMQP or SQS.
 
-SQLite parallel consumers require DBLayer 4.0.1 or newer. DBLayer owns SQLite
-transaction semantics and reserves writer ownership at transaction start;
-Omnibus does not expose a SQLite transaction-mode option. Queue claim and atomic
-workflow-settlement transactions use DBLayer retries to absorb short writer
-contention. Keep these transactions short and keep handler execution outside
-reservation transactions.
+DBLayer integrations are tested against DBLayer 4.1. MySQL, MariaDB,
+PostgreSQL, SQLite and Microsoft SQL Server use their own DBLayer driver paths;
+Omnibus keeps vendor-specific claim/locking syntax inside the DBLayer adapter
+rather than exposing database knobs through the worker API. SQLite parallel
+consumers rely on DBLayer-owned transaction semantics and writer acquisition;
+queue claim and atomic workflow-settlement transactions use DBLayer retries to
+absorb short writer contention. Keep these transactions short and keep handler
+execution outside reservation transactions.
 
 Set visibility longer than ordinary handler execution. The cooperative
 ``DeadlineExecutionScope`` adds ``CancellationStamp`` and checks the deadline
