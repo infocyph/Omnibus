@@ -114,15 +114,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
             $reservedUntil,
             $token,
         ): array {
-            $lock = match ($connection->getDriverName()) {
-                'mysql', 'pgsql' => ' FOR UPDATE SKIP LOCKED',
-                'sqlite' => '',
-                default => throw new \LogicException('Unsupported DBLayer queue driver.'),
-            };
-            $rows = $connection->select(
-                "SELECT id, message_id, payload, attempts FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT {$limit}{$lock}",
-                [$queue, $now, $now],
-            );
+            $rows = $this->selectReservableRows($connection, $queue, $limit, $now);
             if ($rows === []) {
                 return [];
             }
@@ -336,5 +328,23 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
             },
             $operation,
         );
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function selectReservableRows(Connection $connection, string $queue, int $limit, int $now): array
+    {
+        $driver = $connection->getDriverName();
+        $bindings = [$queue, $now, $now];
+
+        $sql = match ($driver) {
+            'mysql' => "SELECT id, message_id, payload, attempts FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT {$limit} FOR UPDATE SKIP LOCKED",
+            'mariadb' => "SELECT id, message_id, payload, attempts FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT {$limit} FOR UPDATE SKIP LOCKED",
+            'pgsql' => "SELECT id, message_id, payload, attempts FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT {$limit} FOR UPDATE SKIP LOCKED",
+            'sqlite' => "SELECT id, message_id, payload, attempts FROM {$this->table} WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT {$limit}",
+            'mssql' => "SELECT TOP ({$limit}) id, message_id, payload, attempts FROM {$this->table} WITH (UPDLOCK, READPAST, ROWLOCK) WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id",
+            default => throw new \LogicException('Unsupported DBLayer queue driver.'),
+        };
+
+        return array_values($connection->select($sql, $bindings));
     }
 }
