@@ -9,8 +9,10 @@ use Infocyph\Omnibus\Consumer\WorkerPool;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
 use Infocyph\Omnibus\Handler\HandlerMap;
+use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Retry\ExponentialRetryStrategy;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
+use Infocyph\Omnibus\Tests\Fixtures\RecordingHandlerMiddleware;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
 
@@ -18,6 +20,7 @@ test('worker respects message bounds without prefetch overshoot', function (): v
     $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
     $transport = new InMemoryTransport($clock);
     $handled = [];
+    $middlewareEvents = [];
 
     foreach (['one', 'two', 'three'] as $value) {
         $transport->send(new Envelope(new TestCommand($value)), 'work');
@@ -26,11 +29,19 @@ test('worker respects message bounds without prefetch overshoot', function (): v
     $worker = new Worker(
         new Consumer(
             $transport,
-            new HandlerMap([
-                TestCommand::class => static function (TestCommand $message) use (&$handled): void {
-                    $handled[] = $message->value;
-                },
-            ]),
+            new HandlerInvoker(
+                new HandlerMap([
+                    TestCommand::class => static function (TestCommand $message) use (&$handled): void {
+                        $handled[] = $message->value;
+                    },
+                ]),
+                [new RecordingHandlerMiddleware(
+                    'worker',
+                    static function (string $event) use (&$middlewareEvents): void {
+                        $middlewareEvents[] = $event;
+                    },
+                )],
+            ),
             new ExponentialRetryStrategy(initialDelaySeconds: 0),
             new InMemoryFailureStore(),
             $clock,
@@ -46,6 +57,12 @@ test('worker respects message bounds without prefetch overshoot', function (): v
     $worker->run();
 
     expect($handled)->toBe(['one', 'two'])
+        ->and($middlewareEvents)->toBe([
+            'before:worker',
+            'after:worker',
+            'before:worker',
+            'after:worker',
+        ])
         ->and($transport->size('work'))->toBe(1);
 });
 
@@ -65,7 +82,7 @@ test('worker restores parent signal handlers after execution', function (): void
         $worker = new Worker(
             new Consumer(
                 $transport,
-                new HandlerMap([TestCommand::class => static function (): void {}]),
+                new HandlerInvoker(new HandlerMap([TestCommand::class => static function (): void {}])),
                 new ExponentialRetryStrategy(),
                 new InMemoryFailureStore(),
                 $clock,
@@ -128,10 +145,12 @@ test('worker pool replaces cleanly recycled workers without consuming the crash 
         throw new RuntimeException('Unable to allocate a worker recycle counter.');
     }
     file_put_contents($counter, '0');
+    $middlewareLog = $counter . '-middleware';
+    file_put_contents($middlewareLog, '');
 
     try {
         $pool = new WorkerPool(
-            static function () use ($counter): Worker {
+            static function () use ($counter, $middlewareLog): Worker {
                 $cycle = (int) file_get_contents($counter) + 1;
                 file_put_contents($counter, (string) $cycle, LOCK_EX);
                 if ($cycle > 2) {
@@ -145,7 +164,17 @@ test('worker pool replaces cleanly recycled workers without consuming the crash 
                 return new Worker(
                     new Consumer(
                         $transport,
-                        new HandlerMap([TestCommand::class => static function (): void {}]),
+                        new HandlerInvoker(
+                            new HandlerMap([TestCommand::class => static function (): void {}]),
+                            [new RecordingHandlerMiddleware(
+                                'pool',
+                                static function (string $event) use ($middlewareLog): void {
+                                    if ($event === 'before:pool') {
+                                        file_put_contents($middlewareLog, "handled\n", FILE_APPEND | LOCK_EX);
+                                    }
+                                },
+                            )],
+                        ),
                         new ExponentialRetryStrategy(),
                         new InMemoryFailureStore(),
                         $clock,
@@ -159,9 +188,11 @@ test('worker pool replaces cleanly recycled workers without consuming the crash 
 
         expect(fn() => $pool->run())
             ->toThrow(RuntimeException::class, 'exhausted its restart budget');
-        expect(file_get_contents($counter))->toBe('3');
+        expect(file_get_contents($counter))->toBe('3')
+            ->and(file($middlewareLog, FILE_IGNORE_NEW_LINES))->toBe(['handled', 'handled']);
     } finally {
         unlink($counter);
+        unlink($middlewareLog);
     }
 });
 
@@ -183,7 +214,7 @@ test('worker pool force kills a child that ignores graceful shutdown', function 
             return new Worker(
                 new Consumer(
                     new InMemoryTransport($clock),
-                    new HandlerMap([]),
+                    new HandlerInvoker(new HandlerMap([])),
                     new ExponentialRetryStrategy(),
                     new InMemoryFailureStore(),
                     $clock,

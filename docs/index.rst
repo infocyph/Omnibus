@@ -17,6 +17,7 @@ adapters, and provider-neutral broadcasts.
    recipes
    architecture
    messages
+   handler-middleware
    events
    queues
    backends
@@ -26,6 +27,7 @@ adapters, and provider-neutral broadcasts.
    scheduling-and-broadcasting
    operations
    integration
+   upgrading
    future-integrations
    testing
    performance

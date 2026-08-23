@@ -15,9 +15,10 @@ Construct only the selected objects:
    $serializer = new JsonEnvelopeSerializer($messageCodecs, $stampCodecs);
    $transport = new RedisTransport($redisClient, $serializer, $clock);
    $failures = new DBLayerFailureStore($connection, $serializer);
+   $invoker = new HandlerInvoker($handlers, $middleware);
    $consumer = new Consumer(
        $transport,
-       $handlers,
+       $invoker,
        $retryStrategy,
        $failures,
        $clock,
@@ -26,6 +27,11 @@ Construct only the selected objects:
 
 The same constructors work with a hand-written bootstrap, any PSR-compatible
 container, or a framework adapter.
+
+Share one ``HandlerInvoker`` between ``SyncTransport`` and ``Consumer`` when
+both execution paths should use the same ordered middleware objects. Construct
+process-bound middleware and its network resources inside a ``WorkerPool``
+worker factory after fork.
 
 DBLayer integration
 -------------------

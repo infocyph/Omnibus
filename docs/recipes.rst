@@ -30,7 +30,7 @@ inventory, sends mail, and updates a private browser channel:
                                               |
               retry + uniqueness + overlap + deadline
                                               |
-                              HandlerMap
+                      HandlerInvoker + HandlerMap
                          /         |          \
                     workflow     PSR event    broadcast
                        |             |             |
@@ -238,6 +238,7 @@ Construct the producer and one bounded consumer operation:
    use Infocyph\Omnibus\Consumer\Consumer;
    use Infocyph\Omnibus\Failure\FailureManager;
    use Infocyph\Omnibus\Handler\HandlerMap;
+   use Infocyph\Omnibus\Handler\HandlerInvoker;
    use Infocyph\Omnibus\Integration\DBLayer\DBLayerFailureStore;
    use Infocyph\Omnibus\Integration\DBLayer\DBLayerTransport;
    use Infocyph\Omnibus\MessageBus;
@@ -255,6 +256,7 @@ Construct the producer and one bounded consumer operation:
            $mailer->sendReceipt($message->invoiceId, $message->email);
        },
    ]);
+   $invoker = new HandlerInvoker($handlers);
 
    $bus = new MessageBus(
        new RouteMap([
@@ -270,7 +272,7 @@ Construct the producer and one bounded consumer operation:
 
    $consumer = new Consumer(
        $queue,
-       $handlers,
+       $invoker,
        new ExponentialRetryStrategy(
            maximumAttempts: 5,
            initialDelaySeconds: 1,
@@ -521,7 +523,7 @@ overlap; CacheLayer's bundled atomic counters currently use Redis or Valkey:
 
    $consumer = new Consumer(
        $queue,
-       $handlers,
+       new HandlerInvoker($handlers),
        $retryStrategy,
        $failureStore,
        $clock,

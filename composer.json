@@ -97,6 +97,7 @@
     "scripts": {
         "benchmark": "@php benchmarks/run.php",
         "benchmark:db-contention": "@php benchmarks/db-contention.php",
+        "benchmark:handler-middleware": "@php benchmarks/handler-middleware.php",
         "soak:consumer": "@php benchmarks/consumer-soak.php",
         "soak:durable": "@php benchmarks/durable-soak.php",
         "soak:workflow": "@php benchmarks/workflow-soak.php"
