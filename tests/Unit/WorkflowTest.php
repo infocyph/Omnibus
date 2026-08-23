@@ -12,6 +12,7 @@ use Infocyph\Omnibus\Event\EventDispatcher;
 use Infocyph\Omnibus\Event\ListenerMap;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
 use Infocyph\Omnibus\Handler\HandlerMap;
+use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Retry\ExponentialRetryStrategy;
 use Infocyph\Omnibus\Testing\RecordingSender;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
@@ -323,7 +324,7 @@ test('workflow eligibility is checked before a missing handler is resolved', fun
 
     $result = (new Consumer(
         $transport,
-        new HandlerMap([]),
+        new HandlerInvoker(new HandlerMap([])),
         new ExponentialRetryStrategy(),
         new InMemoryFailureStore(),
         $clock,
@@ -344,7 +345,7 @@ test('a normally dispatched workflow still requires its registered handler', fun
     $failures = new InMemoryFailureStore();
     $result = (new Consumer(
         new WorkflowTransport($inner, $coordinator),
-        new HandlerMap([]),
+        new HandlerInvoker(new HandlerMap([])),
         new ExponentialRetryStrategy(),
         new WorkflowFailureStore($failures, $coordinator),
         $clock,

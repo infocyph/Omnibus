@@ -8,6 +8,7 @@ use Infocyph\Omnibus\Event\QueuedListener;
 use Infocyph\Omnibus\Event\QueuedListenerNotConfigured;
 use Infocyph\Omnibus\Event\ShouldQueue;
 use Infocyph\Omnibus\Handler\HandlerMap;
+use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\MessageBus;
 use Infocyph\Omnibus\Routing\Route;
 use Infocyph\Omnibus\Routing\RouteMap;
@@ -45,7 +46,7 @@ test('queued listeners use the message bus without executing synchronously', fun
         new RouteMap([QueuedListener::class => new Route('memory', 'listeners')]),
         new TransportRegistry([
             'memory' => $transport,
-            'sync' => new SyncTransport(new HandlerMap([])),
+            'sync' => new SyncTransport(new HandlerInvoker(new HandlerMap([]))),
         ]),
     );
     $dispatcher = new EventDispatcher(

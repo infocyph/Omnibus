@@ -9,6 +9,7 @@ use Infocyph\Omnibus\Failure\FailureStore;
 use Infocyph\Omnibus\Failure\FailureRetryClaim;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
 use Infocyph\Omnibus\Handler\HandlerMap;
+use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Retry\ExponentialRetryStrategy;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
@@ -65,11 +66,11 @@ test('settlement failures propagate without being treated as handler failures', 
     $handled = 0;
     $consumer = new Consumer(
         $receiver,
-        new HandlerMap([
+        new HandlerInvoker(new HandlerMap([
             TestCommand::class => static function () use (&$handled): void {
                 $handled++;
             },
-        ]),
+        ])),
         new ExponentialRetryStrategy(maximumAttempts: 10),
         new InMemoryFailureStore(),
         $clock,
@@ -143,9 +144,9 @@ test('terminal failure persistence precedes destructive rejection', function ():
     };
     $consumer = new Consumer(
         $transport,
-        new HandlerMap([
+        new HandlerInvoker(new HandlerMap([
             TestCommand::class => static fn() => throw new RuntimeException('handler failed'),
-        ]),
+        ])),
         new ExponentialRetryStrategy(maximumAttempts: 1),
         $failures,
         $clock,
@@ -166,7 +167,7 @@ test('a missing handler is terminal even when retry capacity remains', function 
     $sent = $transport->send(new Envelope(new TestCommand('unmapped')), 'default');
     $consumer = new Consumer(
         $transport,
-        new HandlerMap([]),
+        new HandlerInvoker(new HandlerMap([])),
         new ExponentialRetryStrategy(maximumAttempts: 100),
         $failures,
         $clock,
@@ -217,7 +218,7 @@ test('poison reservations prefer their stable message identity over unsafe provi
     $failures = new InMemoryFailureStore();
     $consumer = new Consumer(
         $receiver,
-        new HandlerMap([]),
+        new HandlerInvoker(new HandlerMap([])),
         new ExponentialRetryStrategy(),
         $failures,
         $clock,
@@ -269,7 +270,7 @@ test('decoded failures without a message stamp normalize unsafe provider receipt
     $failures = new InMemoryFailureStore();
     (new Consumer(
         $receiver,
-        new HandlerMap([]),
+        new HandlerInvoker(new HandlerMap([])),
         new ExponentialRetryStrategy(),
         $failures,
         $clock,

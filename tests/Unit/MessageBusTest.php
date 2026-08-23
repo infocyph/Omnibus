@@ -7,6 +7,7 @@ use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Handler\HandlerMap;
+use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Handler\AmbiguousHandler;
 use Infocyph\Omnibus\MessageBus;
 use Infocyph\Omnibus\Routing\AmbiguousRoute;
@@ -26,7 +27,7 @@ test('message bus dispatches synchronously through an explicit handler map', fun
     ]);
     $bus = new MessageBus(
         new RouteMap(),
-        new TransportRegistry(['sync' => new SyncTransport($handlers)]),
+        new TransportRegistry(['sync' => new SyncTransport(new HandlerInvoker($handlers))]),
     );
 
     $envelope = $bus->dispatch(new TestCommand('ready'));
@@ -47,7 +48,7 @@ test('route and handler maps resolve interface mappings', function (): void {
     ]);
     $bus = new MessageBus(
         new RouteMap(),
-        new TransportRegistry(['sync' => new SyncTransport($handlers)]),
+        new TransportRegistry(['sync' => new SyncTransport(new HandlerInvoker($handlers))]),
     );
 
     expect($bus->dispatch($message)->last(HandledStamp::class)?->result)->toBe('mapped');
@@ -65,9 +66,9 @@ test('explicit envelope delay wins and sync transport refuses positive delay', f
     ));
 
     expect($sent->last(DelayStamp::class)?->seconds)->toBe(5.0)
-        ->and(fn() => (new SyncTransport(new HandlerMap([
+        ->and(fn() => (new SyncTransport(new HandlerInvoker(new HandlerMap([
             TestCommand::class => static fn(): null => null,
-        ])))->send($sent, 'work'))
+        ]))))->send($sent, 'work'))
         ->toThrow(UnsupportedDelay::class);
 });
 

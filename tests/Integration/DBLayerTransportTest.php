@@ -12,6 +12,7 @@ use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Failure\FailedMessage;
 use Infocyph\Omnibus\Failure\FailureRetryClaimUnavailable;
 use Infocyph\Omnibus\Handler\HandlerMap;
+use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerFailureStore;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerTransport;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerWorkflowStore;
@@ -326,7 +327,7 @@ test('poison workflow payloads terminalize by durable message metadata without d
     $connection->update('UPDATE omnibus_messages SET payload = ? WHERE id = ?', ['{broken', $row['id']]);
     $consumer = new Consumer(
         new WorkflowTransport($transport, $coordinator),
-        new HandlerMap([]),
+        new HandlerInvoker(new HandlerMap([])),
         new ExponentialRetryStrategy(),
         new WorkflowFailureStore($failures, $coordinator),
         $clock,

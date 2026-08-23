@@ -28,6 +28,7 @@ Synchronous message bus
 .. code-block:: php
 
    use Infocyph\Omnibus\Envelope\HandledStamp;
+   use Infocyph\Omnibus\Handler\HandlerInvoker;
    use Infocyph\Omnibus\Handler\HandlerMap;
    use Infocyph\Omnibus\MessageBus;
    use Infocyph\Omnibus\Routing\RouteMap;
@@ -38,11 +39,12 @@ Synchronous message bus
        CreateInvoice::class => static fn (CreateInvoice $message): string =>
            $invoiceService->create($message),
    ]);
+   $invoker = new HandlerInvoker($handlers);
 
    $bus = new MessageBus(
        new RouteMap(),
        new TransportRegistry([
-           'sync' => new SyncTransport($handlers),
+           'sync' => new SyncTransport($invoker),
        ]),
    );
 

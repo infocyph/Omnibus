@@ -20,6 +20,7 @@ use Infocyph\Omnibus\Event\QueuedListenerResolver;
 use Infocyph\Omnibus\Failure\FailedMessage;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
 use Infocyph\Omnibus\Handler\HandlerMap;
+use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Integration\Broker\BrokerCapabilities;
 use Infocyph\Omnibus\Integration\CacheLayer\DetachedLeaseAdapter;
 use Infocyph\Omnibus\Integration\SQS\SqsTransport;
@@ -91,11 +92,11 @@ test('consumer task runs one bounded lifecycle independently of a command packag
     $transport->send(new Envelope(new TestCommand('task')), 'work');
     $consumer = new Consumer(
         $transport,
-        new HandlerMap([
+        new HandlerInvoker(new HandlerMap([
             TestCommand::class => static function (TestCommand $message) use (&$handled): void {
                 $handled[] = $message->value;
             },
-        ]),
+        ])),
         new ExponentialRetryStrategy(),
         new InMemoryFailureStore(),
         $clock,

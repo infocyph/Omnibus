@@ -11,6 +11,7 @@ use Infocyph\Omnibus\Event\EventDispatcher;
 use Infocyph\Omnibus\Event\ListenerMap;
 use Infocyph\Omnibus\Failure\FailedMessage;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
+use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerTransport;
 use Infocyph\Omnibus\Integration\DBLayer\QueueSchema;
@@ -87,7 +88,7 @@ $handlers = new HandlerMap([
 ]);
 $bus = new MessageBus(
     new RouteMap(),
-    new TransportRegistry(['sync' => new SyncTransport($handlers)]),
+    new TransportRegistry(['sync' => new SyncTransport(new HandlerInvoker($handlers))]),
 );
 $zeroListeners = new EventDispatcher(new ListenerMap());
 $oneListener = new EventDispatcher(new ListenerMap([
@@ -136,9 +137,9 @@ $durableIterations = min($iterations, 10_000);
 $retryTransport = new InMemoryTransport($clock);
 $retryConsumer = new Consumer(
     $retryTransport,
-    new HandlerMap([
+    new HandlerInvoker(new HandlerMap([
         BenchmarkMessage::class => static fn() => throw new RuntimeException('benchmark'),
-    ]),
+    ])),
     new ExponentialRetryStrategy(maximumAttempts: 2, initialDelaySeconds: 0),
     new InMemoryFailureStore(),
     $clock,

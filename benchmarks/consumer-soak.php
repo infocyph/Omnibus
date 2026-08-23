@@ -6,6 +6,7 @@ use Infocyph\Omnibus\Clock\SystemClock;
 use Infocyph\Omnibus\Consumer\Consumer;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
+use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\Retry\ExponentialRetryStrategy;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
@@ -27,11 +28,11 @@ $transport = new InMemoryTransport($clock);
 $handled = 0;
 $consumer = new Consumer(
     $transport,
-    new HandlerMap([
+    new HandlerInvoker(new HandlerMap([
         SoakMessage::class => static function () use (&$handled): void {
             $handled++;
         },
-    ]),
+    ])),
     new ExponentialRetryStrategy(initialDelaySeconds: 0),
     new InMemoryFailureStore(),
     $clock,

@@ -35,6 +35,7 @@ only when their adapters are constructed.
 
 - Explicit, cached route, handler, listener, codec, transport, and factory maps
 - Direct synchronous handlers and ordered PSR-14 events
+- Ordered handler middleware shared by synchronous and consumer execution
 - In-memory, DBLayer, Redis/Valkey, AMQP, and SQS transport boundaries
 - Bounded consumers, long-running workers, and optional fixed process concurrency
 - Conditional reservation settlement and visibility-based crash recovery
@@ -51,6 +52,7 @@ only when their adapters are constructed.
 
 ```php
 use Infocyph\Omnibus\Envelope\HandledStamp;
+use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\MessageBus;
 use Infocyph\Omnibus\Routing\RouteMap;
@@ -61,11 +63,12 @@ $handlers = new HandlerMap([
     CreateInvoice::class => static fn (CreateInvoice $message): string =>
         $invoiceService->create($message),
 ]);
+$invoker = new HandlerInvoker($handlers);
 
 $bus = new MessageBus(
     new RouteMap(),
     new TransportRegistry([
-        'sync' => new SyncTransport($handlers),
+        'sync' => new SyncTransport($invoker),
     ]),
 );
 
@@ -88,6 +91,17 @@ $routes = new RouteMap([
     ),
 ]);
 ```
+
+## Handler middleware
+
+`HandlerInvoker` applies one ordered, framework-neutral middleware stack to
+both synchronous and consumer handling. Middleware can observe
+`HandlerContext` delivery metadata, short-circuit handling, transform the
+synchronous result, or throw into the consumer's existing retry/failure path.
+It does not intercept routing, serialization, transport I/O, PSR events, or
+worker process lifecycle. See the
+[handler middleware guide](docs/handler-middleware.rst) and
+[2.3 upgrade notes](docs/upgrading.rst).
 
 `Consumer::run()` performs one bounded receive call. `Worker` provides the
 long-running loop for one process. On Unix/Linux, optional `WorkerPool` uses

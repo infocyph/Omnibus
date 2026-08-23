@@ -8,7 +8,8 @@ use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Failure\FailedMessage;
 use Infocyph\Omnibus\Failure\FailureInput;
 use Infocyph\Omnibus\Failure\FailureStore;
-use Infocyph\Omnibus\Handler\HandlerMap;
+use Infocyph\Omnibus\Handler\HandlerContext;
+use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Retry\RetryStrategy;
 use Infocyph\Omnibus\Transport\Receiver;
 use Psr\Clock\ClockInterface;
@@ -17,7 +18,7 @@ final readonly class Consumer
 {
     public function __construct(
         private Receiver $receiver,
-        private HandlerMap $handlers,
+        private HandlerInvoker $invoker,
         private RetryStrategy $retry,
         private FailureStore $failures,
         private ClockInterface $clock,
@@ -50,12 +51,17 @@ final readonly class Consumer
                 continue;
             }
             $envelope = $reservation->envelope();
+            $context = new HandlerContext(
+                queue: $reservation->queue,
+                attempt: $reservation->attempt,
+                asynchronous: true,
+            );
 
             try {
                 $this->scope->run(
                     $envelope,
                     fn(object $message, \Infocyph\Omnibus\Envelope\Envelope $delivery): mixed
-                        => ($this->handlers->for($message))($message, $delivery),
+                        => $this->invoker->invoke($message, $delivery, $context),
                 );
             } catch (\Throwable $exception) {
                 if ($this->retry->shouldRetry($exception, $reservation->attempt)) {
