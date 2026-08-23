@@ -1,6 +1,25 @@
 Upgrading
 =========
 
+2.4.0
+-----
+
+Omnibus 2.4 adds the optional ``WorkerLifecycle`` integration boundary for
+portable heartbeat and cooperative external-stop polling:
+
+.. code-block:: php
+
+   $worker = new Worker(
+       consumer: $consumer,
+       options: $options,
+       lifecycle: $hostLifecycle,
+   );
+
+The new constructor argument is nullable and appended, so existing Worker
+construction remains compatible. ``WorkerOptions``, signal handling, and
+``WorkerPool`` are unchanged. External stop requests take effect at safe worker
+loop boundaries and do not preempt a running handler.
+
 2.3.0
 -----
 

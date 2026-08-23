@@ -14,6 +14,47 @@ message/runtime/absolute-memory/memory-growth recycling limits, and graceful
 SIGTERM/SIGINT handling. Prefetch and concurrency are independent: prefetch
 bounds one receive call; concurrency is the number of worker processes.
 
+Hosts may pass an optional ``WorkerLifecycle`` runtime integration to
+``Worker``. It provides portable heartbeat and external graceful-stop polling
+without requiring PCNTL or Unix signals:
+
+.. code-block:: php
+
+    use Infocyph\Omnibus\Consumer\Worker;
+    use Infocyph\Omnibus\Consumer\WorkerLifecycle;
+
+    final readonly class HostWorkerLifecycle implements WorkerLifecycle
+    {
+        public function heartbeat(): void
+        {
+            // Refresh the host-owned liveness record.
+        }
+
+        public function stopRequested(): bool
+        {
+            return externalStopOrReloadRequested();
+        }
+    }
+
+    $worker = new Worker(
+        consumer: $consumer,
+        lifecycle: new HostWorkerLifecycle(),
+    );
+    $worker->run();
+
+The worker heartbeats at startup, after each completed consumer iteration, and
+after idle sleep. It polls external stop state before the first receive and
+after each batch. Lifecycle exceptions propagate to the host; Omnibus does not
+guess whether losing a control backend should fail open. ``stopRequested()`` is
+cooperative: it stops at the next safe loop boundary and never interrupts a
+handler already executing. Long-running handlers that need mid-execution
+cancellation must use their own cooperative cancellation mechanism.
+
+Signals and ``WorkerLifecycle`` may be used together. On Windows, non-PCNTL, or
+embedded runtimes, lifecycle integration works with signal handling disabled.
+``WorkerOptions`` remains value/configuration policy and does not contain the
+lifecycle object.
+
 ``WorkerPool`` is an optional Unix/Linux fixed-process supervisor. It requires
 ``ext-pcntl`` and ``ext-posix``. The pool keeps the configured concurrency
 stable, replaces cleanly recycled workers, and respawns crashed workers with a
@@ -27,6 +68,9 @@ Do not capture or initialize live network/database resources in the parent and
 then fork them into workers. The child also resets the pool's inherited signal
 handlers before constructing the worker, so worker-level signal policy starts
 from a clean process state.
+Construct any process-bound ``WorkerLifecycle`` implementation in this child
+factory as well. ``WorkerPool`` remains intentionally Unix/PCNTL-specific and
+does not emulate a Windows process pool.
 
 Example::
 
