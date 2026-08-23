@@ -13,6 +13,7 @@ use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Retry\ExponentialRetryStrategy;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
 use Infocyph\Omnibus\Tests\Fixtures\RecordingHandlerMiddleware;
+use Infocyph\Omnibus\Tests\Fixtures\RecordingWorkerLifecycle;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
 
@@ -64,6 +65,200 @@ test('worker respects message bounds without prefetch overshoot', function (): v
             'after:worker',
         ])
         ->and($transport->size('work'))->toBe(1);
+});
+
+test('worker lifecycle heartbeats across iterations and preserves one integration object', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $transport = new InMemoryTransport($clock);
+    $handled = 0;
+    $instances = [];
+    foreach (['one', 'two'] as $value) {
+        $transport->send(new Envelope(new TestCommand($value)), 'work');
+    }
+    $lifecycle = new RecordingWorkerLifecycle(
+        static function (int $heartbeat, RecordingWorkerLifecycle $instance) use (&$instances): void {
+            $instances[$heartbeat] = spl_object_id($instance);
+        },
+    );
+    $worker = new Worker(
+        new Consumer(
+            $transport,
+            new HandlerInvoker(new HandlerMap([
+                TestCommand::class => static function () use (&$handled): void {
+                    $handled++;
+                },
+            ])),
+            new ExponentialRetryStrategy(),
+            new InMemoryFailureStore(),
+            $clock,
+        ),
+        new WorkerOptions(queue: 'work', prefetch: 1, maxMessages: 2, handleSignals: false),
+        $lifecycle,
+    );
+
+    $worker->run();
+
+    expect($handled)->toBe(2)
+        ->and($lifecycle->heartbeats)->toBe(3)
+        ->and($lifecycle->stopChecks)->toBe(5)
+        ->and(array_values(array_unique($instances)))->toBe([spl_object_id($lifecycle)]);
+});
+
+test('external lifecycle stops before the first receive without requiring signals', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $transport = new InMemoryTransport($clock);
+    $transport->send(new Envelope(new TestCommand('pending')), 'work');
+    $lifecycle = new RecordingWorkerLifecycle(
+        onStopRequested: static fn(): bool => true,
+    );
+    $worker = new Worker(
+        new Consumer(
+            $transport,
+            new HandlerInvoker(new HandlerMap([
+                TestCommand::class => static function (): void {},
+            ])),
+            new ExponentialRetryStrategy(),
+            new InMemoryFailureStore(),
+            $clock,
+        ),
+        new WorkerOptions(queue: 'work', handleSignals: false),
+        $lifecycle,
+    );
+
+    $worker->run();
+
+    expect($transport->size('work'))->toBe(1)
+        ->and($lifecycle->heartbeats)->toBe(1)
+        ->and($lifecycle->stopChecks)->toBe(1);
+});
+
+test('external lifecycle stop after a batch prevents the next receive', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $transport = new InMemoryTransport($clock);
+    $handled = 0;
+    foreach (['one', 'two'] as $value) {
+        $transport->send(new Envelope(new TestCommand($value)), 'work');
+    }
+    $lifecycle = new RecordingWorkerLifecycle(
+        onStopRequested: static fn(int $checks): bool => $checks >= 2,
+    );
+    $worker = new Worker(
+        new Consumer(
+            $transport,
+            new HandlerInvoker(new HandlerMap([
+                TestCommand::class => static function () use (&$handled): void {
+                    $handled++;
+                },
+            ])),
+            new ExponentialRetryStrategy(),
+            new InMemoryFailureStore(),
+            $clock,
+        ),
+        new WorkerOptions(queue: 'work', prefetch: 1, handleSignals: false),
+        $lifecycle,
+    );
+
+    $worker->run();
+
+    expect($handled)->toBe(1)
+        ->and($transport->size('work'))->toBe(1)
+        ->and($lifecycle->heartbeats)->toBe(2)
+        ->and($lifecycle->stopChecks)->toBe(2);
+});
+
+test('worker lifecycle exceptions escape unchanged', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $consumer = new Consumer(
+        new InMemoryTransport($clock),
+        new HandlerInvoker(new HandlerMap([])),
+        new ExponentialRetryStrategy(),
+        new InMemoryFailureStore(),
+        $clock,
+    );
+    $heartbeatFailure = new RuntimeException('heartbeat unavailable');
+    $stopFailure = new DomainException('stop backend unavailable');
+    $heartbeat = new RecordingWorkerLifecycle(
+        onHeartbeat: static fn() => throw $heartbeatFailure,
+    );
+    $stop = new RecordingWorkerLifecycle(
+        onStopRequested: static fn() => throw $stopFailure,
+    );
+
+    expect(fn() => (new Worker($consumer, lifecycle: $heartbeat))->run())
+        ->toThrow(RuntimeException::class, 'heartbeat unavailable')
+        ->and(fn() => (new Worker($consumer, lifecycle: $stop))->run())
+        ->toThrow(DomainException::class, 'stop backend unavailable');
+});
+
+test('request stop and memory limits still prevent receiving', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $transport = new InMemoryTransport($clock);
+    $transport->send(new Envelope(new TestCommand('pending')), 'work');
+    $consumer = new Consumer(
+        $transport,
+        new HandlerInvoker(new HandlerMap([TestCommand::class => static function (): void {}])),
+        new ExponentialRetryStrategy(),
+        new InMemoryFailureStore(),
+        $clock,
+    );
+    $requested = new Worker($consumer, new WorkerOptions(queue: 'work', handleSignals: false));
+    $requested->requestStop();
+    $requested->run();
+    $memoryLimited = new Worker(
+        $consumer,
+        new WorkerOptions(queue: 'work', memoryLimitBytes: 1, handleSignals: false),
+    );
+    $memoryLimited->run();
+
+    expect($transport->size('work'))->toBe(1);
+});
+
+test('runtime limits and idle backoff remain cooperative lifecycle boundaries', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $consumer = new Consumer(
+        new InMemoryTransport($clock),
+        new HandlerInvoker(new HandlerMap([])),
+        new ExponentialRetryStrategy(),
+        new InMemoryFailureStore(),
+        $clock,
+    );
+    $runtimeWorker = new Worker(
+        $consumer,
+        new WorkerOptions(
+            idleSleepSeconds: 0.01,
+            maxIdleSleepSeconds: 0.01,
+            idleJitterRatio: 0,
+            maxRuntimeSeconds: 0.005,
+            handleSignals: false,
+        ),
+    );
+    $runtimeStarted = microtime(true);
+    $runtimeWorker->run();
+    $runtimeElapsed = microtime(true) - $runtimeStarted;
+
+    $lifecycle = new RecordingWorkerLifecycle(
+        onStopRequested: static fn(int $checks): bool => $checks >= 5,
+    );
+    $idleWorker = new Worker(
+        $consumer,
+        new WorkerOptions(
+            idleSleepSeconds: 0.002,
+            maxIdleSleepSeconds: 0.004,
+            idleJitterRatio: 0,
+            handleSignals: false,
+        ),
+        $lifecycle,
+    );
+    $idleStarted = microtime(true);
+    $idleWorker->run();
+    $idleElapsed = microtime(true) - $idleStarted;
+
+    expect($runtimeElapsed)->toBeGreaterThanOrEqual(0.005)
+        ->and($runtimeElapsed)->toBeLessThan(0.2)
+        ->and($idleElapsed)->toBeGreaterThanOrEqual(0.005)
+        ->and($idleElapsed)->toBeLessThan(0.2)
+        ->and($lifecycle->heartbeats)->toBe(5)
+        ->and($lifecycle->stopChecks)->toBe(5);
 });
 
 test('worker restores parent signal handlers after execution', function (): void {

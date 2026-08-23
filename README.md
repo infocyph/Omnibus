@@ -38,6 +38,7 @@ only when their adapters are constructed.
 - Ordered handler middleware shared by synchronous and consumer execution
 - In-memory, DBLayer, Redis/Valkey, AMQP, and SQS transport boundaries
 - Bounded consumers, long-running workers, and optional fixed process concurrency
+- Portable cooperative worker heartbeat and external graceful-stop integration
 - Conditional reservation settlement and visibility-based crash recovery
 - Bounded retries, poison-payload capture, and durable failure management
 - Safe versioned JSON envelopes with allow-listed aliases and strict limits
@@ -104,7 +105,10 @@ worker process lifecycle. See the
 [2.3 upgrade notes](docs/upgrading.rst).
 
 `Consumer::run()` performs one bounded receive call. `Worker` provides the
-long-running loop for one process. On Unix/Linux, optional `WorkerPool` uses
+long-running loop for one process. Hosts may supply a framework-neutral
+`WorkerLifecycle` for heartbeat and graceful external-stop polling on any
+platform; SIGTERM/SIGINT support remains available on Unix. On Unix/Linux,
+optional `WorkerPool` uses
 `ext-pcntl` and `ext-posix` for fixed process concurrency; construct PDO,
 Redis/Valkey, AMQP, SQS, and other process-bound resources inside its worker
 factory after fork. External Supervisor, systemd, Docker, or Kubernetes remains

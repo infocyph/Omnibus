@@ -20,6 +20,7 @@ final class Worker
     public function __construct(
         private readonly Consumer $consumer,
         private readonly WorkerOptions $options = new WorkerOptions(),
+        private readonly ?WorkerLifecycle $lifecycle = null,
     ) {}
 
     public function requestStop(): void
@@ -36,6 +37,7 @@ final class Worker
             $startedMemory = memory_get_usage(true);
             $processed = 0;
             $idleSleep = $this->options->idleSleepSeconds;
+            $this->heartbeat();
 
             while (!$this->shouldStop($startedAt, $startedMemory, $processed)) {
                 $limit = $this->options->prefetch;
@@ -49,6 +51,11 @@ final class Worker
                     $this->options->visibilitySeconds,
                 );
                 $processed += $result->received;
+                $this->heartbeat();
+
+                if ($this->externalStopRequested()) {
+                    break;
+                }
 
                 if ($result->received > 0) {
                     $idleSleep = $this->options->idleSleepSeconds;
@@ -59,11 +66,22 @@ final class Worker
                 if ($idleSleep > 0.0) {
                     usleep((int) round($this->jittered($idleSleep) * 1_000_000));
                     $idleSleep = min($this->options->maxIdleSleepSeconds, $idleSleep * 2.0);
+                    $this->heartbeat();
                 }
             }
         } finally {
             $this->restoreSignals();
         }
+    }
+
+    private function externalStopRequested(): bool
+    {
+        return $this->lifecycle?->stopRequested() ?? false;
+    }
+
+    private function heartbeat(): void
+    {
+        $this->lifecycle?->heartbeat();
     }
 
     private function jittered(float $seconds): float
@@ -119,6 +137,9 @@ final class Worker
     private function shouldStop(int $startedAt, int $startedMemory, int $processed): bool
     {
         if ($this->stopRequested) {
+            return true;
+        }
+        if ($this->externalStopRequested()) {
             return true;
         }
         if ($this->options->maxMessages !== null && $processed >= $this->options->maxMessages) {
