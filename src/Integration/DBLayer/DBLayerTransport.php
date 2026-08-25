@@ -24,6 +24,7 @@ use Infocyph\Omnibus\Transport\Transport;
 use Infocyph\Omnibus\Workflow\AtomicWorkflowTransport;
 use Infocyph\Omnibus\Workflow\WorkflowInconsistentDelivery;
 use Infocyph\Omnibus\Workflow\WorkflowItemStatus;
+use Infocyph\Omnibus\Workflow\WorkflowNotFound;
 use Infocyph\Omnibus\Workflow\WorkflowStore;
 use Infocyph\Omnibus\Workflow\WorkflowTransition;
 use Infocyph\UID\ULID;
@@ -35,9 +36,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
 
     private const int SETTLEMENT_BACKOFF_US = 100_000;
 
-    private const int TRANSACTION_ATTEMPTS = 3;
-
-    private const int TRANSACTION_JITTER_US = 50_000;
+    private const int SETTLEMENT_JITTER_US = 50_000;
 
     private string $table;
 
@@ -64,7 +63,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         }
 
         try {
-            $transition = $this->retryTransaction(function (Connection $connection) use (
+            $transition = $this->transaction(function (Connection $connection) use (
                 $reservation,
                 $store,
             ): WorkflowTransition {
@@ -90,7 +89,11 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
             });
         } catch (TransactionException $failure) {
             $cause = $failure->getPrevious();
-            if ($cause instanceof WorkflowInconsistentDelivery || $cause instanceof InvalidReservation) {
+            if (
+                $cause instanceof WorkflowInconsistentDelivery
+                || $cause instanceof WorkflowNotFound
+                || $cause instanceof InvalidReservation
+            ) {
                 throw $cause;
             }
 
@@ -103,19 +106,24 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
     public function receive(string $queue, int $limit = 1, float $visibilitySeconds = 60.0): iterable
     {
         self::validateReceive($queue, $limit, $visibilitySeconds);
+        $effectiveLimit = $this->connection->safeBatchSize(
+            parametersPerRow: 1,
+            fixedBindings: 2,
+            requested: $limit,
+        );
         $now = $this->microseconds();
         $reservedUntil = Time::add($now, $visibilitySeconds);
         $token = ULID::generateMonotonic();
 
         /** @var list<array{id:mixed,message_id:mixed,payload:mixed,attempts:mixed}> $rows */
-        $rows = $this->retryTransaction(function (Connection $connection) use (
+        $rows = $this->transaction(function (Connection $connection) use (
             $queue,
-            $limit,
+            $effectiveLimit,
             $now,
             $reservedUntil,
             $token,
         ): array {
-            $rows = $this->selectReservableRows($connection, $queue, $limit, $now);
+            $rows = $this->selectReservableRows($connection, $queue, $effectiveLimit, $now);
             if ($rows === []) {
                 return [];
             }
@@ -313,6 +321,8 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
     {
         $driver = $this->connection->getDriverName();
 
+        // Receipt-guarded settlement changes are safe to replay: only the
+        // currently active reservation can be deleted or released once.
         return $this->connection->withQueryRetryPolicy(
             static function (\Throwable $failure, int $attempt, string $sql, array $bindings) use ($driver): bool {
                 unset($sql, $bindings);
@@ -323,40 +333,12 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
                     return false;
                 }
 
-                usleep(self::SETTLEMENT_BACKOFF_US * $attempt + random_int(0, self::TRANSACTION_JITTER_US));
+                usleep(self::SETTLEMENT_BACKOFF_US * $attempt + random_int(0, self::SETTLEMENT_JITTER_US));
 
                 return true;
             },
             $operation,
         );
-    }
-
-    /**
-     * @template TResult
-     * @param callable(Connection):TResult $operation
-     * @return TResult
-     */
-    private function retryTransaction(callable $operation): mixed
-    {
-        for ($attempt = 1; $attempt <= self::TRANSACTION_ATTEMPTS; $attempt++) {
-            try {
-                return $this->connection->transaction($operation, 3);
-            } catch (TransactionException $failure) {
-                if (
-                    $attempt >= self::TRANSACTION_ATTEMPTS
-                    || !DriverProfile::causedByRetryableTransactionError(
-                        $this->connection->getDriverName(),
-                        $failure,
-                    )
-                ) {
-                    throw $failure;
-                }
-
-                usleep(self::SETTLEMENT_BACKOFF_US * $attempt + random_int(0, self::TRANSACTION_JITTER_US));
-            }
-        }
-
-        throw new \LogicException('DBLayer transaction retry exhausted without a result.');
     }
 
     /** @return list<array<string, mixed>> */
@@ -375,5 +357,15 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         };
 
         return array_values($connection->select($sql, $bindings));
+    }
+
+    /**
+     * @template TResult
+     * @param callable(Connection):TResult $operation
+     * @return TResult
+     */
+    private function transaction(callable $operation): mixed
+    {
+        return $this->connection->transaction($operation, 3);
     }
 }

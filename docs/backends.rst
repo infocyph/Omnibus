@@ -35,13 +35,20 @@ No durable backend initializes unless it is explicitly constructed.
 DBLayer
 -------
 
-Install DBLayer 4.1 (``infocyph/dblayer:^4.1``) and execute every statement
+Install DBLayer 5.x (``infocyph/dblayer:^5.0``) and execute every statement
 returned by ``QueueSchema::statements($driver)`` in an application migration.
 Supported canonical drivers are ``mysql``, ``mariadb``, ``pgsql``, ``mssql``,
 and ``sqlite``. MySQL and MariaDB are independent DBLayer drivers even though
 they currently share an Omnibus schema family. The schema creates message,
 failure, workflow, and workflow-item tables with indexes, state checks, and a
 workflow-item foreign key.
+
+DBLayer is optional: applications that do not construct a database adapter do
+not need to install it. DBLayer owns driver behavior, database execution,
+effective bind sizing, transaction retries, and after-commit callbacks.
+Omnibus owns message reservations, workflow and failure state, conditional
+settlement, and delivery guarantees. Database adapters remain explicit SQL
+coordination code; they do not use DBLayer repositories or query caching.
 
 The failure table includes the ``failed`` → ``retrying`` → ``sent`` claim
 lifecycle. Existing pre-release schemas must be recreated or explicitly
@@ -66,13 +73,21 @@ reservation receipt contains both row ID and token; acknowledge, reject, and
 release are conditional on the current token. An expired stale worker cannot
 settle a newer reservation.
 
+Receive and batch-workflow claim limits are maxima. Before selecting rows,
+Omnibus asks DBLayer 5 for a safe batch size that includes the fixed reservation
+or claim bindings. The selected rows and their conditional update remain one
+transaction; Omnibus does not select an oversized set and split its ownership
+update afterward. Workflow multi-row inserts use the same effective bind
+budget.
+
 After a worker crash, allow ``reserved_until`` to expire. A later receive
 reclaims the row and increments the attempt. Do not manually clear receipts
 while workers are active.
 
 ``AfterCommitDispatcher`` registers dispatch through DBLayer's
 ``Connection::afterCommit()``. It runs immediately outside a transaction, after
-the outermost successful commit inside a transaction, and never after rollback.
+the outermost successful commit inside a transaction, preserves callback order,
+and never runs callbacks registered in rolled-back scopes.
 
 Redis and Valkey
 ----------------

@@ -193,6 +193,8 @@ test('durable lifecycle runs on each configured service database', function (str
         foreach (array_reverse($tables) as $table) {
             $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
         }
+        $connection->resetRuntimeStateForReuse();
+        $connection->disconnect();
     }
 })->with(['mysql', 'mariadb', 'pgsql', 'mssql']);
 
@@ -280,6 +282,8 @@ test('mutation decisions remain writer-affine with a deliberately lagging replic
         foreach (array_reverse($tables) as $table) {
             $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
         }
+        $connection->resetRuntimeStateForReuse();
+        $connection->disconnect();
     }
 })->with(['mysql', 'mariadb', 'pgsql']);
 
@@ -374,5 +378,9 @@ test('workflow claims and terminal transitions remain coherent across service co
         foreach (array_reverse($tables) as $table) {
             $first->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
         }
+        $first->resetRuntimeStateForReuse();
+        $second->resetRuntimeStateForReuse();
+        $first->disconnect();
+        $second->disconnect();
     }
 })->with(['mysql', 'mariadb', 'pgsql', 'mssql']);

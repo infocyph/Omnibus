@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\Exceptions\TransactionException;
 use Infocyph\Omnibus\Clock\SystemClock;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerTransport;
@@ -69,6 +70,7 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
     $configuration = [
         'driver' => 'sqlite',
         'database' => $database,
+        'options' => [PDO::ATTR_TIMEOUT => 5],
     ];
     $children = [];
 
@@ -112,9 +114,20 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
                 );
                 $handled = [];
                 $emptyPasses = 0;
+                $contentionFailures = 0;
 
                 while ($emptyPasses < 5) {
-                    $reservations = [...$workerTransport->receive('parallel', 4, 10)];
+                    try {
+                        $reservations = [...$workerTransport->receive('parallel', 4, 10)];
+                    } catch (TransactionException $failure) {
+                        $contentionFailures++;
+                        if ($contentionFailures > 100) {
+                            throw $failure;
+                        }
+                        usleep(random_int(1_000, 10_000));
+
+                        continue;
+                    }
                     if ($reservations === []) {
                         $emptyPasses++;
                         usleep(10_000);
@@ -134,7 +147,10 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
                 }
 
                 $workerConnection->disconnect();
-                file_put_contents($report, json_encode(['handled' => $handled], JSON_THROW_ON_ERROR));
+                file_put_contents($report, json_encode([
+                    'handled' => $handled,
+                    'contention_failures' => $contentionFailures,
+                ], JSON_THROW_ON_ERROR));
                 omnibusTerminateParallelSQLiteChild(15);
             } catch (Throwable $failure) {
                 file_put_contents(
@@ -171,6 +187,7 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
         $children = [];
 
         $handled = [];
+        $contentionFailures = 0;
         foreach ($reports as $report) {
             $decoded = json_decode((string) file_get_contents($report), true, flags: JSON_THROW_ON_ERROR);
             if (!is_array($decoded) || isset($decoded['error']) || !is_array($decoded['handled'] ?? null)) {
@@ -182,6 +199,7 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
                 }
                 $handled[] = $value;
             }
+            $contentionFailures += (int) ($decoded['contention_failures'] ?? 0);
         }
 
         sort($expected);
@@ -195,7 +213,8 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
 
         expect($handled)->toBe($expected)
             ->and(array_unique($handled))->toHaveCount(count($expected))
-            ->and($verificationTransport->size('parallel'))->toBe(0);
+            ->and($verificationTransport->size('parallel'))->toBe(0)
+            ->and($contentionFailures)->toBeLessThanOrEqual(200);
 
         $verificationConnection->disconnect();
     } finally {

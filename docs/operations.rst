@@ -127,7 +127,7 @@ The in-memory transport is process-local and therefore does not become shared
 by using ``WorkerPool``. Parallel workers require a durable/shared transport
 such as DBLayer, Redis/Valkey, AMQP or SQS.
 
-DBLayer integrations are tested against DBLayer 4.1. MySQL, MariaDB,
+DBLayer integrations are tested against DBLayer 5.x. MySQL, MariaDB,
 PostgreSQL, SQLite and Microsoft SQL Server use their own DBLayer driver paths;
 Omnibus keeps vendor-specific claim/locking syntax inside the DBLayer adapter
 rather than exposing database knobs through the worker API. SQLite parallel
@@ -135,6 +135,14 @@ consumers rely on DBLayer-owned transaction semantics and writer acquisition;
 queue claim and atomic workflow-settlement transactions use DBLayer retries to
 absorb short writer contention. Keep these transactions short and keep handler
 execution outside reservation transactions.
+
+DBLayer is the sole owner of database transaction replay. Omnibus does not wrap
+its bounded transaction attempts in a second retry loop. The isolated
+acknowledge/reject and release statements retain query-level retry because their
+receipt predicates make replay conditional: once ownership changes, the same
+receipt cannot settle the row again. Receive and workflow claim limits may be
+capped below the requested maximum to keep selection plus ownership update
+atomic under DBLayer's effective bind limit.
 
 Set visibility longer than ordinary handler execution. The cooperative
 ``DeadlineExecutionScope`` adds ``CancellationStamp`` and checks the deadline

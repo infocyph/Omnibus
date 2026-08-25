@@ -31,6 +31,14 @@ Requirements:
 DBLayer, CacheLayer, Redis/Valkey clients, and broker SDKs are optional and load
 only when their adapters are constructed.
 
+Database integrations are tested against DBLayer 5.x. DBLayer owns database
+execution, driver behavior, effective bind limits, transaction retries, and
+after-commit callback lifecycle. Omnibus owns reservations, workflows,
+failure-state transitions, and delivery guarantees. Queue receive and workflow
+claim limits remain caller-facing maxima; the adapters may return fewer rows so
+one atomic reservation or claim stays within the active connection's bind
+budget.
+
 ## Highlights
 
 - Explicit, cached route, handler, listener, codec, transport, and factory maps

@@ -1,6 +1,34 @@
 Upgrading
 =========
 
+2.5.0
+-----
+
+DBLayer database integrations now use DBLayer 5.x as their supported and tested
+baseline. DBLayer remains optional; applications that do not construct a
+DBLayer adapter have no new dependency. Applications using database queues,
+workflows, failure storage, or after-commit dispatch should update with:
+
+.. code-block:: console
+
+   composer require infocyph/dblayer:^5.0
+
+DBLayer is now the sole owner of transaction retry. Omnibus no longer wraps a
+three-attempt DBLayer transaction in a second retry loop, preventing a configured
+three attempts from becoming as many as nine callback executions. Conditional,
+single-statement acknowledgement/reject and release query retries remain
+separate from transaction retry.
+
+Queue ``receive()`` and workflow ``claimPending()`` still accept limits up to
+1,000, but these values are maxima. The DBLayer adapters cap the row selection
+before the atomic ownership update according to DBLayer 5's effective bind
+limit. A call may therefore return fewer rows on a deliberately restricted
+connection. Workflow multi-row insertion uses the same adaptive bind sizing.
+
+No application-level migration is expected for ``MessageBus``, ``Transport``,
+``WorkflowStore``, ``FailureStore``, ``Consumer``, or ``Worker``. Existing
+database schemas and driver-specific locking behavior are unchanged.
+
 2.4.0
 -----
 
