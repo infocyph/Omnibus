@@ -27,10 +27,11 @@ The Omnibus suite covers:
 * acknowledgement, retry, terminal failure, poison payload, and settlement
   ambiguity;
 * stale receipt rejection and visibility reclaim;
-* MySQL, PostgreSQL, and SQLite schema generation;
-* live MySQL/PostgreSQL lifecycle when service credentials are available;
+* MySQL, MariaDB, PostgreSQL, SQL Server, and SQLite schema generation;
+* live MySQL/MariaDB/PostgreSQL/SQL Server lifecycle when service credentials
+  are available;
 * multi-connection workflow claim, stale ownership, duplicate terminal, and
-  aggregate completion behavior on live MySQL/PostgreSQL;
+  aggregate completion behavior on each live service database;
 * writer-affinity behavior with a deliberately lagging DBLayer read database;
   the dedicated ``replica-affinity`` CI job configures this exceptional topology,
   while the check remains opt-in and skips in the normal suite;
@@ -42,7 +43,13 @@ The Omnibus suite covers:
   1/100/101/1000 creation, cancellation races, terminal-state non-regression,
   and idempotent lifecycle events;
 * telemetry success and exporter-failure isolation;
-* after-commit, after-response, scheduling, and broadcasting boundaries.
+* after-commit, after-response, scheduling, and broadcasting boundaries;
+* deliberately low DBLayer ``max_params`` coverage for atomic queue
+  reservations, workflow claims, and workflow inserts;
+* SQLite lock contention proving DBLayer transaction attempts are not
+  multiplied, plus receipt-guarded acknowledge and release query retries;
+* nested commit/rollback, callback ordering, database/non-database dispatch,
+  and post-commit failure behavior.
 
 Commands
 --------

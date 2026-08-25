@@ -5,11 +5,15 @@ declare(strict_types=1);
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\Omnibus\Integration\DBLayer\AfterCommitDispatcher;
+use Infocyph\Omnibus\Integration\DBLayer\DBLayerTransport;
+use Infocyph\Omnibus\Integration\DBLayer\QueueSchema;
 use Infocyph\Omnibus\MessageBus;
 use Infocyph\Omnibus\Routing\Route;
 use Infocyph\Omnibus\Routing\RouteMap;
 use Infocyph\Omnibus\Testing\RecordingSender;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
+use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
+use Infocyph\Omnibus\Tests\Fixtures\TestSerializer;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Transport\Sender;
 use Infocyph\Omnibus\Transport\TransportRegistry;
@@ -85,6 +89,84 @@ test('DBLayer integration dispatches immediately outside transactions and promot
     });
 
     expect($sender->count())->toBe(2);
+});
+
+test('DBLayer integration preserves callback order across nested commits', function (): void {
+    $connection = omnibusSqliteConnection();
+    $sender = new RecordingSender();
+    $dispatcher = new AfterCommitDispatcher(
+        $connection,
+        new MessageBus(
+            new RouteMap([TestCommand::class => new Route('recording')]),
+            new TransportRegistry(['recording' => $sender]),
+        ),
+    );
+
+    $connection->transaction(function () use ($connection, $dispatcher): void {
+        $dispatcher->dispatch(new TestCommand('outer-before'));
+        $connection->transaction(function () use ($dispatcher): void {
+            $dispatcher->dispatch(new TestCommand('nested-first'));
+            $dispatcher->dispatch(new TestCommand('nested-second'));
+        });
+        $dispatcher->dispatch(new TestCommand('outer-after'));
+    });
+
+    $values = array_map(
+        static fn(array $entry): string => $entry['envelope']->message->value,
+        $sender->sent(),
+    );
+    expect($values)->toBe(['outer-before', 'nested-first', 'nested-second', 'outer-after']);
+});
+
+test('after-commit dispatch integrates with database and non-database transports', function (): void {
+    $connection = omnibusSqliteConnection();
+    foreach (QueueSchema::statements('sqlite') as $statement) {
+        $connection->statement($statement);
+    }
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $databaseTransport = new DBLayerTransport($connection, TestSerializer::make(), $clock);
+    $recording = new RecordingSender();
+    $databaseDispatcher = new AfterCommitDispatcher(
+        $connection,
+        new MessageBus(
+            new RouteMap([TestCommand::class => new Route('database', 'database')]),
+            new TransportRegistry(['database' => $databaseTransport]),
+        ),
+    );
+    $recordingDispatcher = new AfterCommitDispatcher(
+        $connection,
+        new MessageBus(
+            new RouteMap([TestCommand::class => new Route('recording')]),
+            new TransportRegistry(['recording' => $recording]),
+        ),
+    );
+
+    try {
+        $connection->transaction(function () use (
+            $connection,
+            $databaseDispatcher,
+            $recordingDispatcher,
+        ): void {
+            $connection->transaction(function () use ($databaseDispatcher, $recordingDispatcher): void {
+                $databaseDispatcher->dispatch(new TestCommand('rolled-back database'));
+                $recordingDispatcher->dispatch(new TestCommand('rolled-back recording'));
+            });
+            throw new RuntimeException('outer rollback');
+        });
+    } catch (RuntimeException) {
+    }
+
+    expect($databaseTransport->size('database'))->toBe(0)
+        ->and($recording->count())->toBe(0);
+
+    $connection->transaction(function () use ($databaseDispatcher, $recordingDispatcher): void {
+        $databaseDispatcher->dispatch(new TestCommand('database one'));
+        $recordingDispatcher->dispatch(new TestCommand('recording'));
+        $databaseDispatcher->dispatch(new TestCommand('database two'));
+    });
+
+    expect($databaseTransport->size('database'))->toBe(2)
+        ->and($recording->count())->toBe(1);
 });
 
 test('DBLayer integration discards nested rollback callbacks and cannot roll back after-commit failure', function (): void {

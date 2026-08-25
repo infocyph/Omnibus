@@ -36,9 +36,17 @@ worker factory after fork.
 DBLayer integration
 -------------------
 
-The database adapters target DBLayer 4 and use an existing ``Connection``. Migrations execute
-``QueueSchema`` statements outside Omnibus runtime paths. Dispatch-after-commit
-uses ``AfterCommitDispatcher`` and the connection's transaction callbacks.
+The optional database adapters target DBLayer 5.x and use an existing
+``Connection``. Migrations execute ``QueueSchema`` statements outside Omnibus
+runtime paths. DBLayer owns driver behavior, bind sizing, database execution,
+transaction retry, and after-commit callback lifecycle. Omnibus owns message
+reservations, workflow/failure transitions, and delivery guarantees.
+
+Queue receive and workflow claim operations derive an effective batch from the
+connection before selecting rows, so their dynamic-ID update remains one atomic
+operation within DBLayer's bind budget. Mutation-dependent reads remain
+writer-affine and coordination queries are not cached. Dispatch-after-commit
+uses only ``AfterCommitDispatcher`` and the connection's transaction callbacks.
 
 CacheLayer integration
 ----------------------

@@ -11,6 +11,8 @@ Performance comes from explicit construction and bounded work:
 * dispatch performs no scanning or reflection discovery;
 * clocks are read once per logical timestamp calculation;
 * in-memory, database, Redis, and broker receives are bounded;
+* DBLayer 5 caps dynamic reservation, workflow-claim, and workflow-insert
+  batches to the active connection's effective bind budget;
 * optional policies and telemetry are decorators, absent from unselected paths;
 * durable schemas and maps are prepared before request/consumer work.
 
@@ -43,6 +45,12 @@ queue drains without duplicate settlement.
 while injecting partial dispatch failure, claim expiry, handled redelivery,
 duplicate settlement, and terminal-listener failure. It reports reconciliation
 attempts/errors, duplicate handler executions, and terminal regressions.
+
+The DBLayer 5 baseline removes Omnibus's former outer transaction retry loop.
+Contention results should therefore show no transaction callback amplification:
+a three-attempt DBLayer transaction executes at most three times, not nine.
+This ownership change does not weaken receipt, claim-token, or workflow-state
+guards.
 
 Database contention is an operational benchmark: test 2/4/8 consumers against
 10k and 100k+ mixed ready/delayed/reserved rows on the intended MySQL, MariaDB,

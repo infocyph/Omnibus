@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\Omnibus\Integration\DBLayer;
 
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Exceptions\TransactionException;
 use Infocyph\Omnibus\Clock\SystemClock;
 use Infocyph\Omnibus\Envelope\BatchStamp;
 use Infocyph\Omnibus\Envelope\ChainStamp;
@@ -81,15 +82,25 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         float $leaseSeconds = 30.0,
     ): array {
         self::validateClaim($limit, $leaseSeconds);
-        $claims = $this->connection->transaction(
-            fn(Connection $connection): array => $this->claimPendingWithinTransaction(
-                $connection,
-                $id,
-                $limit,
-                $leaseSeconds,
-            ),
-            3,
-        );
+
+        try {
+            $claims = $this->connection->transaction(
+                fn(Connection $connection): array => $this->claimPendingWithinTransaction(
+                    $connection,
+                    $id,
+                    $limit,
+                    $leaseSeconds,
+                ),
+                3,
+            );
+        } catch (TransactionException $failure) {
+            $cause = $failure->getPrevious();
+            if ($cause instanceof WorkflowNotFound) {
+                throw $cause;
+            }
+
+            throw $failure;
+        }
         if (!is_array($claims) || !array_is_list($claims)) {
             throw new \LogicException('DBLayer returned invalid workflow claims.');
         }
@@ -379,7 +390,12 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
             "UPDATE {$this->items} SET item_status = 'pending', dispatch_claim_token = NULL, dispatch_claim_until = NULL WHERE workflow_id = ? AND item_status = 'dispatching' AND dispatch_claim_until <= ?",
             [$id, $now],
         );
-        $rows = $this->pendingClaimRows($connection, $id, $state->kind, $limit);
+        $effectiveLimit = $connection->safeBatchSize(
+            parametersPerRow: 1,
+            fixedBindings: 3,
+            requested: $limit,
+        );
+        $rows = $this->pendingClaimRows($connection, $id, $state->kind, $effectiveLimit);
         if ($rows === []) {
             return [];
         }
@@ -495,7 +511,11 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
      */
     private function insertItems(Connection $connection, array $rows): void
     {
-        foreach (array_chunk($rows, 100) as $chunk) {
+        $chunkSize = $connection->safeBatchSize(
+            parametersPerRow: count($rows[0]),
+            requested: 100,
+        );
+        foreach (array_chunk($rows, $chunkSize) as $chunk) {
             $builder = $connection->table($this->itemTable);
             $compiled = $connection->getCompiler()->compile($builder->toInsertPayload($chunk));
             if (!$connection->insert($compiled->sql, $compiled->bindings)) {
@@ -574,7 +594,16 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
     /** @param callable(Connection):WorkflowTransition $operation */
     private function stateTransaction(callable $operation): WorkflowTransition
     {
-        $transition = $this->connection->transaction($operation, 3);
+        try {
+            $transition = $this->connection->transaction($operation, 3);
+        } catch (TransactionException $failure) {
+            $cause = $failure->getPrevious();
+            if ($cause instanceof WorkflowNotFound || $cause instanceof WorkflowInconsistentDelivery) {
+                throw $cause;
+            }
+
+            throw $failure;
+        }
         if (!$transition instanceof WorkflowTransition) {
             throw new \LogicException('DBLayer returned an invalid workflow transaction result.');
         }
