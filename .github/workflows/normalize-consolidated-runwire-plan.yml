@@ -1,0 +1,55 @@
+name: Normalize Consolidated Omnibus Plan
+
+on:
+  push:
+    branches:
+      - docs/omnibus-2.6-foundation-hardening-plan
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: docs/omnibus-2.6-foundation-hardening-plan
+      - name: Normalize canonical plan
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('docs/plans/omnibus-2.6-foundation-integration-hardening-plan.md')
+          text = path.read_text()
+
+          text = text.replace('a Runwire 1.0 owns reusable low-level OS process mechanics', 'Runwire 1.0 owns reusable low-level OS process mechanics')
+          text = text.replace('future implementation detail\n Runwire', 'target generic process layer\n Runwire 1.0')
+
+          marker = '# Runwire 1.0 process-supervision integration'
+          if marker in text:
+              before, tail = text.split(marker, 1)
+              tail = tail.strip()
+              tail = re.sub(r'(?m)^#\s+(\d+)\.\s+', lambda m: f'### 27.{m.group(1)} ', tail)
+              tail = tail.replace('The parent Omnibus plan', 'Earlier sections of this Omnibus plan')
+              tail = tail.replace("The parent plan's", "This plan's")
+              tail = tail.replace('the parent plan', 'earlier sections of this plan')
+              tail = tail.replace('parent-plan', 'earlier-plan')
+              tail = tail.replace('Completion gate addendum', 'Runwire completion gate')
+              tail = tail.replace('This addendum', 'This section').replace('the addendum', 'this section')
+              tail = tail.replace('All other earlier-plan completion criteria remain unchanged.', 'All other Omnibus 2.6 completion criteria above remain unchanged.')
+              text = before.rstrip() + '\n\n---\n\n## 27. Runwire 1.0 process-supervision integration\n\n' + tail + '\n'
+
+          path.write_text(text)
+          Path('.github/workflows/normalize-consolidated-runwire-plan.yml').unlink()
+          PY
+      - name: Commit normalization
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs: normalize consolidated Omnibus 2.6 plan"
+          git push origin HEAD:docs/omnibus-2.6-foundation-hardening-plan
