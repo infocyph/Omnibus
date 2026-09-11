@@ -927,8 +927,8 @@ current implementation
  pcntl / posix
         │
         ▼
-future implementation detail
- Runwire
+target generic process layer
+ Runwire 1.0
         │
         ▼
 OS
@@ -936,15 +936,17 @@ OS
 
 The important boundary is:
 
-> Foundation owns application/runtime policy; Omnibus owns messaging and queue-worker policy; a Runwire 1.0 owns reusable low-level OS process mechanics.
+> Foundation owns application/runtime policy; Omnibus owns messaging and queue-worker policy; Runwire 1.0 owns reusable low-level OS process mechanics.
 
 That keeps each library focused, removes duplicate supervision logic from Foundation, and avoids turning Omnibus into a generic process-execution or security-sandbox package.
 
 ---
 
-# Runwire 1.0 process-supervision integration
+---
 
-# 1. Revised ownership
+## 27. Runwire 1.0 process-supervision integration
+
+### 27.1 Revised ownership
 
 ## Omnibus owns
 
@@ -988,7 +990,7 @@ Hard invariant:
 
 ---
 
-# 2. Current collision to remove
+### 27.2 Current collision to remove
 
 Current `Omnibus\Consumer\WorkerPool` directly owns generic Unix process mechanics including:
 
@@ -1018,7 +1020,7 @@ The goal is to remove that duplication without moving queue semantics into Runwi
 
 ---
 
-# 3. Preserve `WorkerPool` as Omnibus public API/facade
+### 27.3 Preserve `WorkerPool` as Omnibus public API/facade
 
 Do not force Omnibus users to understand Runwire supervision just to consume messages.
 
@@ -1048,7 +1050,7 @@ Exact internal Runwire mapping must use the final Runwire 1.0 public API rather 
 
 ---
 
-# 4. Dependency decision
+### 27.4 Dependency decision
 
 Recommended for Omnibus 2.6:
 
@@ -1083,7 +1085,7 @@ Development branches may temporarily target Runwire development state; final Omn
 
 ---
 
-# 5. `Worker` remains Omnibus-owned
+### 27.5 `Worker` remains Omnibus-owned
 
 Do not move `Omnibus\Consumer\Worker` into Runwire.
 
@@ -1117,7 +1119,7 @@ Runwire observes process outcome
 
 ---
 
-# 6. Clean exit vs crash semantics
+### 27.6 Clean exit vs crash semantics
 
 Omnibus must communicate enough intent to Runwire so queue-worker recycling is not misclassified as a crash.
 
@@ -1143,9 +1145,9 @@ Avoid encoding a large queue-specific reason protocol into Runwire unless a smal
 
 ---
 
-# 7. Lifecycle integration
+### 27.7 Lifecycle integration
 
-The parent Omnibus plan proposed adding `WorkerLifecycle` polling to `WorkerPool` and replacing Foundation's SIGALRM wrapper.
+Earlier sections of this Omnibus plan proposed adding `WorkerLifecycle` polling to `WorkerPool` and replacing Foundation's SIGALRM wrapper.
 
 With Runwire, keep the desired behavior but move the **generic ticking/wakeup/supervision mechanism** lower.
 
@@ -1174,9 +1176,9 @@ Foundation should no longer need `SIGALRM` around `WorkerPool::run()`.
 
 ---
 
-# 8. Signal/wait hardening moves to Runwire
+### 27.8 Signal/wait hardening moves to Runwire
 
-The parent plan's detailed requirements for:
+This plan's detailed requirements for:
 
 - minimal signal handlers;
 - restoring handlers;
@@ -1202,7 +1204,7 @@ Runwire owns exhaustive raw signal/wait/reap tests.
 
 ---
 
-# 9. Post-fork resource rule remains mandatory
+### 27.9 Post-fork resource rule remains mandatory
 
 Runwire delegation does not change the existing Omnibus resource-lifetime rule.
 
@@ -1235,7 +1237,7 @@ Listeners intentionally inherited by Runwire web workers are unrelated to Omnibu
 
 ---
 
-# 10. DBLayer semantics remain unchanged
+### 27.10 DBLayer semantics remain unchanged
 
 Do not use the Runwire refactor as a reason to change Omnibus's exact DBLayer `Connection` semantics.
 
@@ -1250,7 +1252,7 @@ Runwire does not create or resolve DB connections.
 
 ---
 
-# 11. No Runwire networking leakage into Omnibus messaging
+### 27.11 No Runwire networking leakage into Omnibus messaging
 
 Runwire also owns TCP/server/event-loop mechanics, but Omnibus should not become coupled to them merely because it uses Runwire process supervision.
 
@@ -1262,7 +1264,7 @@ Runwire is used here for **generic process supervision**, not as the Omnibus mes
 
 ---
 
-# 12. Process execution remains outside Omnibus
+### 27.12 Process execution remains outside Omnibus
 
 Runwire's structured ProcessRunner does not make arbitrary process execution an Omnibus concern.
 
@@ -1287,7 +1289,7 @@ Omnibus message
 
 ---
 
-# 13. Foundation migration revision
+### 27.13 Foundation migration revision
 
 After Runwire-aligned Omnibus 2.6 is released, Foundation Point 26.8 should:
 
@@ -1304,7 +1306,7 @@ Foundation should not call raw `pcntl_*` or `posix_kill()` to supervise an Omnib
 
 ---
 
-# 14. Omnibus tests to add/update
+### 27.14 Omnibus tests to add/update
 
 Add integration/contract coverage for:
 
@@ -1327,7 +1329,7 @@ Raw EINTR/ECHILD/signal restoration/PID bookkeeping exhaustive tests belong prim
 
 ---
 
-# 15. Benchmark revision
+### 27.15 Benchmark revision
 
 Keep Omnibus queue benchmarks separate from Runwire process benchmarks.
 
@@ -1357,7 +1359,7 @@ No benchmark-only bypass of Omnibus Consumer/settlement behavior.
 
 ---
 
-# 16. Documentation revision
+### 27.16 Documentation revision
 
 Update Omnibus 2.6 docs to state:
 
@@ -1373,7 +1375,7 @@ Replace provisional `ProcessGuard` / “future process runtime” terminology in
 
 ---
 
-# 17. Revised implementation order
+### 27.17 Revised implementation order
 
 For process-related parts of Omnibus 2.6, use:
 
@@ -1394,7 +1396,7 @@ Do not block non-process Omnibus work on Runwire internals that are irrelevant t
 
 ---
 
-# 18. Revised process completion gate
+### 27.18 Revised process completion gate
 
 The process/supervision part of Omnibus 2.6 closes only when:
 
@@ -1413,7 +1415,7 @@ The process/supervision part of Omnibus 2.6 closes only when:
 
 ---
 
-# 19. Parent-plan interpretation
+### 27.19 Parent-plan interpretation
 
 Where `omnibus-2.6-foundation-integration-hardening-plan.md` says:
 
@@ -1427,6 +1429,6 @@ read:
 Runwire 1.0
 ```
 
-Where the parent plan proposes improving Omnibus's internal raw `pcntl` supervisor, interpret those behaviors as **required end-state semantics**, but implement generic OS-process mechanics in Runwire and test Omnibus's facade/integration behavior above it.
+Where earlier sections of this plan proposes improving Omnibus's internal raw `pcntl` supervisor, interpret those behaviors as **required end-state semantics**, but implement generic OS-process mechanics in Runwire and test Omnibus's facade/integration behavior above it.
 
-All queue/persistence/CacheLayer/DBLayer portions of the parent plan remain unchanged.
+All queue/persistence/CacheLayer/DBLayer portions of earlier sections of this plan remain unchanged.
