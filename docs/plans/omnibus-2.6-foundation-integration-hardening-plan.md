@@ -10,10 +10,37 @@ Baseline:
 - UID: `^5.0`
 - CacheLayer reference integration: raise to `^3.4`
 - DBLayer reference integration: raise to `^5.1`
+- Runwire process-supervision dependency: `^1.0`
 - PHPForge: keep `dev-main@dev`
 - Foundation integration target: `infocyph/foundation` Point **26.8**
 
+Runwire **1.0 is released**. The Runwire integration in Section 27 is therefore the
+authoritative process-supervision path for Omnibus 2.6. Earlier sections that
+describe raw `pcntl`/`posix` implementation details define required end-state
+semantics only; they must **not** be implemented as a second Omnibus supervisor.
+If an earlier section conflicts with Section 27, Section 27 wins.
+
 This release is an additive hardening and ownership-alignment pass. Omnibus remains a framework-agnostic messaging/event/queue library. Foundation must consume Omnibus-owned generic messaging/runtime mechanics rather than maintaining Foundation-only substitutes.
+
+## Plan tracker
+
+| Batch | Scope | Status | Completion evidence |
+|---|---|---|---|
+| 0 | Plan reconciliation and ownership freeze | **COMPLETE** | Runwire 1.0 verified; direct-`pcntl` and Runwire tracks reconciled; Foundation/Omnibus/Runwire boundaries frozen. |
+| 1 | Dependency alignment | OPEN | Composer uses CacheLayer `^3.4`, DBLayer `^5.1`, Runwire `^1.0`; suggest/docs/version assertions aligned. |
+| 2 | `WorkerPool` Runwire facade | OPEN | Omnibus queue-facing API delegates generic process supervision to Runwire `Supervisor`/`WorkerGroup`; no raw supervisor fallback remains. |
+| 3 | Lifecycle, stop and recycle semantics | OPEN | Parent lifecycle polling uses the Runwire loop; stop-before-run/requestStop semantics are preserved; clean recycle, requested stop and crash are distinct. |
+| 4 | Post-fork resource and durable integration hardening | OPEN | Child-only DB/cache/broker creation, exact DBLayer connection ownership, after-commit behavior and CacheLayer coordination are proven. |
+| 5 | WorkerPool/worker integration test matrix | OPEN | Pool lifecycle, restart, drain, fork-safety, signal facade, no-zombie and persistent-worker tests pass; raw OS edge cases remain Runwire-owned. |
+| 6 | Benchmarks, soak and documentation | OPEN | Direct Worker vs WorkerPool-via-Runwire attribution, idle CPU, startup/recycle/shutdown cost and durable contention baselines are recorded. |
+| 7 | Foundation Point 26.8 migration | OPEN | Foundation raises Omnibus to `^2.6`, deletes `WorkerManager::watchPool()`, keeps parent-clean/app policy, and passes persistent-runtime acceptance. |
+| 8 | Omnibus 2.6 release gate | OPEN | PHP 8.4/8.5 QA green, dependency graph released-only, docs complete, no duplicate supervisor, Foundation handoff green. |
+
+**Current execution batch:** **Batch 1 — dependency alignment**.
+
+Tracker rule: mark a batch **COMPLETE** only after its code, focused tests and
+relevant QA/benchmark evidence are green. Do not advance tracker state from code
+presence alone.
 
 ---
 
@@ -21,11 +48,11 @@ This release is an additive hardening and ownership-alignment pass. Omnibus rema
 
 1. Align Omnibus's optional CacheLayer and DBLayer integration suites with the versions currently consumed by Foundation.
 2. Make `WorkerPool` lifecycle-aware so host runtimes can supply heartbeat and cooperative stop checks without wrapping the pool in their own signal watchdog.
-3. Harden `pcntl`/`posix` supervision semantics: wait/reap behavior, signal handling, shutdown escalation, child process state, and restart behavior.
+3. Delegate generic fork/signal/wait/reap/restart/shutdown mechanics to released Runwire 1.0 while preserving Omnibus queue-worker semantics and the `WorkerPool` facade.
 4. Preserve the correct post-fork ownership model for DB connections, Redis clients, broker connections, CacheLayer resources, sockets, locks, and other process-bound state.
 5. Keep durable DBLayer-backed Omnibus services bound to the exact `Connection` instance required for queue/workflow transaction semantics.
 6. Remove generic Omnibus supervision mechanics from Foundation where they currently exist only because Omnibus lacks the corresponding API.
-7. Define a clean future extraction boundary for a lower-level Runwire/process-runtime library without making that future library a prerequisite for Omnibus 2.6.
+7. Keep one process-supervision engine: Omnibus must not retain a direct-`pcntl` fallback once `WorkerPool` delegates to Runwire 1.0.
 8. Add focused tests and benchmarks proving the worker lifecycle and persistent-process behavior remain deterministic, bounded, leak-free, and low-overhead.
 
 ## 2. Non-goals
@@ -95,6 +122,22 @@ Retest all DB-backed components against DBLayer 5.1:
 Prefer DBLayer 5.1 instance-native `Connection` APIs and capability helpers where applicable.
 
 Do **not** replace exact concrete connections with a process-global/static connection lookup.
+
+### 3.3 Runwire
+
+Runwire 1.0 is released and is the process-supervision engine for Omnibus 2.6:
+
+```json
+"infocyph/runwire": "^1.0"
+```
+
+Use it as a normal production dependency because `WorkerPool` is part of the
+normal Omnibus package and must not preserve a second raw-`pcntl` supervisor as
+a fallback.
+
+Omnibus remains responsible for queue-worker semantics and adapts them to the
+Runwire public API. Runwire must remain unaware of Omnibus messages, retries,
+failure stores, workflows or queue settlement.
 
 ---
 
@@ -551,65 +594,48 @@ This is a Foundation simplification opportunity, not an Omnibus 2.6 release bloc
 
 ---
 
-## 16. Runwire future boundary
+## 16. Runwire 1.0 process-runtime boundary
 
-Omnibus 2.6 should continue to implement its process pool directly with `pcntl`/`posix`.
+Runwire 1.0 is the released lower-level process runtime for Omnibus 2.6.
 
-Do not block this release on a new process library.
+Omnibus must not maintain an independent raw `pcntl`/`posix` supervisor beside
+Runwire. Generic OS-process mechanics delegate to Runwire; Omnibus keeps the
+queue-facing `WorkerPool` facade and message-worker policy.
 
-When a Runwire-style library exists later, only generic OS process mechanics should move there.
+### Runwire owns
 
-### Future Runwire ownership
-
-Possible Runwire-owned mechanics:
-
-- `fork()` wrapper;
-- child PID tracking primitives;
-- wait/reap helpers;
-- signal registration/restoration;
-- signal-mask manipulation;
-- process-group signaling;
-- graceful/forced termination primitive;
-- monotonic process deadlines;
-- clean post-fork signal state;
-- low-level process capability detection.
+- fork/spawn and child PID tracking;
+- signal registration/restoration and child normalization;
+- wait/reap handling, including EINTR/ECHILD correctness;
+- graceful/forced process termination;
+- generic restart/backoff bookkeeping;
+- monotonic supervisor timers;
+- worker-group lifecycle/status primitives.
 
 ### Omnibus remains owner of
 
-- queue worker concurrency;
-- worker slots;
-- queue-worker factory semantics;
-- worker recycling;
-- crash restart budgets;
-- restart backoff policy;
+- queue worker concurrency/options;
+- worker factory semantics;
+- mapping Omnibus clean recycle vs requested stop vs crash;
 - message-consumer lifecycle;
-- queue shutdown semantics;
-- message retries/failures;
-- queue/workflow integration.
+- queue retry/failure/settlement behavior;
+- queue/workflow integration;
+- the public `WorkerPool` API.
 
-Desired eventual dependency direction:
+Dependency direction:
 
 ```text
 Foundation
     ↓
 Omnibus
     ↓
-Runwire
+Runwire 1.0
     ↓
 pcntl / posix / OS
 ```
 
-Not:
-
-```text
-Runwire → Omnibus
-```
-
-and not:
-
-```text
-Omnibus → Foundation
-```
+Runwire must never depend on Omnibus, and Omnibus must never depend on
+Foundation.
 
 ---
 
@@ -697,6 +723,12 @@ Do not swallow DBLayer infrastructure errors and reinterpret them as normal queu
 ---
 
 ## 20. Tests
+
+Runwire owns exhaustive raw process-supervision tests: signal restoration,
+EINTR/ECHILD handling, PID bookkeeping, wait/reap internals and low-level forced
+termination. Omnibus tests the queue-facing contract above Runwire and keeps only
+integration-level assertions needed to prove the facade preserves Omnibus
+semantics.
 
 ### 20.1 WorkerPool lifecycle tests
 
@@ -829,9 +861,9 @@ Document clearly:
 3. parent-process resource cleanliness;
 4. child-only process-bound resource construction;
 5. graceful shutdown/restart semantics;
-6. `pcntl`/`posix` requirements;
+6. Runwire 1.0 as the WorkerPool process runtime and its underlying Unix extension requirements;
 7. process isolation is not security sandboxing;
-8. Runwire 1.0 extraction boundary.
+8. Foundation/Omnibus/Runwire ownership boundaries.
 
 ---
 
@@ -856,17 +888,18 @@ Once Omnibus 2.6 is released:
 
 Omnibus 2.6 is ready when all of the following are true:
 
-- Composer/test metadata targets CacheLayer `^3.4` and DBLayer `^5.1`.
-- Existing optional integrations still remain optional runtime dependencies.
+- Composer/test metadata targets CacheLayer `^3.4`, DBLayer `^5.1` and released Runwire `^1.0`.
+- Existing CacheLayer/DBLayer integrations still remain optional runtime dependencies.
+- `WorkerPool` delegates generic process supervision to Runwire; no second direct-`pcntl` supervisor/fallback remains.
 - All DBLayer 5.1 durable queue/workflow/failure/after-commit tests pass.
 - CacheLayer 3.4 coordination tests pass.
 - `WorkerPool` accepts an external lifecycle without Foundation-specific dependencies.
 - An external stop request can stop a pool without a Foundation `SIGALRM` wrapper.
 - Pool lifecycle heartbeat operates while children are active/idle.
 - Parent supervisor does not busy-spin.
-- Unexpected `pcntl_wait*()` failures cannot produce infinite loops.
-- Parent SIGTERM/SIGINT handlers and async mode are restored after run.
-- child process Omnibus-owned signal state is normalized before worker construction.
+- Runwire wait/reap failures cannot surface through Omnibus as an infinite/busy supervision loop.
+- Runwire restores parent signal state and normalizes the child process before the Omnibus worker factory runs.
+- Omnibus pooled workers do not install a competing second signal handler set over Runwire.
 - graceful stop escalates to SIGKILL after the configured deadline.
 - all children are reaped on normal exit, lifecycle failure, spawn failure, restart exhaustion, and forced shutdown.
 - clean worker recycling does not consume crash restart budget.
@@ -880,21 +913,20 @@ Omnibus 2.6 is ready when all of the following are true:
 
 ## 25. Recommended implementation order
 
-1. Dependency/docs alignment: CacheLayer 3.4 and DBLayer 5.1.
-2. Add `WorkerPool` lifecycle support.
-3. Refactor parent supervision to lifecycle-capable `waitpid(..., WNOHANG)` loop.
-4. Harden wait error handling.
-5. Reduce signal callbacks to flag mutation and centralize shutdown orchestration in the supervisor loop.
-6. Normalize Omnibus-owned child signal/process state after fork.
-7. Harden spawn/reap/restart/shutdown edge cases.
-8. Add lifecycle, signal, fork-safety, zombie/reaping, and restart tests.
-9. Re-run CacheLayer/DBLayer integrations and contention suites.
+1. Align dependencies/docs: CacheLayer 3.4, DBLayer 5.1 and released Runwire 1.0.
+2. Adapt `WorkerPool` to Runwire `Supervisor`/`WorkerGroup` while preserving the Omnibus public facade and its current concurrency/stop validation.
+3. Add a supervised-child Worker path that does not install Omnibus signal handlers over Runwire.
+4. Add explicit Worker completion classification so clean queue-worker recycle maps to Runwire `WorkerContext::requestRecycle()`, requested stop remains a stop, and abnormal failure remains a crash.
+5. Integrate parent `WorkerLifecycle` polling through the Runwire `LoopInterface::repeat()` timer; lifecycle failure must stop/drain the supervisor before escaping.
+6. Set Runwire worker readiness only after the child worker factory has created process-bound resources; do not advertise ready before DB/cache/broker initialization.
+7. Preserve stop-before-run, repeated `requestStop()`, graceful shutdown and restart-budget facade semantics, with explicit mapping to Runwire policies.
+8. Re-run post-fork resource, CacheLayer 3.4 and DBLayer 5.1 exact-connection/after-commit suites.
+9. Add WorkerPool facade tests for lifecycle, clean recycle, crash budget, stop/drain, fork-safety and no-zombie behavior; keep exhaustive raw OS supervision tests in Runwire.
 10. Add worker/pool/lifecycle benchmarks and soak runs.
-11. Update architecture/operations/upgrading documentation.
+11. Update architecture/operations/upgrading/security documentation.
 12. Release Omnibus 2.6.
-13. Upgrade Foundation to `^2.6` and remove `WorkerManager::watchPool()`.
-14. Complete Foundation Point 26.8 acceptance and benchmark gates.
-15. Track Runwire delegation separately as a later ecosystem-level process-runtime task.
+13. Upgrade Foundation to `^2.6`, remove `WorkerManager::watchPool()`/SIGALRM supervision and keep Foundation-specific parent-clean/runtime-control policy.
+14. Complete Foundation Point 26.8 exact-head acceptance and direct-vs-Foundation benchmark gates.
 
 ---
 
@@ -923,15 +955,14 @@ Omnibus 2.6
  └─ WorkerPool queue-supervision policy
         │
         ▼
-current implementation
- pcntl / posix
+Runwire 1.0
+ ├─ worker-group supervision
+ ├─ fork/signal/wait/reap
+ ├─ restart/backoff
+ └─ graceful/forced process termination
         │
         ▼
-target generic process layer
- Runwire 1.0
-        │
-        ▼
-OS
+pcntl / posix / OS
 ```
 
 The important boundary is:
@@ -1046,19 +1077,50 @@ Its queue-oriented options may remain:
 - Omnibus lifecycle adapter;
 - worker factory.
 
-Exact internal Runwire mapping must use the final Runwire 1.0 public API rather than pre-emptively exposing unstable lower-level types in Omnibus signatures.
+Exact internal Runwire mapping must use the released Runwire 1.0 public API rather than exposing lower-level types in Omnibus signatures.
+
+### 27.3.1 Required Omnibus → Runwire adapter invariants
+
+The implementation should use one Runwire loop/supervisor per Omnibus pool and
+preserve the existing Omnibus facade.
+
+Required mapping rules:
+
+- create the Runwire `Supervisor` with a `LoopInterface` owned by the pool adapter;
+- register parent `WorkerLifecycle` heartbeat/stop polling with
+  `LoopInterface::repeat()` rather than `SIGALRM`;
+- keep an Omnibus pre-run stop flag because Runwire `Supervisor::stop()` is a
+  no-op before the supervisor is running;
+- use `WorkerGroup::automaticReady = false`; construct child DB/cache/broker
+  resources first, then call `WorkerContext::ready()`;
+- the pooled Omnibus `Worker` must not install its own SIGTERM/SIGINT handlers;
+  Runwire owns child process signals and the Omnibus child lifecycle must observe
+  `WorkerContext::stopping()`;
+- a normal queue-worker recycle caused by max messages/runtime/memory/growth must
+  call `WorkerContext::requestRecycle()` so Runwire uses its planned-recycle
+  exit path instead of charging the crash restart budget;
+- a parent/requested stop must not be translated into recycle;
+- an unexpected worker exception/fatal termination must remain a crash and use
+  Runwire restart-budget handling;
+- map Omnibus `maximumRestarts`, backoff and shutdown-grace options explicitly
+  to Runwire `RestartPolicy`/`WorkerGroup` behavior and test any changed
+  timing semantics rather than assuming the two implementations are identical.
+
+A tiny Omnibus run-outcome/disposition value is preferable to inferring
+recycle-vs-stop from process exit code after the fact.
 
 ---
 
 ### 27.4 Dependency decision
 
-Recommended for Omnibus 2.6:
+Required for Omnibus 2.6:
 
 ```json
 "infocyph/runwire": "^1.0"
 ```
 
-as a normal production dependency **if `WorkerPool` delegates to Runwire in the released build**.
+as a normal production dependency because the released `WorkerPool` delegates
+generic process supervision to Runwire.
 
 Reasoning:
 
@@ -1067,7 +1129,9 @@ Reasoning:
 - Runwire is a low-level Infocyph runtime dependency, not a framework dependency;
 - one process engine is easier to secure/test than two.
 
-If packaging work proves Runwire can be truly optional without retaining any duplicate supervisor—for example `WorkerPool` itself moves to a separately installable integration package—then optionality may be reconsidered. Do **not** preserve a second raw `pcntl` engine merely to avoid the dependency.
+Do **not** preserve a second raw `pcntl` engine merely to avoid the dependency.
+A future packaging split may reconsider optionality only if the process-pool
+feature itself moves out of the normal package.
 
 Runwire must never depend on Omnibus.
 
@@ -1371,7 +1435,7 @@ Update Omnibus 2.6 docs to state:
 - handlers needing external processes should use an application/Runwire process service rather than shell helpers in Omnibus;
 - Foundation supplies app lifecycle/release policy above Omnibus/Runwire.
 
-Replace provisional `ProcessGuard` / “future process runtime” terminology in the final documentation.
+Remove provisional `ProcessGuard` / “future process runtime” terminology; Runwire 1.0 is the released process runtime.
 
 ---
 
@@ -1432,3 +1496,7 @@ Runwire 1.0
 Where earlier sections of this plan proposes improving Omnibus's internal raw `pcntl` supervisor, interpret those behaviors as **required end-state semantics**, but implement generic OS-process mechanics in Runwire and test Omnibus's facade/integration behavior above it.
 
 All queue/persistence/CacheLayer/DBLayer portions of earlier sections of this plan remain unchanged.
+
+For process supervision, do not implement the earlier direct-`pcntl`
+recommendations first and then migrate them. Implement the Section 27 Runwire
+path directly; the earlier raw-process sections are acceptance semantics only.
