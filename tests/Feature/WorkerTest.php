@@ -312,6 +312,23 @@ test('worker pool validates process limits before execution', function (): void 
         ->and(fn() => new WorkerPool($factory, shutdownGraceSeconds: 0))->toThrow(InvalidArgumentException::class);
 });
 
+test('worker pool stop requests are idempotent before native startup', function (): void {
+    $created = false;
+    $pool = new WorkerPool(
+        static function () use (&$created): Worker {
+            $created = true;
+
+            throw new RuntimeException('factory must not run');
+        },
+    );
+
+    $pool->requestStop();
+    $pool->requestStop();
+    $pool->run();
+
+    expect($created)->toBeFalse();
+});
+
 test('worker pool stops after the bounded crash restart budget', function (): void {
     if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
         throw new RuntimeException('WorkerPool tests require ext-pcntl and ext-posix.');
