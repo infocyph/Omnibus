@@ -33,7 +33,7 @@ This release is an additive hardening and ownership-alignment pass. Omnibus rema
 | 4 | Post-fork resource and durable integration hardening | OPEN | Child-only DB/cache/broker creation, exact DBLayer connection ownership, after-commit behavior and CacheLayer coordination are proven. |
 | 5 | WorkerPool/worker integration test matrix | OPEN | Pool lifecycle, restart, drain, fork-safety, signal facade, no-zombie and persistent-worker tests pass; raw OS edge cases remain Runwire-owned. |
 | 6 | Benchmarks, soak and documentation | OPEN | Direct Worker vs WorkerPool-via-Runwire attribution, idle CPU, startup/recycle/shutdown cost and durable contention baselines are recorded. |
-| 7 | Foundation Point 26.8 migration | OPEN | Foundation raises Omnibus to `^2.6`, deletes `WorkerManager::watchPool()`, keeps parent-clean/app policy, and passes persistent-runtime acceptance. |
+| 7 | Foundation Point 26.8 migration | OPEN | Foundation raises Omnibus to `^2.6`, deletes `WorkerManager::watchPool()`, keeps parent-clean/app policy, and passes persistent-runtime acceptance; no direct Runwire dependency is added solely for Omnibus. |
 | 8 | Omnibus 2.6 release gate | OPEN | PHP 8.4/8.5 QA green, dependency graph released-only, docs complete, no duplicate supervisor, Foundation handoff green. |
 
 **Current execution batch:** **Batch 1 — dependency alignment**.
@@ -1086,9 +1086,16 @@ preserve the existing Omnibus facade.
 
 Required mapping rules:
 
+- retain a small Omnibus feature gate that reports a clear WorkerPool capability
+  error when the Runwire supervisor's required Unix process extensions are
+  unavailable; do not reimplement supervision as the fallback;
 - create the Runwire `Supervisor` with a `LoopInterface` owned by the pool adapter;
 - register parent `WorkerLifecycle` heartbeat/stop polling with
   `LoopInterface::repeat()` rather than `SIGALRM`;
+- if a parent lifecycle callback throws, store the first failure, call
+  `Supervisor::stop()`, allow the Runwire supervisor to drain children, and
+  rethrow only after `Supervisor::run()` returns; do not throw directly from the
+  repeating timer and bypass graceful drain;
 - keep an Omnibus pre-run stop flag because Runwire `Supervisor::stop()` is a
   no-op before the supervisor is running;
 - use `WorkerGroup::automaticReady = false`; construct child DB/cache/broker
@@ -1174,11 +1181,16 @@ Runwire child starts
        ↓
 Omnibus worker factory creates process-bound resources
        ↓
-Omnibus Worker::run()
+WorkerContext::ready()
        ↓
-clean return / exception / process termination
+Omnibus supervised Worker run
        ↓
-Runwire observes process outcome
+Omnibus maps result to:
+  recycle → WorkerContext::requestRecycle()
+  stop    → normal requested shutdown
+  crash   → exception/abnormal child outcome
+       ↓
+Runwire observes the explicit process outcome
 ```
 
 ---
@@ -1199,13 +1211,19 @@ Runwire supervisor failure
 
 Preferred implementation:
 
-- Omnibus Worker returns/terminates with a clean child outcome when message/runtime/memory recycle conditions are reached;
-- Runwire treats clean worker exit as replaceable while group remains active;
-- clean recycle does not consume the crash restart budget;
-- unexpected non-zero/abnormal termination consumes configured restart budget;
-- Foundation release drain/stop prevents replacement when group is stopping.
+- keep public standalone `Worker::run()` behavior compatible;
+- add a small Omnibus supervised-run outcome/disposition path so max
+  messages/runtime/memory/growth can be distinguished from lifecycle/parent stop;
+- map only the recycle disposition to `WorkerContext::requestRecycle()` before
+  child bootstrap returns;
+- let requested stop return without setting recycle state;
+- let unexpected worker exceptions remain abnormal failures;
+- Runwire then replaces planned recycle without consuming the crash restart
+  budget and applies restart policy only to abnormal failure;
+- Foundation release drain/stop prevents replacement when the group is stopping.
 
-Avoid encoding a large queue-specific reason protocol into Runwire unless a small generic child-exit classification is genuinely required.
+Do not invent a queue-specific exit-code protocol in Runwire; use its existing
+`WorkerContext` planned-recycle mechanism.
 
 ---
 
@@ -1358,7 +1376,9 @@ Omnibus message
 After Runwire-aligned Omnibus 2.6 is released, Foundation Point 26.8 should:
 
 - require Omnibus 2.6;
-- require Runwire 1.0 through Foundation's own native-runtime dependency;
+- consume Runwire transitively through Omnibus for queue-worker supervision;
+  add a direct Foundation Runwire dependency only if a separate Foundation
+  native-runtime feature independently consumes Runwire APIs;
 - remove Foundation `WorkerManager::watchPool()` / SIGALRM pool watchdog behavior;
 - supply Foundation lifecycle/control policy through the Omnibus/Runwire adapter path;
 - retain Foundation parent-clean assertions;
@@ -1444,7 +1464,7 @@ Remove provisional `ProcessGuard` / “future process runtime” terminology; Ru
 For process-related parts of Omnibus 2.6, use:
 
 ```text
-1. Release/stabilize Runwire supervisor contract needed by Omnibus.
+1. Verify the released Runwire 1.0 supervisor contract against Omnibus requirements.
 2. Add Runwire ^1.0 integration/dependency.
 3. Adapt Omnibus WorkerPool to Runwire worker group/supervisor.
 4. Preserve WorkerLifecycle and queue-facing options through adapter/facade.
@@ -1464,7 +1484,7 @@ Do not block non-process Omnibus work on Runwire internals that are irrelevant t
 
 The process/supervision part of Omnibus 2.6 closes only when:
 
-- [ ] released Runwire 1.0 provides the required generic supervisor semantics;
+- [X] released Runwire 1.0 provides the required generic supervisor semantics;
 - [ ] Omnibus `WorkerPool` retains a clean queue-facing API;
 - [ ] queue/message `Worker` semantics remain Omnibus-owned;
 - [ ] raw generic fork/signal/wait/reap/restart implementation is delegated to Runwire rather than duplicated;
