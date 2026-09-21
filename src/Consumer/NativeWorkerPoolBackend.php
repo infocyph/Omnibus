@@ -362,6 +362,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
             throw new \RuntimeException($fatal);
         }
     }
+
     private function terminateChild(int $signal): never
     {
         $pid = getmypid();

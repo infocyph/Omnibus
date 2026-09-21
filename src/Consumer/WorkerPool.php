@@ -6,10 +6,10 @@ namespace Infocyph\Omnibus\Consumer;
 
 final readonly class WorkerPool
 {
+    private WorkerPoolBackend $backend;
+
     /** @var \Closure(int):Worker */
     private \Closure $workerFactory;
-
-    private WorkerPoolBackend $backend;
 
     /**
      * The factory is invoked in each child after process creation. Create
