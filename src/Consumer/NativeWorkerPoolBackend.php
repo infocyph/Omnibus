@@ -374,5 +374,4 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
             usleep(self::SUPERVISION_SLEEP_MICROSECONDS);
         }
     }
-
 }
