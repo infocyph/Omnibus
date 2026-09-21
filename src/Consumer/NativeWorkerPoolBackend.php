@@ -340,9 +340,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
 
             $child = $this->pollChild();
             if ($child === null) {
-                if ($this->children !== []) {
-                    usleep(self::SUPERVISION_SLEEP_MICROSECONDS);
-                }
+                usleep(self::SUPERVISION_SLEEP_MICROSECONDS);
 
                 continue;
             }
