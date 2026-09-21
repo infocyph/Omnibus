@@ -72,6 +72,15 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         return hrtime(true) / 1_000_000_000;
     }
 
+    private static function waitStatus(mixed $status): int
+    {
+        if (!is_int($status)) {
+            throw new \UnexpectedValueException('pcntl_waitpid() returned an invalid child status.');
+        }
+
+        return $status;
+    }
+
     private function assertSupported(): void
     {
         foreach ([
@@ -177,30 +186,41 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         return defined($constant) && $error === constant($constant);
     }
 
-    private function reapStoppedChild(): bool
+    /** @return array{int,int}|null */
+    private function pollChild(): ?array
     {
         $status = 0;
         $pid = pcntl_waitpid(-1, $status, WNOHANG);
         if ($pid > 0) {
-            unset($this->children[$pid]);
-
-            return true;
+            return [$pid, self::waitStatus($status)];
         }
         if ($pid === 0) {
-            return false;
+            return null;
         }
 
         $error = pcntl_get_last_error();
         if ($this->isWaitError($error, 'PCNTL_EINTR')) {
-            return true;
+            return null;
         }
         if ($this->isWaitError($error, 'PCNTL_ECHILD')) {
             $this->children = [];
 
-            return true;
+            return null;
         }
 
-        throw new \RuntimeException(sprintf('Unable to reap Omnibus worker process (pcntl error %d).', $error));
+        throw new \RuntimeException(sprintf('Unable to wait for Omnibus worker process (pcntl error %d).', $error));
+    }
+
+    private function reapStoppedChild(): bool
+    {
+        $child = $this->pollChild();
+        if ($child === null) {
+            return false;
+        }
+
+        unset($this->children[$child[0]]);
+
+        return true;
     }
 
     private function registerSignals(): void
@@ -320,41 +340,26 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
                 break;
             }
 
-            $status = 0;
-            $pid = pcntl_waitpid(-1, $status, WNOHANG);
-            if ($pid > 0) {
-                $fatal = $this->consumeChildExit(
-                    $pid,
-                    $status,
-                    $restarts,
-                    $workerFactory,
-                    $maximumRestarts,
-                    $restartBackoffSeconds,
-                );
-                if ($fatal !== null) {
-                    $this->requestStop();
+            $child = $this->pollChild();
+            if ($child === null) {
+                if ($this->children !== []) {
+                    usleep(self::SUPERVISION_SLEEP_MICROSECONDS);
                 }
 
                 continue;
             }
-            if ($pid === -1) {
-                $error = pcntl_get_last_error();
-                if ($this->isWaitError($error, 'PCNTL_EINTR')) {
-                    continue;
-                }
-                if ($this->isWaitError($error, 'PCNTL_ECHILD')) {
-                    $this->children = [];
 
-                    break;
-                }
-
-                throw new \RuntimeException(sprintf(
-                    'Unable to wait for Omnibus worker process (pcntl error %d).',
-                    $error,
-                ));
+            $fatal = $this->consumeChildExit(
+                $child[0],
+                $child[1],
+                $restarts,
+                $workerFactory,
+                $maximumRestarts,
+                $restartBackoffSeconds,
+            );
+            if ($fatal !== null) {
+                $this->requestStop();
             }
-
-            usleep(self::SUPERVISION_SLEEP_MICROSECONDS);
         }
 
         if ($fatal !== null) {
