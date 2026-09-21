@@ -16,16 +16,12 @@ test('native Redis-compatible service completes reservation and settlement lifec
     string $passwordVariable,
 ): void {
     if (!extension_loaded('redis') || !class_exists(Redis::class)) {
-        test()->markTestSkipped('The redis extension is unavailable.');
-
-        return;
+        throw new RuntimeException('The redis extension is required by this integration test.');
     }
     $host = getenv($hostVariable);
     $port = getenv($portVariable);
     if (!is_string($host) || $host === '' || !is_string($port) || $port === '') {
-        test()->markTestSkipped(sprintf('The %s service is not configured.', $backend));
-
-        return;
+        throw new RuntimeException(sprintf('The %s service must be configured for this integration test.', $backend));
     }
 
     $redis = new Redis();

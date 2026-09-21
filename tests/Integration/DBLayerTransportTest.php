@@ -91,9 +91,7 @@ function omnibusWithSqliteWriteLock(array $configuration, callable $operation, i
         || !function_exists('pcntl_waitpid')
         || !function_exists('posix_kill')
     ) {
-        test()->markTestSkipped('SQLite retry integration requires ext-pcntl and ext-posix.');
-
-        return null;
+        throw new RuntimeException('SQLite retry integration requires ext-pcntl and ext-posix.');
     }
 
     $ready = sys_get_temp_dir() . '/omnibus-sqlite-lock-' . bin2hex(random_bytes(8));

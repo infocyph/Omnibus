@@ -263,7 +263,7 @@ test('runtime limits and idle backoff remain cooperative lifecycle boundaries', 
 
 test('worker restores parent signal handlers after execution', function (): void {
     if (!function_exists('pcntl_signal_get_handler')) {
-        $this->markTestSkipped('Worker signal restoration requires ext-pcntl.');
+        throw new RuntimeException('Worker signal restoration test requires ext-pcntl.');
     }
 
     $previous = pcntl_signal_get_handler(15);
@@ -314,7 +314,7 @@ test('worker pool validates process limits before execution', function (): void 
 
 test('worker pool stops after the bounded crash restart budget', function (): void {
     if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
-        $this->markTestSkipped('WorkerPool requires ext-pcntl and ext-posix.');
+        throw new RuntimeException('WorkerPool tests require ext-pcntl and ext-posix.');
     }
 
     $pool = new WorkerPool(
@@ -332,7 +332,7 @@ test('worker pool stops after the bounded crash restart budget', function (): vo
 
 test('worker pool replaces cleanly recycled workers without consuming the crash budget', function (): void {
     if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
-        $this->markTestSkipped('WorkerPool requires ext-pcntl and ext-posix.');
+        throw new RuntimeException('WorkerPool tests require ext-pcntl and ext-posix.');
     }
 
     $counter = tempnam(sys_get_temp_dir(), 'omnibus-worker-recycle-');
@@ -393,7 +393,7 @@ test('worker pool replaces cleanly recycled workers without consuming the crash 
 
 test('worker pool force kills a child that ignores graceful shutdown', function (): void {
     if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
-        $this->markTestSkipped('WorkerPool requires ext-pcntl and ext-posix.');
+        throw new RuntimeException('WorkerPool tests require ext-pcntl and ext-posix.');
     }
 
     $pool = new WorkerPool(
@@ -443,7 +443,7 @@ test('worker pool restores parent signal handlers after execution', function ():
         || !function_exists('pcntl_signal_get_handler')
         || !function_exists('posix_kill')
     ) {
-        $this->markTestSkipped('WorkerPool requires ext-pcntl and ext-posix.');
+        throw new RuntimeException('WorkerPool tests require ext-pcntl and ext-posix.');
     }
 
     $previous = pcntl_signal_get_handler(15);

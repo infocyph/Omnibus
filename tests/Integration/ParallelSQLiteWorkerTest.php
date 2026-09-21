@@ -51,10 +51,10 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
         || !function_exists('pcntl_waitpid')
         || !function_exists('posix_kill')
     ) {
-        $this->markTestSkipped('Parallel SQLite integration requires ext-pcntl and ext-posix.');
+        throw new RuntimeException('Parallel SQLite integration requires ext-pcntl and ext-posix.');
     }
     if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
-        $this->markTestSkipped('Parallel SQLite integration requires pdo_sqlite.');
+        throw new RuntimeException('Parallel SQLite integration requires pdo_sqlite.');
     }
 
     $database = tempnam(sys_get_temp_dir(), 'omnibus-parallel-sqlite-');

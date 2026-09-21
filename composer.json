@@ -41,8 +41,8 @@
         "aws/aws-sdk-php": "One option for implementing the native SQS backend boundary.",
         "infocyph/cachelayer": "Enables Omnibus CacheLayer coordination integrations; tested with CacheLayer 3.4.",
         "infocyph/dblayer": "Enables DB queue, workflow, failure-store, and after-commit integrations; tested with DBLayer 5.1.",
-        "php-amqplib/php-amqplib": "One option for implementing the native AMQP backend boundary.",
-        "infocyph/runwire": "Optional alternative process-supervision backend for WorkerPool."
+        "infocyph/runwire": "Optional alternative process-supervision backend for WorkerPool.",
+        "php-amqplib/php-amqplib": "One option for implementing the native AMQP backend boundary."
     },
     "minimum-stability": "stable",
     "prefer-stable": true,

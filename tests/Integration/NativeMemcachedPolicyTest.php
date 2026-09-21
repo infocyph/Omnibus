@@ -14,16 +14,12 @@ use Infocyph\Omnibus\Transport\InMemoryTransport;
 
 test('native Memcached service preserves the unique-message lease lifecycle', function (): void {
     if (!extension_loaded('memcached') || !class_exists(Memcached::class)) {
-        test()->markTestSkipped('The memcached extension is unavailable.');
-
-        return;
+        throw new RuntimeException('The memcached extension is required by this integration test.');
     }
     $host = getenv('IC_MEMCACHED_HOST');
     $port = getenv('IC_MEMCACHED_PORT');
     if (!is_string($host) || $host === '' || !is_string($port) || $port === '') {
-        test()->markTestSkipped('The Memcached service is not configured.');
-
-        return;
+        throw new RuntimeException('The Memcached service must be configured for this integration test.');
     }
 
     $memcached = new Memcached();
@@ -31,9 +27,7 @@ test('native Memcached service preserves the unique-message lease lifecycle', fu
     $probeKey = 'omnibus:probe:'.getmypid();
     $memcached->set($probeKey, 'ready', 5);
     if ($memcached->getResultCode() !== Memcached::RES_SUCCESS) {
-        test()->markTestSkipped('The Memcached service is unreachable.');
-
-        return;
+        throw new RuntimeException('The configured Memcached service is unreachable.');
     }
     $memcached->delete($probeKey);
 

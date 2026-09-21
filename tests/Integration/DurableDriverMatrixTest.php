@@ -122,9 +122,7 @@ function omnibusEnsureMssqlDatabase(array $config): void
 test('durable lifecycle runs on each configured service database', function (string $driver): void {
     $config = omnibusServiceDatabase($driver);
     if ($config === null) {
-        test()->markTestSkipped(sprintf('%s service database is not configured.', $driver));
-
-        return;
+        throw new RuntimeException(sprintf('%s service database must be configured for this integration test.', $driver));
     }
 
     $connection = new Connection(ConnectionConfig::fromArray($config));
@@ -198,101 +196,104 @@ test('durable lifecycle runs on each configured service database', function (str
     }
 })->with(['mysql', 'mariadb', 'pgsql', 'mssql']);
 
-test('mutation decisions remain writer-affine with a deliberately lagging replica', function (string $driver): void {
-    $config = omnibusServiceDatabase($driver);
-    $replicaDatabase = getenv('IC_SERVICE_REPLICA_DATABASE');
-    if ($config === null || !is_string($replicaDatabase) || $replicaDatabase === '') {
-        test()->markTestSkipped(sprintf('%s lagging replica is not configured.', $driver));
-
-        return;
-    }
-
-    $config['read'] = [[
-        'host' => $config['host'],
-        'port' => $config['port'],
-        'database' => $replicaDatabase,
-        'username' => $config['username'],
-        'password' => $config['password'],
-    ]];
-    $connection = new Connection(ConnectionConfig::fromArray($config));
-    $tables = [
-        'queue' => 'omnibus_affinity_messages',
-        'failures' => 'omnibus_affinity_failures',
-        'workflows' => 'omnibus_affinity_workflows',
-        'items' => 'omnibus_affinity_items',
-    ];
-    foreach (array_reverse($tables) as $table) {
-        $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
-    }
-
-    try {
-        foreach (QueueSchema::statements(
-            $driver,
-            $tables['queue'],
-            $tables['failures'],
-            $tables['workflows'],
-            $tables['items'],
-        ) as $statement) {
-            $connection->statement($statement);
+$replicaDatabase = getenv('IC_SERVICE_REPLICA_DATABASE');
+if (is_string($replicaDatabase) && $replicaDatabase !== '') {
+    test('mutation decisions remain writer-affine with a deliberately lagging replica', function (string $driver): void {
+        $config = omnibusServiceDatabase($driver);
+        if ($config === null) {
+            throw new RuntimeException(sprintf('%s service database must be configured for the replica-affinity test.', $driver));
         }
-        $replicaLagProved = false;
-        try {
-            $connection->select(sprintf('SELECT COUNT(*) FROM %s', $tables['queue']));
-        } catch (Throwable) {
-            $replicaLagProved = true;
-        }
-        if (!$replicaLagProved) {
-            throw new RuntimeException('Replica must intentionally omit the affinity test tables.');
+        $replicaDatabase = getenv('IC_SERVICE_REPLICA_DATABASE');
+        if (!is_string($replicaDatabase) || $replicaDatabase === '') {
+            throw new RuntimeException('Replica-affinity test registered without IC_SERVICE_REPLICA_DATABASE.');
         }
 
-        $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
-        $serializer = TestSerializer::make();
-        $transport = new DBLayerTransport($connection, $serializer, $clock, $tables['queue']);
-        $store = new DBLayerWorkflowStore(
-            $connection,
-            $serializer,
-            $tables['workflows'],
-            $tables['items'],
-            $clock,
-        );
-        $failures = new DBLayerFailureStore($connection, $serializer, $tables['failures']);
-        $coordinator = new WorkflowCoordinator($store, $transport);
-        $workflowTransport = new WorkflowTransport($transport, $coordinator);
-        $scope = new WorkflowExecutionScope(new DirectExecutionScope(), $store);
-        $id = $coordinator->batch([new TestCommand('writer')], 'work');
-        $reservation = [...$workflowTransport->receive('work')][0];
-        $scope->run($reservation->envelope(), static fn(): null => null);
-        $workflowTransport->acknowledge($reservation);
-        $failures->add(FailedMessage::decoded(
-            'writer-failure',
-            'work',
-            new Envelope(new TestCommand('failed')),
-            1,
-            $clock->now(),
-            RuntimeException::class,
-            'failure',
-        ));
-
-        [$state, $failure] = $connection->transaction(
-            static fn(): array => [$store->find($id), $failures->find('writer-failure')],
-        );
-        expect($state?->status)->toBe(WorkflowStatus::Completed)
-            ->and($failure)->not->toBeNull();
-    } finally {
+        $config['read'] = [[
+            'host' => $config['host'],
+            'port' => $config['port'],
+            'database' => $replicaDatabase,
+            'username' => $config['username'],
+            'password' => $config['password'],
+        ]];
+        $connection = new Connection(ConnectionConfig::fromArray($config));
+        $tables = [
+            'queue' => 'omnibus_affinity_messages',
+            'failures' => 'omnibus_affinity_failures',
+            'workflows' => 'omnibus_affinity_workflows',
+            'items' => 'omnibus_affinity_items',
+        ];
         foreach (array_reverse($tables) as $table) {
             $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
         }
-        $connection->resetRuntimeStateForReuse();
-        $connection->disconnect();
-    }
-})->with(['mysql', 'mariadb', 'pgsql']);
+
+        try {
+            foreach (QueueSchema::statements(
+                $driver,
+                $tables['queue'],
+                $tables['failures'],
+                $tables['workflows'],
+                $tables['items'],
+            ) as $statement) {
+                $connection->statement($statement);
+            }
+            $replicaLagProved = false;
+            try {
+                $connection->select(sprintf('SELECT COUNT(*) FROM %s', $tables['queue']));
+            } catch (Throwable) {
+                $replicaLagProved = true;
+            }
+            if (!$replicaLagProved) {
+                throw new RuntimeException('Replica must intentionally omit the affinity test tables.');
+            }
+
+            $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+            $serializer = TestSerializer::make();
+            $transport = new DBLayerTransport($connection, $serializer, $clock, $tables['queue']);
+            $store = new DBLayerWorkflowStore(
+                $connection,
+                $serializer,
+                $tables['workflows'],
+                $tables['items'],
+                $clock,
+            );
+            $failures = new DBLayerFailureStore($connection, $serializer, $tables['failures']);
+            $coordinator = new WorkflowCoordinator($store, $transport);
+            $workflowTransport = new WorkflowTransport($transport, $coordinator);
+            $scope = new WorkflowExecutionScope(new DirectExecutionScope(), $store);
+            $id = $coordinator->batch([new TestCommand('writer')], 'work');
+            $reservation = [...$workflowTransport->receive('work')][0];
+            $scope->run($reservation->envelope(), static fn(): null => null);
+            $workflowTransport->acknowledge($reservation);
+            $failures->add(FailedMessage::decoded(
+                'writer-failure',
+                'work',
+                new Envelope(new TestCommand('failed')),
+                1,
+                $clock->now(),
+                RuntimeException::class,
+                'failure',
+            ));
+
+            [$state, $failure] = $connection->transaction(
+                static fn(): array => [$store->find($id), $failures->find('writer-failure')],
+            );
+            expect($state?->status)->toBe(WorkflowStatus::Completed)
+                ->and($failure)->not->toBeNull();
+        } finally {
+            foreach (array_reverse($tables) as $table) {
+                $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
+            }
+            $connection->resetRuntimeStateForReuse();
+            $connection->disconnect();
+        }
+    })->with(['mysql', 'mariadb', 'pgsql']);
+}
+
 
 test('workflow claims and terminal transitions remain coherent across service connections', function (string $driver): void {
     $config = omnibusServiceDatabase($driver);
     if ($config === null) {
-        test()->markTestSkipped(sprintf('%s service database is not configured.', $driver));
-
-        return;
+        throw new RuntimeException(sprintf('%s service database must be configured for this integration test.', $driver));
     }
 
     $first = new Connection(ConnectionConfig::fromArray($config));
