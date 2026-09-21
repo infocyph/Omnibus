@@ -10,7 +10,7 @@ Baseline:
 - UID: `^5.0`
 - CacheLayer reference integration: raise to `^3.4`
 - DBLayer reference integration: raise to `^5.1`
-- Runwire process-supervision dependency: `^1.0`
+- Runwire process-supervision integration: optional, tested against `^1.0`
 - PHPForge: keep `dev-main@dev`
 - Foundation integration target: `infocyph/foundation` Point **26.8**
 
@@ -27,8 +27,8 @@ This release is an additive hardening and ownership-alignment pass. Omnibus rema
 | Batch | Scope | Status | Completion evidence |
 |---|---|---|---|
 | 0 | Plan reconciliation and ownership freeze | **COMPLETE** | Runwire 1.0 verified; direct-`pcntl` and Runwire tracks reconciled; Foundation/Omnibus/Runwire boundaries frozen. |
-| 1 | Dependency alignment | OPEN | Composer uses CacheLayer `^3.4`, DBLayer `^5.1`, Runwire `^1.0`; suggest/docs/version assertions aligned. |
-| 2 | `WorkerPool` Runwire facade | OPEN | Omnibus queue-facing API delegates generic process supervision to Runwire `Supervisor`/`WorkerGroup`; no raw supervisor fallback remains. |
+| 1 | Dependency alignment | OPEN | Composer uses CacheLayer `^3.4`, DBLayer `^5.1`; Runwire `^1.0` is dev-tested/suggested but not mandatory; suggest/docs/version assertions aligned. |
+| 2 | `WorkerPool` optional Runwire facade | OPEN | When Runwire is installed, Omnibus delegates process supervision to Runwire `Supervisor`/`WorkerGroup`; without Runwire, non-pool Omnibus paths still work and `WorkerPool` fails with a clear capability error; no raw supervisor fallback remains. |
 | 3 | Lifecycle, stop and recycle semantics | OPEN | Parent lifecycle polling uses the Runwire loop; stop-before-run/requestStop semantics are preserved; clean recycle, requested stop and crash are distinct. |
 | 4 | Post-fork resource and durable integration hardening | OPEN | Child-only DB/cache/broker creation, exact DBLayer connection ownership, after-commit behavior and CacheLayer coordination are proven. |
 | 5 | WorkerPool/worker integration test matrix | OPEN | Pool lifecycle, restart, drain, fork-safety, signal facade, no-zombie and persistent-worker tests pass; raw OS edge cases remain Runwire-owned. |
@@ -52,7 +52,7 @@ presence alone.
 4. Preserve the correct post-fork ownership model for DB connections, Redis clients, broker connections, CacheLayer resources, sockets, locks, and other process-bound state.
 5. Keep durable DBLayer-backed Omnibus services bound to the exact `Connection` instance required for queue/workflow transaction semantics.
 6. Remove generic Omnibus supervision mechanics from Foundation where they currently exist only because Omnibus lacks the corresponding API.
-7. Keep one process-supervision engine: Omnibus must not retain a direct-`pcntl` fallback once `WorkerPool` delegates to Runwire 1.0.
+7. Keep one process-supervision engine for the optional `WorkerPool` feature: Omnibus must not retain a direct-`pcntl` fallback when Runwire is absent.
 8. Add focused tests and benchmarks proving the worker lifecycle and persistent-process behavior remain deterministic, bounded, leak-free, and low-overhead.
 
 ## 2. Non-goals
@@ -125,19 +125,42 @@ Do **not** replace exact concrete connections with a process-global/static conne
 
 ### 3.3 Runwire
 
-Runwire 1.0 is released and is the process-supervision engine for Omnibus 2.6:
+Runwire 1.0 is released and is the optional process-supervision engine used by
+Omnibus `WorkerPool`.
+
+Omnibus itself must remain usable without Runwire for:
+
+- direct `MessageBus` dispatch;
+- `Consumer` execution;
+- single-process `Worker`;
+- FPM/request-driven application paths;
+- normal PHP CLI usage;
+- in-memory/native transports that do not need a process pool.
+
+Therefore keep Runwire out of Omnibus's mandatory production requirements.
+Use it as a development/reference integration dependency and advertise the
+capability through Composer `suggest`:
 
 ```json
-"infocyph/runwire": "^1.0"
+"require-dev": {
+    "infocyph/runwire": "^1.0"
+},
+"suggest": {
+    "infocyph/runwire": "Required only for the process-based WorkerPool capability."
+}
 ```
 
-Use it as a normal production dependency because `WorkerPool` is part of the
-normal Omnibus package and must not preserve a second raw-`pcntl` supervisor as
-a fallback.
+When Runwire is unavailable:
+
+- loading/using ordinary Omnibus messaging APIs must continue to work;
+- single-process `Worker` must continue to work;
+- `WorkerPool` must fail immediately with a clear capability/dependency error;
+- Omnibus must **not** fall back to a second raw-`pcntl` supervisor.
 
 Omnibus remains responsible for queue-worker semantics and adapts them to the
-Runwire public API. Runwire must remain unaware of Omnibus messages, retries,
-failure stores, workflows or queue settlement.
+Runwire public API only when the pool capability is selected. Runwire must remain
+unaware of Omnibus messages, retries, failure stores, workflows or queue
+settlement.
 
 ---
 
@@ -888,9 +911,10 @@ Once Omnibus 2.6 is released:
 
 Omnibus 2.6 is ready when all of the following are true:
 
-- Composer/test metadata targets CacheLayer `^3.4`, DBLayer `^5.1` and released Runwire `^1.0`.
-- Existing CacheLayer/DBLayer integrations still remain optional runtime dependencies.
-- `WorkerPool` delegates generic process supervision to Runwire; no second direct-`pcntl` supervisor/fallback remains.
+- Composer/test metadata targets CacheLayer `^3.4` and DBLayer `^5.1`; Runwire `^1.0` is dev-tested/suggested rather than mandatory.
+- Existing CacheLayer/DBLayer/Runwire integrations remain optional runtime capabilities.
+- Omnibus direct dispatch, Consumer and single-process Worker paths run without Runwire.
+- `WorkerPool` delegates generic process supervision to Runwire when available; without Runwire it fails with a clear capability error and no second direct-`pcntl` supervisor/fallback remains.
 - All DBLayer 5.1 durable queue/workflow/failure/after-commit tests pass.
 - CacheLayer 3.4 coordination tests pass.
 - `WorkerPool` accepts an external lifecycle without Foundation-specific dependencies.
@@ -913,7 +937,7 @@ Omnibus 2.6 is ready when all of the following are true:
 
 ## 25. Recommended implementation order
 
-1. Align dependencies/docs: CacheLayer 3.4, DBLayer 5.1 and released Runwire 1.0.
+1. Align dependencies/docs: CacheLayer 3.4, DBLayer 5.1 and optional dev-tested/suggested Runwire 1.0.
 2. Adapt `WorkerPool` to Runwire `Supervisor`/`WorkerGroup` while preserving the Omnibus public facade and its current concurrency/stop validation.
 3. Add a supervised-child Worker path that does not install Omnibus signal handlers over Runwire.
 4. Add explicit Worker completion classification so clean queue-worker recycle maps to Runwire `WorkerContext::requestRecycle()`, requested stop remains a stop, and abnormal failure remains a crash.
@@ -1087,8 +1111,8 @@ preserve the existing Omnibus facade.
 Required mapping rules:
 
 - retain a small Omnibus feature gate that reports a clear WorkerPool capability
-  error when the Runwire supervisor's required Unix process extensions are
-  unavailable; do not reimplement supervision as the fallback;
+  error when Runwire itself is unavailable or when its required Unix process
+  capabilities are unavailable; do not reimplement supervision as the fallback;
 - create the Runwire `Supervisor` with a `LoopInterface` owned by the pool adapter;
 - register parent `WorkerLifecycle` heartbeat/stop polling with
   `LoopInterface::repeat()` rather than `SIGALRM`;
@@ -1120,25 +1144,32 @@ recycle-vs-stop from process exit code after the fact.
 
 ### 27.4 Dependency decision
 
-Required for Omnibus 2.6:
+Runwire remains an **optional Omnibus capability dependency**.
+
+Recommended Composer shape:
 
 ```json
-"infocyph/runwire": "^1.0"
+"require-dev": {
+    "infocyph/runwire": "^1.0"
+},
+"suggest": {
+    "infocyph/runwire": "Required only for the process-based WorkerPool capability."
+}
 ```
-
-as a normal production dependency because the released `WorkerPool` delegates
-generic process supervision to Runwire.
 
 Reasoning:
 
-- Omnibus already publicly advertises process-based `WorkerPool` behavior;
-- retaining an optional fallback direct-`pcntl` supervisor defeats the ownership consolidation;
-- Runwire is a low-level Infocyph runtime dependency, not a framework dependency;
+- most Omnibus APIs do not require a process supervisor;
+- FPM, request-driven PHP, direct dispatch, `Consumer`, and single-process
+  `Worker` must remain usable without Runwire;
+- when `WorkerPool` is selected, Runwire is the only supported process engine;
+- retaining an optional fallback direct-`pcntl` supervisor would defeat the
+  ownership consolidation;
 - one process engine is easier to secure/test than two.
 
-Do **not** preserve a second raw `pcntl` engine merely to avoid the dependency.
-A future packaging split may reconsider optionality only if the process-pool
-feature itself moves out of the normal package.
+Do **not** preserve a second raw `pcntl` engine merely to avoid installing
+Runwire. Absence of Runwire disables only the pool capability, not Omnibus as a
+whole.
 
 Runwire must never depend on Omnibus.
 
@@ -1376,9 +1407,11 @@ Omnibus message
 After Runwire-aligned Omnibus 2.6 is released, Foundation Point 26.8 should:
 
 - require Omnibus 2.6;
-- consume Runwire transitively through Omnibus for queue-worker supervision;
-  add a direct Foundation Runwire dependency only if a separate Foundation
-  native-runtime feature independently consumes Runwire APIs;
+- install/require Runwire 1.0 explicitly in Foundation only for deployments or
+  modules that enable Omnibus `WorkerPool`, because Omnibus keeps Runwire
+  optional;
+- do not make Runwire necessary for Foundation FPM/request paths merely because
+  Foundation also supports queue pools;
 - remove Foundation `WorkerManager::watchPool()` / SIGALRM pool watchdog behavior;
 - supply Foundation lifecycle/control policy through the Omnibus/Runwire adapter path;
 - retain Foundation parent-clean assertions;
@@ -1407,7 +1440,9 @@ Add integration/contract coverage for:
 - no direct inherited parent connection use;
 - Foundation-style external lifecycle adapter works;
 - Omnibus can run non-pool/single-process consumer paths without Foundation;
-- Runwire absence is a Composer/install-time dependency condition rather than a runtime fallback to duplicated `pcntl` logic when WorkerPool is part of normal package.
+- Runwire absence leaves direct/Consumer/single-Worker Omnibus paths operational;
+  selecting `WorkerPool` without Runwire fails clearly and never falls back to
+  duplicated `pcntl` logic.
 
 Raw EINTR/ECHILD/signal restoration/PID bookkeeping exhaustive tests belong primarily in Runwire.
 
@@ -1485,10 +1520,10 @@ Do not block non-process Omnibus work on Runwire internals that are irrelevant t
 The process/supervision part of Omnibus 2.6 closes only when:
 
 - [X] released Runwire 1.0 provides the required generic supervisor semantics;
-- [ ] Omnibus `WorkerPool` retains a clean queue-facing API;
+- [ ] Omnibus remains fully usable without Runwire for non-pool paths, while `WorkerPool` retains a clean queue-facing API when Runwire is installed;
 - [ ] queue/message `Worker` semantics remain Omnibus-owned;
 - [ ] raw generic fork/signal/wait/reap/restart implementation is delegated to Runwire rather than duplicated;
-- [ ] no alternate direct-`pcntl` fallback silently recreates a second supervisor;
+- [ ] Runwire absence disables only `WorkerPool`; no alternate direct-`pcntl` fallback silently recreates a second supervisor;
 - [ ] clean worker recycle and abnormal crash remain correctly distinguished;
 - [ ] post-fork DB/cache/broker ownership tests pass;
 - [ ] DBLayer exact-connection/atomic workflow semantics remain intact;
