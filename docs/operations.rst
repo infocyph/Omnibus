@@ -55,8 +55,11 @@ embedded runtimes, lifecycle integration works with signal handling disabled.
 ``WorkerOptions`` remains value/configuration policy and does not contain the
 lifecycle object.
 
-``WorkerPool`` is an optional Unix/Linux fixed-process supervisor. It requires
-``ext-pcntl`` and ``ext-posix``. The pool keeps the configured concurrency
+``WorkerPool`` is an optional fixed-process supervisor. Its native Unix/Linux
+backend requires ``ext-pcntl`` and ``ext-posix`` and remains usable without
+Runwire. Runwire 1.x is an optional alternative backend and must be selected
+explicitly; ordinary FPM/request, Consumer, and single-process Worker usage does
+not require either pool backend. The pool keeps the configured concurrency
 stable, replaces cleanly recycled workers, and respawns crashed workers with a
 bounded linear backoff. Exhausting the crash restart budget fails the pool and
 signals the remaining children to stop. Parent signal handlers are scoped to
@@ -127,7 +130,7 @@ The in-memory transport is process-local and therefore does not become shared
 by using ``WorkerPool``. Parallel workers require a durable/shared transport
 such as DBLayer, Redis/Valkey, AMQP or SQS.
 
-DBLayer integrations are tested against DBLayer 5.x. MySQL, MariaDB,
+DBLayer integrations are tested against DBLayer 5.1. MySQL, MariaDB,
 PostgreSQL, SQLite and Microsoft SQL Server use their own DBLayer driver paths;
 Omnibus keeps vendor-specific claim/locking syntax inside the DBLayer adapter
 rather than exposing database knobs through the worker API. SQLite parallel

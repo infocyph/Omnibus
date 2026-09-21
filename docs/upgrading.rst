@@ -1,6 +1,19 @@
 Upgrading
 =========
 
+2.6.0
+-----
+
+Omnibus 2.6 raises its optional integration test floors to CacheLayer 3.4 and
+DBLayer 5.1. Applications that do not construct those adapters keep no runtime
+dependency on either package.
+
+Runwire 1.x is an optional alternative ``WorkerPool`` backend. It is not a core
+runtime dependency and is never selected merely because it is installed. The
+native Unix pool continues to use ``ext-pcntl`` and ``ext-posix`` directly, while
+ordinary FPM/request, direct dispatch, ``Consumer``, and single-process
+``Worker`` usage requires neither Runwire nor the process extensions.
+
 2.5.0
 -----
 

@@ -28,10 +28,13 @@ Requirements:
 - `psr/clock`
 - `psr/event-dispatcher`
 
-DBLayer, CacheLayer, Redis/Valkey clients, and broker SDKs are optional and load
-only when their adapters are constructed.
+DBLayer, CacheLayer, Redis/Valkey clients, broker SDKs, and Runwire are optional and load
+only when their adapters/backends are constructed. The core FPM/request, direct
+CLI, Consumer, and single-process Worker paths do not require Runwire,
+`ext-pcntl`, or `ext-posix`.
 
-Database integrations are tested against DBLayer 5.x. DBLayer owns database
+Database integrations are tested against DBLayer 5.1. CacheLayer coordination
+integrations are tested against CacheLayer 3.4. DBLayer owns database
 execution, driver behavior, effective bind limits, transaction retries, and
 after-commit callback lifecycle. Omnibus owns reservations, workflows,
 failure-state transitions, and delivery guarantees. Queue receive and workflow
@@ -117,7 +120,8 @@ long-running loop for one process. Hosts may supply a framework-neutral
 `WorkerLifecycle` for heartbeat and graceful external-stop polling on any
 platform; SIGTERM/SIGINT support remains available on Unix. On Unix/Linux,
 optional `WorkerPool` uses
-`ext-pcntl` and `ext-posix` for fixed process concurrency; construct PDO,
+`ext-pcntl` and `ext-posix` for its native fixed-process backend; Runwire 1.x is
+an optional alternative backend and is never selected implicitly; construct PDO,
 Redis/Valkey, AMQP, SQS, and other process-bound resources inside its worker
 factory after fork. External Supervisor, systemd, Docker, or Kubernetes remains
 the preferred production supervisor when available.
