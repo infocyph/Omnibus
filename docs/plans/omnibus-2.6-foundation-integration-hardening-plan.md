@@ -36,7 +36,7 @@ This release is an additive hardening and ownership-alignment pass. Omnibus rema
 | Batch | Scope | Status | Completion evidence |
 |---|---|---|---|
 | 0 | Plan reconciliation + whole-codebase audit | **COMPLETE** | Current branch/codebase reviewed; FPM/native-PCNTL/optional-Runwire ownership corrected; durable/policy hardening gaps added. |
-| 1 | Dependency and capability alignment | OPEN | CacheLayer `^3.4`, DBLayer `^5.1`, optional Runwire `^1.0`; `ext-pcntl`/`ext-posix` remain optional WorkerPool capabilities, not core/FPM requirements. |
+| 1 | Dependency and capability alignment | **COMPLETE** | CacheLayer `^3.4`, DBLayer `^5.1`, optional Runwire `^1.0` aligned; PCNTL/POSIX remain optional native-pool capabilities; PHP 8.4/8.5 lowest/stable QA, analysis, clean install, replica-affinity and benchmarks green in run `35631189934`. |
 | 2 | Native `WorkerPool` extraction + PCNTL/POSIX hardening | OPEN | Native pool works without Runwire; wait/reap, signals, child normalization, stop/drain, restart/recycle and error handling are hardened. |
 | 3 | Optional Runwire backend + lifecycle parity | OPEN | Explicit Runwire backend preserves the same WorkerPool semantics; no implicit dependency-driven backend switching. |
 | 4 | Durable transport/store + coordination integrity | OPEN | DBLayer 5.1 ownership, binary-safe payloads, strict hydration/claim counts, failure-state semantics, Redis validation and CacheLayer cleanup/error precedence are proven. |
@@ -45,7 +45,7 @@ This release is an additive hardening and ownership-alignment pass. Omnibus rema
 | 7 | Foundation Point 26.8 migration | OPEN | Foundation raises Omnibus to `^2.6`, removes `WorkerManager::watchPool()`, keeps parent-clean/app policy, and can use native pool without Runwire or explicitly opt into Runwire. |
 | 8 | Omnibus 2.6 release gate | OPEN | PHP 8.4/8.5 QA green, released-only dependency graph, docs complete, both supported pool backends green, Foundation handoff green. |
 
-**Current execution batch:** **Batch 1 — dependency and capability alignment**.
+**Current execution batch:** **Batch 2 — native `WorkerPool` extraction + PCNTL/POSIX hardening**.
 
 Tracker rule: mark a batch **COMPLETE** only after its code, focused tests and
 relevant QA/benchmark evidence are green. Do not advance tracker state from code
