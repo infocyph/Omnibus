@@ -110,9 +110,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         if ($this->children === [] || $this->shutdownGraceSeconds === null) {
             return;
         }
-        if ($this->shutdownDeadline === null) {
-            $this->shutdownDeadline = self::monotonicSeconds() + $this->shutdownGraceSeconds;
-        }
+        $this->shutdownDeadline ??= self::monotonicSeconds() + $this->shutdownGraceSeconds;
 
         $this->signalChildren(self::SIGNAL_TERMINATE);
     }
@@ -307,9 +305,9 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
             $this->resetSignalsForChild();
             $worker = $workerFactory($slot);
             $worker->run();
-            exit(0);
+            $this->terminateChild(self::SIGNAL_TERMINATE);
         } catch (\Throwable) {
-            exit(1);
+            $this->terminateChild(self::SIGNAL_KILL);
         }
     }
 
@@ -366,4 +364,16 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
             throw new \RuntimeException($fatal);
         }
     }
+    private function terminateChild(int $signal): never
+    {
+        $pid = getmypid();
+        if (!is_int($pid) || !posix_kill($pid, $signal)) {
+            throw new \RuntimeException('Unable to terminate Omnibus worker child process.');
+        }
+
+        while (true) {
+            usleep(self::SUPERVISION_SLEEP_MICROSECONDS);
+        }
+    }
+
 }

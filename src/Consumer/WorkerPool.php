@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Infocyph\Omnibus\Consumer;
 
-final class WorkerPool
+final readonly class WorkerPool
 {
     /** @var \Closure(int):Worker */
-    private readonly \Closure $workerFactory;
+    private \Closure $workerFactory;
 
-    private readonly WorkerPoolBackend $backend;
+    private WorkerPoolBackend $backend;
 
     /**
      * The factory is invoked in each child after process creation. Create
@@ -19,10 +19,10 @@ final class WorkerPool
      */
     public function __construct(
         callable $workerFactory,
-        private readonly int $concurrency = 1,
-        private readonly int $maximumRestarts = 5,
-        private readonly float $restartBackoffSeconds = 0.25,
-        private readonly float $shutdownGraceSeconds = 30.0,
+        private int $concurrency = 1,
+        private int $maximumRestarts = 5,
+        private float $restartBackoffSeconds = 0.25,
+        private float $shutdownGraceSeconds = 30.0,
         ?WorkerPoolBackend $backend = null,
     ) {
         if ($concurrency < 1 || $concurrency > 256) {
@@ -38,7 +38,7 @@ final class WorkerPool
             throw new \InvalidArgumentException('Worker shutdown grace must be positive and finite.');
         }
 
-        $this->workerFactory = \Closure::fromCallable($workerFactory);
+        $this->workerFactory = $workerFactory(...);
         $this->backend = $backend ?? new NativeWorkerPoolBackend();
     }
 

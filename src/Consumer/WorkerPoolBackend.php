@@ -6,6 +6,8 @@ namespace Infocyph\Omnibus\Consumer;
 
 interface WorkerPoolBackend
 {
+    public function requestStop(): void;
+
     /** @param \Closure(int):Worker $workerFactory */
     public function run(
         \Closure $workerFactory,
@@ -14,6 +16,4 @@ interface WorkerPoolBackend
         float $restartBackoffSeconds,
         float $shutdownGraceSeconds,
     ): void;
-
-    public function requestStop(): void;
 }
