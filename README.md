@@ -120,8 +120,9 @@ worker process lifecycle. See the
 
 `Consumer::run()` performs one bounded receive call. `Worker` provides the
 long-running loop for one process. Hosts may supply a framework-neutral
-`WorkerLifecycle` for heartbeat and graceful external-stop polling on any
-platform policy; SIGTERM/SIGINT support remains available on Unix. Omnibus 2.6
+`WorkerLifecycle` for heartbeat and graceful external-stop policy without
+requiring signal delivery for each lifecycle decision. SIGTERM/SIGINT support
+remains available on Unix. Omnibus 2.6
 requires `ext-pcntl` and `ext-posix`; the optional `WorkerPool` uses them for
 its native fixed-process backend. Runwire 1.x remains an optional alternative
 backend and is never selected implicitly; construct PDO,

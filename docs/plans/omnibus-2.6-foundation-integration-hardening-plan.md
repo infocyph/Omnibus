@@ -37,16 +37,16 @@ This release is an additive hardening and ownership-alignment pass. Omnibus rema
 | Batch | Scope | Status | Completion evidence |
 |---|---|---|---|
 | 0 | Plan reconciliation + whole-codebase audit | **COMPLETE** | Current branch/codebase reviewed; FPM/native-PCNTL/optional-Runwire ownership corrected; durable/policy hardening gaps added. |
-| 1 | Dependency and capability alignment | **COMPLETE** | CacheLayer `^3.4`, DBLayer `^5.1`, optional Runwire `^1.0` aligned; PCNTL/POSIX remain optional native-pool capabilities; PHP 8.4/8.5 lowest/stable QA, analysis, clean install, replica-affinity and benchmarks green in run `35631189934`. |
+| 1 | Dependency and capability alignment | **COMPLETE** | CacheLayer `^3.4`, DBLayer `^5.1`, optional Runwire `^1.0` aligned; `ext-pcntl` + `ext-posix` are mandatory runtime requirements and are absent from `require-dev`/`suggest`; full PHP 8.4/8.5 validation is green in run `35680858522`. |
 | 2 | Native `WorkerPool` extraction + PCNTL/POSIX hardening | **COMPLETE** | Native backend extracted behind `WorkerPoolBackend`; default remains PCNTL/POSIX without Runwire; signal callbacks, child normalization, nonblocking wait/reap with EINTR/ECHILD reconciliation, stop/drain, restart/recycle and parent signal restoration are green in run `35633494360`. |
 | 3 | Optional Runwire backend + lifecycle parity | **COMPLETE** | Explicit `RunwireWorkerPoolBackend` uses Runwire 1.x public Supervisor/WorkerGroup APIs, preserves native/Runwire lifecycle parity, keeps backend choice explicit, and passed the full PHP 8.4/8.5 QA/analysis/benchmark matrix in run `35676264890`. |
 | 4 | Durable transport/store + coordination integrity | **COMPLETE** | Portable binary-safe DB payload encoding, exact DB reservation/claim ownership, strict failure hydration/re-failure state, CacheLayer primary-error/cleanup precedence, Redis/Valkey structural corruption detection, bounded redispatch stamps and PSR-14 provider hardening are green in run `35678113518`. |
-| 5 | Worker/WorkerPool + integration test matrix | **COMPLETE** | Shared native/Runwire child-factory parity, crash/exhaustion reaping, explicit no-zombie checks, DBLayer child-side construction, no-process core/FPM-compatible Worker paths, durable drivers and Batch 4 CacheLayer/Redis invariants are green in run `35678607318`. |
+| 5 | Worker/WorkerPool + integration test matrix | **COMPLETE** | Shared native/Runwire child-factory parity, crash/exhaustion reaping, explicit no-zombie checks, DBLayer child-side construction, core/FPM-compatible Worker execution without pool construction, durable drivers and Batch 4 CacheLayer/Redis invariants are green; mandatory PCNTL/POSIX dependency contract revalidated in run `35680858522`. |
 | 6 | Benchmarks, soak and documentation | **COMPLETE** | Component and WorkerPool benchmarks now attribute direct Consumer, single Worker, native pool and explicit Runwire pool costs; parent idle CPU, recycle/startup/shutdown wall time, memory growth and portable DB storage overhead are reported; durable contention/soak guidance and operational docs are updated; PHP 8.4/8.5 QA, analysis, clean install, replica-affinity and benchmarks are green in run `35679889105`. |
-| 7 | Foundation Point 26.8 migration | OPEN | Foundation raises Omnibus to `^2.6`, removes `WorkerManager::watchPool()`, keeps parent-clean/app policy, and can use native pool without Runwire or explicitly opt into Runwire. |
-| 8 | Omnibus 2.6 release gate | OPEN | PHP 8.4/8.5 QA green, released-only dependency graph, docs complete, both supported pool backends green, Foundation handoff green. |
+| 7 | Omnibus 2.6 release gate | OPEN | Final PHP 8.4/8.5 QA, mandatory PCNTL/POSIX production dependency graph, docs, benchmarks/soaks and both supported pool backends are green before publication. |
+| 8 | Foundation Point 26.8 post-release migration | OPEN | After Omnibus 2.6 is published, Foundation raises Omnibus to `^2.6`, removes `WorkerManager::watchPool()`, keeps parent-clean/app policy, and can use the native pool without Runwire or explicitly opt into Runwire. |
 
-**Current execution batch:** **Batch 7 — Foundation Point 26.8 migration**.
+**Current execution batch:** **Batch 7 — Omnibus 2.6 release gate**.
 
 Tracker rule: mark a batch **COMPLETE** only after its code, focused tests and
 relevant QA/benchmark evidence are green. Do not advance tracker state from code
@@ -956,8 +956,8 @@ Omnibus 2.6 is ready when all of the following are true:
 
 ## 25. Recommended implementation order
 
-1. Align CacheLayer 3.4, DBLayer 5.1, optional Runwire 1.0 and
-   PCNTL/POSIX capability metadata/docs.
+1. Align CacheLayer 3.4, DBLayer 5.1, optional Runwire 1.0 and mandatory
+   PCNTL/POSIX runtime dependency metadata/docs.
 2. Extract/harden native WorkerPool mechanics without removing native support.
 3. Centralize WorkerPool outcome/lifecycle/restart policy above backend-specific
    supervision.
@@ -967,7 +967,7 @@ Omnibus 2.6 is ready when all of the following are true:
 6. Harden CacheLayer cleanup/error precedence and Redis structural invariants.
 7. Close envelope redispatch/transient-stamp and external PSR-provider edge
    cases.
-8. Run the full native/Runwire/core-no-process test matrix.
+8. Run the full native/Runwire/core-without-pool-construction test matrix.
 9. Add benchmarks/soaks and update operations/performance/upgrading/security
    documentation.
 10. Release Omnibus 2.6.
