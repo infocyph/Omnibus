@@ -15,7 +15,7 @@ use Infocyph\Omnibus\Tests\Fixtures\RecordingWorkerLifecycle;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
 
-test('core and FPM-compatible paths keep process backends optional', function (): void {
+test('core and FPM-compatible paths keep Runwire optional with mandatory process extensions', function (): void {
     $composerPath = dirname(__DIR__, 2) . '/composer.json';
     $composer = json_decode((string) file_get_contents($composerPath), true, flags: JSON_THROW_ON_ERROR);
     if (!is_array($composer['require'] ?? null) || !is_array($composer['require-dev'] ?? null)) {
@@ -24,9 +24,12 @@ test('core and FPM-compatible paths keep process backends optional', function ()
 
     expect($composer['require'])
         ->not->toHaveKey('infocyph/runwire')
+        ->and($composer['require']['ext-pcntl'] ?? null)->toBe('*')
+        ->and($composer['require']['ext-posix'] ?? null)->toBe('*');
+    expect($composer['require-dev'])
         ->not->toHaveKey('ext-pcntl')
-        ->not->toHaveKey('ext-posix');
-    expect($composer['require-dev']['infocyph/runwire'] ?? null)->toBe('^1.0');
+        ->not->toHaveKey('ext-posix')
+        ->and($composer['require-dev']['infocyph/runwire'] ?? null)->toBe('^1.0');
 
     $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
     $transport = new InMemoryTransport($clock);

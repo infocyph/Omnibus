@@ -53,8 +53,8 @@ The Omnibus suite covers:
 * native/Runwire WorkerPool parity, child-factory PID ownership, crash reaping
   and explicit no-zombie checks;
 * DBLayer construction after fork inside the worker factory;
-* core/FPM-compatible Worker execution with Runwire, PCNTL and POSIX absent
-  from mandatory Composer requirements.
+* core/FPM-compatible Worker execution without constructing Runwire or a pool
+  backend, while mandatory PCNTL/POSIX Composer requirements remain present.
 
 Commands
 --------

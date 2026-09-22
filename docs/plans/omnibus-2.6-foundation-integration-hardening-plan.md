@@ -10,17 +10,18 @@ Baseline:
 - UID: `^5.0`
 - CacheLayer reference integration: raise to `^3.4`
 - DBLayer reference integration: raise to `^5.1`
-- Native WorkerPool runtime: optional Unix capability via `ext-pcntl` + `ext-posix`
+- Unix runtime floor: mandatory `ext-pcntl` + `ext-posix`
 - Runwire process-supervision integration: optional alternative backend, tested against `^1.0`
 - PHPForge: keep `dev-main@dev`
 - Foundation integration target: `infocyph/foundation` Point **26.8**
 
 Runwire **1.0 is released**, but it is **not** a mandatory runtime dependency and
 does **not** replace Omnibus's native Unix worker-pool capability. Omnibus 2.6
-must support three deployment shapes:
+has a mandatory Unix process-extension floor through `ext-pcntl` +
+`ext-posix` and supports these deployment shapes:
 
-1. ordinary FPM/request and direct CLI usage with neither Runwire nor
-   `ext-pcntl`/`ext-posix` required;
+1. ordinary FPM/request, direct CLI, Consumer and single-process Worker usage
+   with the mandatory extensions installed but without constructing a pool;
 2. the built-in Unix `WorkerPool` using `ext-pcntl` + `ext-posix` without
    Runwire;
 3. an explicitly selected optional Runwire-backed `WorkerPool` integration.
@@ -62,7 +63,7 @@ presence alone.
 5. Keep durable DBLayer-backed Omnibus services bound to the exact `Connection` instance required for queue/workflow transaction semantics.
 6. Remove generic Omnibus supervision mechanics from Foundation where they currently exist only because Omnibus lacks the corresponding API.
 7. Keep one queue-worker policy surface while supporting two process backends: native `pcntl`/`posix` by default and optional Runwire when explicitly selected; do not duplicate queue/retry/recycle policy between them.
-8. Keep ordinary FPM/request, direct dispatch, Consumer and single-process Worker usage independent of Runwire and process extensions.
+8. Keep ordinary FPM/request, direct dispatch, Consumer and single-process Worker usage independent of Runwire and pool construction, while accepting the mandatory PCNTL/POSIX package floor.
 9. Add focused tests and benchmarks proving the worker lifecycle and persistent-process behavior remain deterministic, bounded, leak-free, and low-overhead.
 
 ## 2. Non-goals
@@ -140,9 +141,8 @@ for Omnibus or for the built-in Unix pool.
 
 Keep Runwire out of mandatory production requirements. Use it as a
 development/reference integration dependency and advertise it through Composer
-`suggest`. Keep `ext-pcntl` and `ext-posix` in `suggest` because they are
-the native WorkerPool capabilities, but do not place them in global
-`require`.
+`suggest`. Place `ext-pcntl` and `ext-posix` in global `require`; do not
+duplicate them in `require-dev` or `suggest`.
 
 Backend selection must be explicit. Do not silently switch supervision
 semantics merely because another package installs Runwire.
@@ -151,27 +151,23 @@ When Runwire is unavailable:
 
 - direct `MessageBus`, `Consumer`, workflows, transports, FPM/request usage
   and single-process `Worker` continue to work;
-- native `WorkerPool` continues to work when `ext-pcntl` + `ext-posix` are
-  available;
+- native `WorkerPool` continues to work through the mandatory
+  `ext-pcntl` + `ext-posix` runtime requirements;
 - no Runwire class may be referenced during ordinary bootstrap.
 
-When the native process extensions are unavailable:
-
-- all non-pool paths continue to work;
-- selecting native `WorkerPool` fails immediately with a clear capability
-  error;
-- the package remains installable/useful in normal FPM deployments.
+When the native process extensions are unavailable, Composer must reject the
+Omnibus 2.6 installation because they are mandatory runtime requirements.
 
 ### 3.4 Runtime capability matrix
 
 | Runtime/use | Runwire | PCNTL/POSIX | Expected support |
 |---|---:|---:|---|
-| FPM/request-driven dispatch | not required | not required | full non-pool Omnibus |
-| normal CLI direct dispatch/Consumer | not required | not required | full non-pool Omnibus |
-| single-process `Worker` without signal handling | not required | not required | supported |
-| single-process `Worker` with Unix signals | not required | PCNTL | supported |
-| native `WorkerPool` | not required | PCNTL + POSIX | supported/default Unix pool backend |
-| Runwire-backed `WorkerPool` | required | Runwire process capabilities | supported when explicitly selected |
+| FPM/request-driven dispatch | not required | mandatory package floor | full non-pool Omnibus |
+| normal CLI direct dispatch/Consumer | not required | mandatory package floor | full non-pool Omnibus |
+| single-process `Worker` without signal handling | not required | mandatory package floor | supported |
+| single-process `Worker` with Unix signals | not required | mandatory package floor | supported |
+| native `WorkerPool` | not required | mandatory package floor | supported/default Unix pool backend |
+| Runwire-backed `WorkerPool` | required | mandatory package floor plus Runwire capabilities | supported when explicitly selected |
 
 Do not encourage creating a process pool from inside an FPM request. FPM is a
 valid host for request-time Omnibus; `WorkerPool` is a CLI/persistent-process
@@ -929,7 +925,8 @@ Omnibus 2.6 is ready when all of the following are true:
 - Composer/test metadata targets CacheLayer `^3.4` and DBLayer `^5.1`;
   Runwire `^1.0`, PCNTL and POSIX remain optional capabilities.
 - Ordinary FPM/request, direct dispatch, Consumer and single-process Worker
-  paths run without Runwire and without mandatory process extensions.
+  paths run without Runwire or pool construction, while the package retains
+  mandatory PCNTL/POSIX requirements.
 - Native `WorkerPool` remains operational without Runwire on supported Unix
   runtimes with PCNTL/POSIX.
 - Optional Runwire WorkerPool backend can be selected explicitly and preserves
@@ -1237,7 +1234,8 @@ Prove process support is optional:
 - mandatory Composer requirements contain no Runwire, PCNTL or POSIX;
 - ordinary dispatch/serialization/transports/request integrations load without
   Runwire;
-- `Worker(handleSignals: false)` works without process extensions;
+- `Worker(handleSignals: false)` avoids signal handling while the mandatory
+  PCNTL/POSIX package requirements remain installed;
 - native WorkerPool capability failure is isolated to selecting the feature;
 - documentation clearly separates FPM/request usage from CLI/persistent pool
   usage.

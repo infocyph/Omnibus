@@ -22,6 +22,8 @@
     ],
     "require": {
         "php": "^8.4",
+        "ext-pcntl": "*",
+        "ext-posix": "*",
         "infocyph/uid": "^5.0",
         "psr/clock": "^1.0",
         "psr/event-dispatcher": "^1.0"
@@ -35,8 +37,6 @@
     "suggest": {
         "ext-memcached": "Optional for Memcached-backed uniqueness and overlap leases.",
         "ext-msgpack": "One option for a CallbackEnvelopeSerializer binary codec.",
-        "ext-pcntl": "Enables Unix signal handling and the native process-based WorkerPool backend.",
-        "ext-posix": "Enables process signalling for the native WorkerPool backend.",
         "ext-redis": "Required by the native Redis/Valkey transport.",
         "aws/aws-sdk-php": "One option for implementing the native SQS backend boundary.",
         "infocyph/cachelayer": "Enables Omnibus CacheLayer coordination integrations; tested with CacheLayer 3.4.",

@@ -9,10 +9,12 @@ DBLayer 5.1. Applications that do not construct those adapters keep no runtime
 dependency on either package.
 
 Runwire 1.x is an optional alternative ``WorkerPool`` backend. It is not a core
-runtime dependency and is never selected merely because it is installed. The
-native Unix pool continues to use ``ext-pcntl`` and ``ext-posix`` directly, while
-ordinary FPM/request, direct dispatch, ``Consumer``, and single-process
-``Worker`` usage requires neither Runwire nor the process extensions.
+runtime dependency and is never selected merely because it is installed.
+Omnibus 2.6 now requires ``ext-pcntl`` and ``ext-posix`` at the package
+level. The native Unix pool uses those extensions directly; ordinary
+FPM/request, direct dispatch, ``Consumer``, and single-process ``Worker``
+paths do not construct a pool backend, but their installation still inherits
+the mandatory process-extension floor.
 
 ``WorkerPool`` now accepts an optional backend, parent ``WorkerLifecycle`` and
 lifecycle polling interval. Existing construction continues to select the
