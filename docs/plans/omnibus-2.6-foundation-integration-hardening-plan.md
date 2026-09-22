@@ -45,7 +45,7 @@ This release is an additive hardening and ownership-alignment pass. Omnibus rema
 | 7 | Foundation Point 26.8 migration | OPEN | Foundation raises Omnibus to `^2.6`, removes `WorkerManager::watchPool()`, keeps parent-clean/app policy, and can use native pool without Runwire or explicitly opt into Runwire. |
 | 8 | Omnibus 2.6 release gate | OPEN | PHP 8.4/8.5 QA green, released-only dependency graph, docs complete, both supported pool backends green, Foundation handoff green. |
 
-**Current execution batch:** **Batch 3 — optional Runwire backend + lifecycle parity**.
+**Current execution batch:** **Batch 4 — durable transport/store + coordination integrity**.
 
 Tracker rule: mark a batch **COMPLETE** only after its code, focused tests and
 relevant QA/benchmark evidence are green. Do not advance tracker state from code
