@@ -300,6 +300,7 @@ final readonly class DBLayerFailureStore implements FailureStore
         if (!isset($rows[0])) {
             return null;
         }
+
         return self::associative($rows[0]);
     }
 
