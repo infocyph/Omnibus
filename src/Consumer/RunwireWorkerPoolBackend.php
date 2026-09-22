@@ -41,18 +41,62 @@ final class RunwireWorkerPoolBackend implements WorkerPoolBackend
         }
 
         $this->assertSupported();
-        if ($lifecycle !== null) {
-            $lifecycle->heartbeat();
-            if ($lifecycle->stopRequested()) {
-                $this->stopRequested = true;
-
-                return;
-            }
+        if ($this->lifecycleRequestsStop($lifecycle)) {
+            return;
         }
 
         $loop = new SelectLoop();
-        $supervisor = new Supervisor($loop);
+        $supervisor = $this->createSupervisor(
+            $loop,
+            $workerFactory,
+            $concurrency,
+            $maximumRestarts,
+            $restartBackoffSeconds,
+            $shutdownGraceSeconds,
+        );
         $this->supervisor = $supervisor;
+        $lifecycleFailure = null;
+        $timer = $this->registerLifecycleTimer(
+            $loop,
+            $supervisor,
+            $lifecycle,
+            $lifecycleIntervalSeconds,
+            $lifecycleFailure,
+        );
+
+        $supervisorFailure = $this->runSupervisor($loop, $supervisor, $timer);
+        $this->throwFailure($lifecycleFailure, $supervisorFailure);
+    }
+
+    private function assertSupported(): void
+    {
+        foreach ([Supervisor::class, WorkerContext::class, WorkerGroup::class] as $class) {
+            if (!class_exists($class)) {
+                throw new \RuntimeException(
+                    'The Runwire WorkerPool backend requires infocyph/runwire ^1.0.',
+                );
+            }
+        }
+
+        foreach (['pcntl_fork', 'posix_kill'] as $function) {
+            if (!function_exists($function)) {
+                throw new \RuntimeException(
+                    'The Runwire WorkerPool backend requires Runwire native process capabilities.',
+                );
+            }
+        }
+    }
+
+    /** @param \Closure(int):Worker $workerFactory */
+    private function createSupervisor(
+        SelectLoop $loop,
+        \Closure $workerFactory,
+        int $concurrency,
+        int $maximumRestarts,
+        float $restartBackoffSeconds,
+        float $shutdownGraceSeconds,
+    ): Supervisor {
+        $supervisor = new Supervisor($loop);
         $supervisor->group(WorkerGroup::callbacks(
             name: 'omnibus',
             count: $concurrency,
@@ -82,30 +126,60 @@ final class RunwireWorkerPoolBackend implements WorkerPoolBackend
             reloadable: false,
         ));
 
-        $lifecycleFailure = null;
-        $timer = null;
-        if ($lifecycle !== null) {
-            $timer = $loop->repeat(
-                $lifecycleIntervalSeconds,
-                function () use ($lifecycle, $supervisor, &$lifecycleFailure): void {
-                    try {
-                        $lifecycle->heartbeat();
-                        if ($lifecycle->stopRequested()) {
-                            $this->requestStop();
-                        }
-                    } catch (\Throwable $failure) {
-                        $lifecycleFailure ??= $failure;
-                        $supervisor->stop();
-                    }
-                },
-            );
+        return $supervisor;
+    }
+
+    private function lifecycleRequestsStop(?WorkerLifecycle $lifecycle): bool
+    {
+        if ($lifecycle === null) {
+            return false;
         }
 
-        $supervisorFailure = null;
+        $lifecycle->heartbeat();
+        if (!$lifecycle->stopRequested()) {
+            return false;
+        }
+
+        $this->stopRequested = true;
+
+        return true;
+    }
+
+    private function registerLifecycleTimer(
+        SelectLoop $loop,
+        Supervisor $supervisor,
+        ?WorkerLifecycle $lifecycle,
+        float $lifecycleIntervalSeconds,
+        ?\Throwable &$lifecycleFailure,
+    ): ?int {
+        if ($lifecycle === null) {
+            return null;
+        }
+
+        return $loop->repeat(
+            $lifecycleIntervalSeconds,
+            function () use ($lifecycle, $supervisor, &$lifecycleFailure): void {
+                try {
+                    $lifecycle->heartbeat();
+                    if ($lifecycle->stopRequested()) {
+                        $this->requestStop();
+                    }
+                } catch (\Throwable $failure) {
+                    $lifecycleFailure ??= $failure;
+                    $supervisor->stop();
+                }
+            },
+        );
+    }
+
+    private function runSupervisor(SelectLoop $loop, Supervisor $supervisor, ?int $timer): ?SupervisorException
+    {
+        $failure = null;
+
         try {
             $supervisor->run();
-        } catch (SupervisorException $failure) {
-            $supervisorFailure = $failure;
+        } catch (SupervisorException $error) {
+            $failure = $error;
         } finally {
             if ($timer !== null) {
                 $loop->cancel($timer);
@@ -113,44 +187,27 @@ final class RunwireWorkerPoolBackend implements WorkerPoolBackend
             $this->supervisor = null;
         }
 
+        return $failure;
+    }
+
+    private function throwFailure(?\Throwable $lifecycleFailure, ?SupervisorException $supervisorFailure): void
+    {
         if ($lifecycleFailure !== null) {
             throw $lifecycleFailure;
         }
-        if ($supervisorFailure !== null) {
-            if (str_contains($supervisorFailure->getMessage(), 'Restart budget exhausted')) {
-                throw new \RuntimeException(
-                    'WorkerPool exhausted its restart budget.',
-                    previous: $supervisorFailure,
-                );
-            }
-
+        if ($supervisorFailure === null) {
+            return;
+        }
+        if (str_contains($supervisorFailure->getMessage(), 'Restart budget exhausted')) {
             throw new \RuntimeException(
-                'Runwire WorkerPool supervision failed: ' . $supervisorFailure->getMessage(),
+                'WorkerPool exhausted its restart budget.',
                 previous: $supervisorFailure,
             );
         }
-    }
 
-    private function assertSupported(): void
-    {
-        foreach ([
-            Supervisor::class,
-            WorkerContext::class,
-            WorkerGroup::class,
-        ] as $class) {
-            if (!class_exists($class)) {
-                throw new \RuntimeException(
-                    'The Runwire WorkerPool backend requires infocyph/runwire ^1.0.',
-                );
-            }
-        }
-
-        foreach (['pcntl_fork', 'posix_kill'] as $function) {
-            if (!function_exists($function)) {
-                throw new \RuntimeException(
-                    'The Runwire WorkerPool backend requires Runwire native process capabilities.',
-                );
-            }
-        }
+        throw new \RuntimeException(
+            'Runwire WorkerPool supervision failed: ' . $supervisorFailure->getMessage(),
+            previous: $supervisorFailure,
+        );
     }
 }
