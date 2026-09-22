@@ -29,7 +29,7 @@ final readonly class UniqueSender implements Sender
         ) {
             throw new \InvalidArgumentException('Unique-message wait and lease values are invalid.');
         }
-        $this->key = \Closure::fromCallable($key);
+        $this->key = $key(...);
     }
 
     public function send(Envelope $envelope, string $queue): Envelope
@@ -47,7 +47,11 @@ final readonly class UniqueSender implements Sender
                 $queue,
             );
         } catch (\Throwable $failure) {
-            $this->locks->release($handle);
+            try {
+                $this->locks->release($handle);
+            } catch (\Throwable) {
+                // The send failure remains primary; the lease TTL owns uncertain cleanup.
+            }
 
             throw $failure;
         }

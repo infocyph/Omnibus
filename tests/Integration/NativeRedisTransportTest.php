@@ -4,10 +4,17 @@ declare(strict_types=1);
 
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Integration\Redis\CallbackRedisClient;
+use Infocyph\Omnibus\Integration\Redis\RedisBackendStateCorruption;
 use Infocyph\Omnibus\Integration\Redis\RedisTransport;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
+use Infocyph\Omnibus\Tests\Fixtures\IntegrationEnvironment;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 use Infocyph\Omnibus\Tests\Fixtures\TestSerializer;
+
+$omnibusRedisTransportBackends = IntegrationEnvironment::redisBackendCases();
+if ($omnibusRedisTransportBackends === []) {
+    return;
+}
 
 test('native Redis-compatible service completes reservation and settlement lifecycle', function (
     string $backend,
@@ -15,18 +22,8 @@ test('native Redis-compatible service completes reservation and settlement lifec
     string $portVariable,
     string $passwordVariable,
 ): void {
-    if (!extension_loaded('redis') || !class_exists(Redis::class)) {
-        test()->markTestSkipped('The redis extension is unavailable.');
-
-        return;
-    }
-    $host = getenv($hostVariable);
-    $port = getenv($portVariable);
-    if (!is_string($host) || $host === '' || !is_string($port) || $port === '') {
-        test()->markTestSkipped(sprintf('The %s service is not configured.', $backend));
-
-        return;
-    }
+    $host = (string) getenv($hostVariable);
+    $port = (string) getenv($portVariable);
 
     $redis = new Redis();
     $redis->connect($host, (int) $port, 3);
@@ -37,12 +34,14 @@ test('native Redis-compatible service completes reservation and settlement lifec
 
     $prefix = 'omnibus_'.$backend.'_matrix_'.getmypid();
     $queue = 'native';
+    $tag = sprintf('{%s:%s}', $prefix, $queue);
     $keys = [
-        "{$prefix}:{native}:ready",
-        "{$prefix}:{native}:reserved",
-        "{$prefix}:{native}:payloads",
-        "{$prefix}:{native}:attempts",
-        "{$prefix}:{native}:receipts",
+        $tag . ':ready',
+        $tag . ':reserved',
+        $tag . ':payloads',
+        $tag . ':attempts',
+        $tag . ':receipts',
+        $tag . ':message_ids',
     ];
     $redis->del($keys);
 
@@ -68,11 +67,20 @@ test('native Redis-compatible service completes reservation and settlement lifec
             ->and($redelivery->attempt)->toBe(2)
             ->and($redelivery->envelope()->message)->toEqual(new TestCommand($backend.'-native'))
             ->and($transport->size($queue))->toBe(0);
+
+        $transport->send(new Envelope(new TestCommand($backend.'-corrupt')), $queue);
+        $ids = $redis->zRange($keys[0], 0, 0);
+        $corruptId = is_array($ids) ? ($ids[0] ?? null) : null;
+        if (!is_string($corruptId)) {
+            throw new RuntimeException('Unable to locate the Redis corruption-test message.');
+        }
+        $redis->hDel($keys[2], $corruptId);
+
+        expect(fn() => [...$transport->receive($queue)])
+            ->toThrow(RedisBackendStateCorruption::class)
+            ->and($redis->zScore($keys[0], $corruptId))->not->toBeFalse();
     } finally {
         $redis->del($keys);
         $redis->close();
     }
-})->with([
-    'redis' => ['redis', 'IC_REDIS_HOST', 'IC_REDIS_PORT', 'IC_REDIS_PASSWORD'],
-    'valkey' => ['valkey', 'IC_VALKEY_HOST', 'IC_VALKEY_PORT', 'IC_VALKEY_PASSWORD'],
-]);
+})->with($omnibusRedisTransportBackends);

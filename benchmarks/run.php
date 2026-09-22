@@ -15,6 +15,7 @@ use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerTransport;
 use Infocyph\Omnibus\Integration\DBLayer\QueueSchema;
+use Infocyph\Omnibus\Integration\DBLayer\StoredPayload;
 use Infocyph\Omnibus\MessageBus;
 use Infocyph\Omnibus\Retry\ExponentialRetryStrategy;
 use Infocyph\Omnibus\Routing\RouteMap;
@@ -113,6 +114,7 @@ $serializer = new JsonEnvelopeSerializer(
     new StampCodecRegistry(CoreStampCodecs::all()),
 );
 $encoded = $serializer->encode(new Envelope($message));
+$storedEncoded = StoredPayload::encode($encoded);
 $clock = new SystemClock();
 $memory = new InMemoryTransport($clock);
 $failures = new InMemoryFailureStore();
@@ -219,5 +221,10 @@ $results = [
 fwrite(STDOUT, json_encode([
     'scope' => 'component-only; not application RPM',
     'php' => PHP_VERSION,
+    'storage' => [
+        'serializer_payload_bytes' => strlen($encoded),
+        'portable_db_payload_bytes' => strlen($storedEncoded),
+        'portable_db_expansion_ratio' => strlen($storedEncoded) / strlen($encoded),
+    ],
     'results' => $results,
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL);

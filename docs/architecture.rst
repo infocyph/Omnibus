@@ -29,6 +29,9 @@ Omnibus reuses existing library and application boundaries:
      - Connections, transactions, query execution, and migration orchestration.
    * - CacheLayer
      - Cache backends, distributed leases, locks, and atomic counters.
+   * - Runwire
+     - Optional reusable worker-group process supervision when explicitly
+       selected; Omnibus retains its native PCNTL/POSIX backend.
    * - PSR contracts
      - Clock and event-dispatcher interoperability.
    * - Broker adapter
@@ -81,3 +84,16 @@ without invoking the handler again. A shared ``DBLayerTransport`` and
 backend combinations retain an unavoidable cross-system at-least-once boundary.
 Omnibus does not claim exactly-once execution; domain side effects should still
 be idempotent.
+
+Worker supervision boundary
+---------------------------
+
+``WorkerPool`` owns queue-worker policy and exposes one backend contract. The
+native backend owns Omnibus's PCNTL/POSIX fork, signal, wait/reap and termination
+mechanics. The optional Runwire backend adapts the same policy to Runwire's
+public supervisor primitives. Backend installation never changes selection.
+
+The pool parent must remain free of process-bound DB/cache/broker resources.
+The worker factory is the post-child-creation boundary where those resources are
+constructed. Ordinary request/FPM dispatch, ``Consumer`` and single-process
+``Worker`` paths do not construct either pool backend.

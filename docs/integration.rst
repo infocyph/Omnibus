@@ -36,7 +36,7 @@ worker factory after fork.
 DBLayer integration
 -------------------
 
-The optional database adapters target DBLayer 5.x and use an existing
+The optional database adapters target DBLayer 5.1 and use an existing
 ``Connection``. Migrations execute ``QueueSchema`` statements outside Omnibus
 runtime paths. DBLayer owns driver behavior, bind sizing, database execution,
 transaction retry, and after-commit callback lifecycle. Omnibus owns message
@@ -51,7 +51,7 @@ uses only ``AfterCommitDispatcher`` and the connection's transaction callbacks.
 CacheLayer integration
 ----------------------
 
-The policy adapters target CacheLayer 3.1. Uniqueness, overlap protection,
+The policy adapters target CacheLayer 3.4. Uniqueness, overlap protection,
 fixed-window rate limiting, and circuit breaking
 adapt CacheLayer's existing lock and atomic-counter contracts. Omnibus does not
 introduce a competing cache-provider hierarchy.
@@ -68,7 +68,11 @@ Web and CLI separation
 
 Web applications may construct ``AfterResponseDispatcher`` and a runtime
 adapter. Worker/CLI applications construct ``Consumer`` and transports. Neither
-path requires booting the other.
+path requires booting the other. Ordinary FPM/request and non-pool CLI paths do
+not require Runwire or construct a pool backend, while Omnibus 2.6 still has
+mandatory PCNTL/POSIX package requirements. The native ``WorkerPool`` uses
+those extensions; Runwire 1.x is an optional explicitly selected alternative
+pool backend.
 
 Provider integrations
 ---------------------

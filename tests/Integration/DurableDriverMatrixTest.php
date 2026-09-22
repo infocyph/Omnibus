@@ -12,7 +12,9 @@ use Infocyph\Omnibus\Integration\DBLayer\DBLayerTransport;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerWorkflowStore;
 use Infocyph\Omnibus\Integration\DBLayer\QueueSchema;
 use Infocyph\Omnibus\Integration\DBLayer\SqlIdentifier;
+use Infocyph\Omnibus\Tests\Fixtures\BinaryEnvelopeSerializer;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
+use Infocyph\Omnibus\Tests\Fixtures\IntegrationEnvironment;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 use Infocyph\Omnibus\Tests\Fixtures\TestSerializer;
 use Infocyph\Omnibus\Workflow\WorkflowItemStatus;
@@ -119,268 +121,378 @@ function omnibusEnsureMssqlDatabase(array $config): void
     }
 }
 
-test('durable lifecycle runs on each configured service database', function (string $driver): void {
-    $config = omnibusServiceDatabase($driver);
-    if ($config === null) {
-        test()->markTestSkipped(sprintf('%s service database is not configured.', $driver));
-
-        return;
-    }
-
-    $connection = new Connection(ConnectionConfig::fromArray($config));
-    $tables = [
-        'queue' => 'omnibus_matrix_messages',
-        'failures' => 'omnibus_matrix_failures',
-        'workflows' => 'omnibus_matrix_workflows',
-        'items' => 'omnibus_matrix_workflow_items',
-    ];
-    foreach (array_reverse($tables) as $table) {
-        $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
-    }
-
-    try {
-        foreach (QueueSchema::statements(
-            $driver,
-            $tables['queue'],
-            $tables['failures'],
-            $tables['workflows'],
-            $tables['items'],
-        ) as $statement) {
-            $connection->statement($statement);
+$omnibusServiceDrivers = IntegrationEnvironment::configuredDatabaseDrivers([
+    'mysql',
+    'mariadb',
+    'pgsql',
+    'mssql',
+]);
+if ($omnibusServiceDrivers !== []) {
+    test('durable lifecycle runs on each configured service database', function (string $driver): void {
+        $config = omnibusServiceDatabase($driver);
+        if ($config === null) {
+            throw new RuntimeException(sprintf('%s service database must be configured for this integration test.', $driver));
         }
 
-        $serializer = TestSerializer::make();
-        $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
-        $transport = new DBLayerTransport($connection, $serializer, $clock, $tables['queue']);
-        $transport->send(new Envelope(new TestCommand($driver)), 'work');
-        $reservation = [...$transport->receive('work')][0];
-        $transport->acknowledge($reservation);
-
-        $failures = new DBLayerFailureStore($connection, $serializer, $tables['failures']);
-        $workflows = new DBLayerWorkflowStore(
-            $connection,
-            $serializer,
-            $tables['workflows'],
-            $tables['items'],
-        );
-        $workflows->createBatch(
-            '01DRIVERMATRIX000000000000',
-            [new Envelope(new TestCommand('workflow'))],
-            'work',
-        );
-        $claim = $workflows->claimPending('01DRIVERMATRIX000000000000')[0];
-        $workflows->confirmDispatched(
-            '01DRIVERMATRIX000000000000',
-            $claim->item->itemId,
-            $claim->token,
-        );
-        $workflows->markHandled(
-            '01DRIVERMATRIX000000000000',
-            $claim->item->itemId,
-            $claim->item->index,
-        );
-        $transition = $workflows->succeed(
-            '01DRIVERMATRIX000000000000',
-            $claim->item->itemId,
-            0,
-        );
-
-        expect($reservation->envelope()->message)->toEqual(new TestCommand($driver))
-            ->and($transport->size('work'))->toBe(0)
-            ->and($failures->all())->toBe([])
-            ->and($transition->state->succeeded)->toBe(1);
-    } finally {
+        $connection = new Connection(ConnectionConfig::fromArray($config));
+        $tables = [
+            'queue' => 'omnibus_matrix_messages',
+            'failures' => 'omnibus_matrix_failures',
+            'workflows' => 'omnibus_matrix_workflows',
+            'items' => 'omnibus_matrix_workflow_items',
+        ];
         foreach (array_reverse($tables) as $table) {
             $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
         }
-        $connection->resetRuntimeStateForReuse();
-        $connection->disconnect();
-    }
-})->with(['mysql', 'mariadb', 'pgsql', 'mssql']);
 
-test('mutation decisions remain writer-affine with a deliberately lagging replica', function (string $driver): void {
-    $config = omnibusServiceDatabase($driver);
-    $replicaDatabase = getenv('IC_SERVICE_REPLICA_DATABASE');
-    if ($config === null || !is_string($replicaDatabase) || $replicaDatabase === '') {
-        test()->markTestSkipped(sprintf('%s lagging replica is not configured.', $driver));
-
-        return;
-    }
-
-    $config['read'] = [[
-        'host' => $config['host'],
-        'port' => $config['port'],
-        'database' => $replicaDatabase,
-        'username' => $config['username'],
-        'password' => $config['password'],
-    ]];
-    $connection = new Connection(ConnectionConfig::fromArray($config));
-    $tables = [
-        'queue' => 'omnibus_affinity_messages',
-        'failures' => 'omnibus_affinity_failures',
-        'workflows' => 'omnibus_affinity_workflows',
-        'items' => 'omnibus_affinity_items',
-    ];
-    foreach (array_reverse($tables) as $table) {
-        $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
-    }
-
-    try {
-        foreach (QueueSchema::statements(
-            $driver,
-            $tables['queue'],
-            $tables['failures'],
-            $tables['workflows'],
-            $tables['items'],
-        ) as $statement) {
-            $connection->statement($statement);
-        }
-        $replicaLagProved = false;
         try {
-            $connection->select(sprintf('SELECT COUNT(*) FROM %s', $tables['queue']));
-        } catch (Throwable) {
-            $replicaLagProved = true;
+            foreach (QueueSchema::statements(
+                $driver,
+                $tables['queue'],
+                $tables['failures'],
+                $tables['workflows'],
+                $tables['items'],
+            ) as $statement) {
+                $connection->statement($statement);
+            }
+
+            $serializer = BinaryEnvelopeSerializer::make();
+            $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+            $transport = new DBLayerTransport($connection, $serializer, $clock, $tables['queue']);
+            $transport->send(new Envelope(new TestCommand($driver)), 'work');
+            $reservation = [...$transport->receive('work')][0];
+            $transport->acknowledge($reservation);
+
+            $failures = new DBLayerFailureStore($connection, $serializer, $tables['failures']);
+            $rawPayload = "\x00\xFFraw-\x80" . $driver;
+            $failures->add(FailedMessage::undecodable(
+                'binary-failure',
+                'work',
+                $rawPayload,
+                1,
+                $clock->now(),
+                JsonException::class,
+                'binary payload',
+            ));
+            $workflows = new DBLayerWorkflowStore(
+                $connection,
+                $serializer,
+                $tables['workflows'],
+                $tables['items'],
+            );
+            $workflows->createBatch(
+                '01DRIVERMATRIX000000000000',
+                [new Envelope(new TestCommand('workflow'))],
+                'work',
+            );
+            $claim = $workflows->claimPending('01DRIVERMATRIX000000000000')[0];
+            $workflows->confirmDispatched(
+                '01DRIVERMATRIX000000000000',
+                $claim->item->itemId,
+                $claim->token,
+            );
+            $workflows->markHandled(
+                '01DRIVERMATRIX000000000000',
+                $claim->item->itemId,
+                $claim->item->index,
+            );
+            $transition = $workflows->succeed(
+                '01DRIVERMATRIX000000000000',
+                $claim->item->itemId,
+                0,
+            );
+
+            expect($reservation->envelope()->message)->toEqual(new TestCommand($driver))
+                ->and($transport->size('work'))->toBe(0)
+                ->and($failures->find('binary-failure')?->payload)->toBe($rawPayload)
+                ->and($transition->state->succeeded)->toBe(1);
+        } finally {
+            foreach (array_reverse($tables) as $table) {
+                $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
+            }
+            $connection->resetRuntimeStateForReuse();
+            $connection->disconnect();
         }
-        if (!$replicaLagProved) {
-            throw new RuntimeException('Replica must intentionally omit the affinity test tables.');
+    })->with($omnibusServiceDrivers);
+}
+
+$replicaDatabase = getenv('IC_SERVICE_REPLICA_DATABASE');
+$omnibusReplicaDrivers = array_values(array_intersect(
+    ['mysql', 'mariadb', 'pgsql'],
+    $omnibusServiceDrivers,
+));
+if (is_string($replicaDatabase) && $replicaDatabase !== '' && $omnibusReplicaDrivers !== []) {
+    test('mutation decisions remain writer-affine with a deliberately lagging replica', function (string $driver): void {
+        $config = omnibusServiceDatabase($driver);
+        if ($config === null) {
+            throw new RuntimeException(sprintf('%s service database must be configured for the replica-affinity test.', $driver));
+        }
+        $replicaDatabase = getenv('IC_SERVICE_REPLICA_DATABASE');
+        if (!is_string($replicaDatabase) || $replicaDatabase === '') {
+            throw new RuntimeException('Replica-affinity test registered without IC_SERVICE_REPLICA_DATABASE.');
         }
 
-        $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
-        $serializer = TestSerializer::make();
-        $transport = new DBLayerTransport($connection, $serializer, $clock, $tables['queue']);
-        $store = new DBLayerWorkflowStore(
-            $connection,
-            $serializer,
-            $tables['workflows'],
-            $tables['items'],
-            $clock,
-        );
-        $failures = new DBLayerFailureStore($connection, $serializer, $tables['failures']);
-        $coordinator = new WorkflowCoordinator($store, $transport);
-        $workflowTransport = new WorkflowTransport($transport, $coordinator);
-        $scope = new WorkflowExecutionScope(new DirectExecutionScope(), $store);
-        $id = $coordinator->batch([new TestCommand('writer')], 'work');
-        $reservation = [...$workflowTransport->receive('work')][0];
-        $scope->run($reservation->envelope(), static fn(): null => null);
-        $workflowTransport->acknowledge($reservation);
-        $failures->add(FailedMessage::decoded(
-            'writer-failure',
-            'work',
-            new Envelope(new TestCommand('failed')),
-            1,
-            $clock->now(),
-            RuntimeException::class,
-            'failure',
-        ));
-
-        [$state, $failure] = $connection->transaction(
-            static fn(): array => [$store->find($id), $failures->find('writer-failure')],
-        );
-        expect($state?->status)->toBe(WorkflowStatus::Completed)
-            ->and($failure)->not->toBeNull();
-    } finally {
+        $config['read'] = [[
+            'host' => $config['host'],
+            'port' => $config['port'],
+            'database' => $replicaDatabase,
+            'username' => $config['username'],
+            'password' => $config['password'],
+        ]];
+        $connection = new Connection(ConnectionConfig::fromArray($config));
+        $tables = [
+            'queue' => 'omnibus_affinity_messages',
+            'failures' => 'omnibus_affinity_failures',
+            'workflows' => 'omnibus_affinity_workflows',
+            'items' => 'omnibus_affinity_items',
+        ];
         foreach (array_reverse($tables) as $table) {
             $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
         }
-        $connection->resetRuntimeStateForReuse();
-        $connection->disconnect();
-    }
-})->with(['mysql', 'mariadb', 'pgsql']);
 
-test('workflow claims and terminal transitions remain coherent across service connections', function (string $driver): void {
-    $config = omnibusServiceDatabase($driver);
-    if ($config === null) {
-        test()->markTestSkipped(sprintf('%s service database is not configured.', $driver));
+        try {
+            foreach (QueueSchema::statements(
+                $driver,
+                $tables['queue'],
+                $tables['failures'],
+                $tables['workflows'],
+                $tables['items'],
+            ) as $statement) {
+                $connection->statement($statement);
+            }
+            $replicaLagProved = false;
+            try {
+                $connection->select(sprintf('SELECT COUNT(*) FROM %s', $tables['queue']));
+            } catch (Throwable) {
+                $replicaLagProved = true;
+            }
+            if (!$replicaLagProved) {
+                throw new RuntimeException('Replica must intentionally omit the affinity test tables.');
+            }
 
-        return;
-    }
+            $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+            $serializer = TestSerializer::make();
+            $transport = new DBLayerTransport($connection, $serializer, $clock, $tables['queue']);
+            $store = new DBLayerWorkflowStore(
+                $connection,
+                $serializer,
+                $tables['workflows'],
+                $tables['items'],
+                $clock,
+            );
+            $failures = new DBLayerFailureStore($connection, $serializer, $tables['failures']);
+            $coordinator = new WorkflowCoordinator($store, $transport);
+            $workflowTransport = new WorkflowTransport($transport, $coordinator);
+            $scope = new WorkflowExecutionScope(new DirectExecutionScope(), $store);
+            $id = $coordinator->batch([new TestCommand('writer')], 'work');
+            $reservation = [...$workflowTransport->receive('work')][0];
+            $scope->run($reservation->envelope(), static fn(): null => null);
+            $workflowTransport->acknowledge($reservation);
+            $failures->add(FailedMessage::decoded(
+                'writer-failure',
+                'work',
+                new Envelope(new TestCommand('failed')),
+                1,
+                $clock->now(),
+                RuntimeException::class,
+                'failure',
+            ));
 
-    $first = new Connection(ConnectionConfig::fromArray($config));
-    $second = new Connection(ConnectionConfig::fromArray($config));
-    $tables = [
-        'queue' => 'omnibus_concurrency_messages',
-        'failures' => 'omnibus_concurrency_failures',
-        'workflows' => 'omnibus_concurrency_workflows',
-        'items' => 'omnibus_concurrency_items',
-    ];
-    foreach (array_reverse($tables) as $table) {
-        $first->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
-    }
-
-    try {
-        foreach (QueueSchema::statements(
-            $driver,
-            $tables['queue'],
-            $tables['failures'],
-            $tables['workflows'],
-            $tables['items'],
-        ) as $statement) {
-            $first->statement($statement);
+            [$state, $failure] = $connection->transaction(
+                static fn(): array => [$store->find($id), $failures->find('writer-failure')],
+            );
+            expect($state?->status)->toBe(WorkflowStatus::Completed)
+                ->and($failure)->not->toBeNull();
+        } finally {
+            foreach (array_reverse($tables) as $table) {
+                $connection->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
+            }
+            $connection->resetRuntimeStateForReuse();
+            $connection->disconnect();
         }
-        $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
-        $serializer = TestSerializer::make();
-        $storeA = new DBLayerWorkflowStore(
-            $first,
-            $serializer,
-            $tables['workflows'],
-            $tables['items'],
-            $clock,
-        );
-        $storeB = new DBLayerWorkflowStore(
-            $second,
-            $serializer,
-            $tables['workflows'],
-            $tables['items'],
-            $clock,
-        );
-        $id = str_repeat('b', 26);
-        $storeA->createBatch($id, [
-            new Envelope(new TestCommand('one')),
-            new Envelope(new TestCommand('two')),
-        ], 'work');
-        $claimA = $storeA->claimPending($id, 1)[0];
-        $claimB = $storeB->claimPending($id, 1)[0];
-        expect($claimB->item->itemId)->not->toBe($claimA->item->itemId);
-        $storeA->confirmDispatched($id, $claimA->item->itemId, $claimA->token);
-        $storeB->confirmDispatched($id, $claimB->item->itemId, $claimB->token);
-        $storeA->markHandled($id, $claimA->item->itemId, $claimA->item->index);
-        $storeB->markHandled($id, $claimB->item->itemId, $claimB->item->index);
-        $storeA->succeed($id, $claimA->item->itemId, $claimA->item->index);
-        $terminal = $storeB->succeed($id, $claimB->item->itemId, $claimB->item->index);
-        $duplicate = $storeA->succeed($id, $claimA->item->itemId, $claimA->item->index);
+    })->with($omnibusReplicaDrivers);
+}
 
-        expect($terminal->state->status)->toBe(WorkflowStatus::Completed)
-            ->and($terminal->state->succeeded)->toBe(2)
-            ->and($duplicate->itemChanged)->toBeFalse();
 
-        $chainId = str_repeat('c', 26);
-        $storeA->createChain($chainId, [
-            new Envelope(new TestCommand('first')),
-            new Envelope(new TestCommand('blocked')),
-        ], 'work');
-        $chainClaim = $storeA->claimPending($chainId)[0];
-        expect($storeB->claimPending($chainId))->toBe([]);
-        $storeA->releaseDispatchClaim($chainId, $chainClaim->item->itemId, $chainClaim->token);
+if ($omnibusServiceDrivers !== []) {
+    test('workflow claims and terminal transitions remain coherent across service connections', function (string $driver): void {
+        $config = omnibusServiceDatabase($driver);
+        if ($config === null) {
+            throw new RuntimeException(sprintf('%s service database must be configured for this integration test.', $driver));
+        }
 
-        $staleId = str_repeat('s', 26);
-        $storeA->createBatch($staleId, [new Envelope(new TestCommand('stale'))], 'work');
-        $stale = $storeA->claimPending($staleId, leaseSeconds: 1)[0];
-        $clock->advance('+2 seconds');
-        $current = $storeB->claimPending($staleId)[0];
-        expect(fn() => $storeA->confirmDispatched($staleId, $stale->item->itemId, $stale->token))
-            ->toThrow(LogicException::class)
-            ->and(fn() => $storeA->releaseDispatchClaim($staleId, $stale->item->itemId, $stale->token))
-            ->toThrow(LogicException::class);
-        $storeB->confirmDispatched($staleId, $current->item->itemId, $current->token);
-        expect($storeA->itemStatus($staleId, $current->item->itemId, 0))
-            ->toBe(WorkflowItemStatus::Dispatched);
-    } finally {
+        $first = new Connection(ConnectionConfig::fromArray($config));
+        $second = new Connection(ConnectionConfig::fromArray($config));
+        $tables = [
+            'queue' => 'omnibus_concurrency_messages',
+            'failures' => 'omnibus_concurrency_failures',
+            'workflows' => 'omnibus_concurrency_workflows',
+            'items' => 'omnibus_concurrency_items',
+        ];
         foreach (array_reverse($tables) as $table) {
             $first->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
         }
-        $first->resetRuntimeStateForReuse();
-        $second->resetRuntimeStateForReuse();
+
+        try {
+            foreach (QueueSchema::statements(
+                $driver,
+                $tables['queue'],
+                $tables['failures'],
+                $tables['workflows'],
+                $tables['items'],
+            ) as $statement) {
+                $first->statement($statement);
+            }
+            $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+            $serializer = TestSerializer::make();
+            $storeA = new DBLayerWorkflowStore(
+                $first,
+                $serializer,
+                $tables['workflows'],
+                $tables['items'],
+                $clock,
+            );
+            $storeB = new DBLayerWorkflowStore(
+                $second,
+                $serializer,
+                $tables['workflows'],
+                $tables['items'],
+                $clock,
+            );
+            $id = str_repeat('b', 26);
+            $storeA->createBatch($id, [
+                new Envelope(new TestCommand('one')),
+                new Envelope(new TestCommand('two')),
+            ], 'work');
+            $claimA = $storeA->claimPending($id, 1)[0];
+            $claimB = $storeB->claimPending($id, 1)[0];
+            expect($claimB->item->itemId)->not->toBe($claimA->item->itemId);
+            $storeA->confirmDispatched($id, $claimA->item->itemId, $claimA->token);
+            $storeB->confirmDispatched($id, $claimB->item->itemId, $claimB->token);
+            $storeA->markHandled($id, $claimA->item->itemId, $claimA->item->index);
+            $storeB->markHandled($id, $claimB->item->itemId, $claimB->item->index);
+            $storeA->succeed($id, $claimA->item->itemId, $claimA->item->index);
+            $terminal = $storeB->succeed($id, $claimB->item->itemId, $claimB->item->index);
+            $duplicate = $storeA->succeed($id, $claimA->item->itemId, $claimA->item->index);
+
+            expect($terminal->state->status)->toBe(WorkflowStatus::Completed)
+                ->and($terminal->state->succeeded)->toBe(2)
+                ->and($duplicate->itemChanged)->toBeFalse();
+
+            $chainId = str_repeat('c', 26);
+            $storeA->createChain($chainId, [
+                new Envelope(new TestCommand('first')),
+                new Envelope(new TestCommand('blocked')),
+            ], 'work');
+            $chainClaim = $storeA->claimPending($chainId)[0];
+            expect($storeB->claimPending($chainId))->toBe([]);
+            $storeA->releaseDispatchClaim($chainId, $chainClaim->item->itemId, $chainClaim->token);
+
+            $staleId = str_repeat('s', 26);
+            $storeA->createBatch($staleId, [new Envelope(new TestCommand('stale'))], 'work');
+            $stale = $storeA->claimPending($staleId, leaseSeconds: 1)[0];
+            $clock->advance('+2 seconds');
+            $current = $storeB->claimPending($staleId)[0];
+            expect(fn() => $storeA->confirmDispatched($staleId, $stale->item->itemId, $stale->token))
+                ->toThrow(LogicException::class)
+                ->and(fn() => $storeA->releaseDispatchClaim($staleId, $stale->item->itemId, $stale->token))
+                ->toThrow(LogicException::class);
+            $storeB->confirmDispatched($staleId, $current->item->itemId, $current->token);
+            expect($storeA->itemStatus($staleId, $current->item->itemId, 0))
+                ->toBe(WorkflowItemStatus::Dispatched);
+        } finally {
+            foreach (array_reverse($tables) as $table) {
+                $first->statement(sprintf('DROP TABLE IF EXISTS %s', $table));
+            }
+            $first->resetRuntimeStateForReuse();
+            $second->resetRuntimeStateForReuse();
+            $first->disconnect();
+            $second->disconnect();
+        }
+    })->with($omnibusServiceDrivers);
+}
+
+$omnibusFailureRaceDrivers = ['sqlite', ...$omnibusServiceDrivers];
+
+test('concurrent first failure inserts preserve the newest generation and retry claim', function (
+    string $driver,
+    bool $firstIsNewer,
+    bool $orderByTime,
+): void {
+    $database = tempnam(sys_get_temp_dir(), 'omnibus-failure-race-');
+    if ($database === false) {
+        throw new RuntimeException('Unable to allocate failure-race database.');
+    }
+    $config = $driver === 'sqlite'
+        ? ['driver' => 'sqlite', 'database' => $database]
+        : omnibusServiceDatabase($driver);
+    if ($config === null) {
+        unlink($database);
+        throw new RuntimeException(sprintf('%s service database must be configured for this integration test.', $driver));
+    }
+    $first = new Connection(ConnectionConfig::fromArray($config));
+    $second = new Connection(ConnectionConfig::fromArray($config));
+    $tables = ['omnibus_race_queue', 'omnibus_race_failures', 'omnibus_race_workflows', 'omnibus_race_items'];
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $storeA = new DBLayerFailureStore($first, TestSerializer::make(), $tables[1], $clock);
+    $storeB = new DBLayerFailureStore($second, TestSerializer::make(), $tables[1], $clock);
+    $failure = static fn(int $attempt): FailedMessage => FailedMessage::decoded(
+        'concurrent-first-failure',
+        'work',
+        new Envelope(new TestCommand('generation-' . $attempt)),
+        $orderByTime ? 1 : $attempt,
+        $clock->now()->modify('+' . $attempt . ' seconds'),
+        RuntimeException::class,
+        'generation-' . $attempt,
+    );
+    $interleaved = false;
+    $claim = null;
+    $listenerFailure = null;
+    $listener = static function (\Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuting $event) use (
+        $first, $storeB, $failure, $firstIsNewer, &$interleaved, &$claim, &$listenerFailure,
+    ): void {
+        if ($event->connection !== $first || $interleaved
+            || preg_match('/^(INSERT|MERGE)\b/i', $event->sql) !== 1) {
+            return;
+        }
+        $interleaved = true;
+        try {
+            $storeB->add($failure($firstIsNewer ? 1 : 2));
+            $claim = $storeB->claimRetry('concurrent-first-failure');
+        } catch (Throwable $error) {
+            $listenerFailure = $error;
+        }
+    };
+    try {
+        foreach (array_reverse($tables) as $table) {
+            $first->statement('DROP TABLE IF EXISTS ' . $table);
+        }
+        foreach (QueueSchema::statements($driver, ...$tables) as $statement) {
+            $first->statement($statement);
+        }
+        \Infocyph\DBLayer\Events\Events::listen('db.query.executing', $listener);
+        $storeA->add($failure($firstIsNewer ? 2 : 1));
+        if ($listenerFailure !== null) {
+            throw $listenerFailure;
+        }
+        expect($interleaved)->toBeTrue()
+            ->and($claim)->not->toBeNull()
+            ->and($storeA->find('concurrent-first-failure')?->attempt)->toBe($orderByTime ? 1 : 2)
+            ->and($storeA->find('concurrent-first-failure')?->reason)->toBe('generation-2');
+        if ($claim === null) {
+            throw new RuntimeException('The competing retry claim was not created.');
+        }
+        expect($storeB->markRetrySent($claim))->toBe(!$firstIsNewer);
+        if ($firstIsNewer) {
+            expect($storeA->claimRetry('concurrent-first-failure')->failure->attempt)->toBe($orderByTime ? 1 : 2);
+        }
+    } finally {
+        \Infocyph\DBLayer\Events\Events::forget('db.query.executing', $listener);
+        foreach (array_reverse($tables) as $table) {
+            $first->statement('DROP TABLE IF EXISTS ' . $table);
+        }
         $first->disconnect();
         $second->disconnect();
+        unlink($database);
     }
-})->with(['mysql', 'mariadb', 'pgsql', 'mssql']);
+})->with($omnibusFailureRaceDrivers)->with([false, true])->with([false, true]);

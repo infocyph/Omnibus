@@ -45,16 +45,8 @@ function omnibusTerminateParallelSQLiteChild(int $signal): never
 }
 
 test('parallel SQLite consumers reserve every message exactly once', function (): void {
-    if (
-        !function_exists('pcntl_fork')
-        || !function_exists('pcntl_sigprocmask')
-        || !function_exists('pcntl_waitpid')
-        || !function_exists('posix_kill')
-    ) {
-        $this->markTestSkipped('Parallel SQLite integration requires ext-pcntl and ext-posix.');
-    }
     if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
-        $this->markTestSkipped('Parallel SQLite integration requires pdo_sqlite.');
+        throw new RuntimeException('Parallel SQLite integration requires pdo_sqlite.');
     }
 
     $database = tempnam(sys_get_temp_dir(), 'omnibus-parallel-sqlite-');
@@ -165,7 +157,7 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
             $status = 0;
             pcntl_waitpid($pid, $status);
             $exitCode = pcntl_wifexited($status) ? pcntl_wexitstatus($status) : null;
-            $cleanSignal = pcntl_wifsignaled($status) && pcntl_wtermsig($status) === 15;
+            $cleanSignal = pcntl_wifsignaled($status) && pcntl_wtermsig($status) === SIGTERM;
             if ($exitCode !== 0 && !$cleanSignal) {
                 $detail = 'no child report was written';
                 $report = $reports[$index] ?? null;
@@ -219,9 +211,7 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
         $verificationConnection->disconnect();
     } finally {
         foreach ($children as $pid) {
-            if (function_exists('posix_kill')) {
-                posix_kill($pid, 15);
-            }
+            posix_kill($pid, SIGTERM);
             $status = 0;
             pcntl_waitpid($pid, $status);
         }

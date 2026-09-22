@@ -21,8 +21,22 @@ final class InMemoryFailureStore implements FailureStore
 
     public function add(FailedMessage $failure): void
     {
+        $existing = $this->failures[$failure->id] ?? null;
+        if (
+            $existing instanceof FailedMessage
+            && (
+                $failure->attempt < $existing->attempt
+                || (
+                    $failure->attempt === $existing->attempt
+                    && $failure->failedAt <= $existing->failedAt
+                )
+            )
+        ) {
+            return;
+        }
+
         $this->failures[$failure->id] = $failure;
-        $this->retryStates[$failure->id] ??= [
+        $this->retryStates[$failure->id] = [
             'status' => 'failed',
             'token' => null,
             'until' => null,

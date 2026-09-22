@@ -447,7 +447,7 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
                         ?? throw new \LogicException('Workflow items must have a message ID.'),
                     'item_index' => $index,
                     'queue_name' => $queue,
-                    'payload' => $this->serializer->encode($envelope->with($stamp)),
+                    'payload' => StoredPayload::encode($this->serializer->encode($envelope->with($stamp))),
                     'item_status' => 'pending',
                     'dispatch_claim_token' => null,
                     'dispatch_claim_until' => null,
@@ -480,7 +480,7 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
             self::string($row, 'item_id'),
             self::int($row, 'item_index'),
             self::string($row, 'queue_name'),
-            $this->serializer->decode(self::string($row, 'payload')),
+            $this->serializer->decode(StoredPayload::decode(self::string($row, 'payload'))),
         );
     }
 

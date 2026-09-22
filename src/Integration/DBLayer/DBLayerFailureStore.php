@@ -35,34 +35,46 @@ final readonly class DBLayerFailureStore implements FailureStore
         $payload = $failure->envelope === null
             ? (string) $failure->payload
             : $this->serializer->encode($failure->envelope);
+        $storedPayload = StoredPayload::encode($payload);
+        $failedAt = Time::fromDate($failure->failedAt);
 
-        $upserted = $this->connection->table($this->rawTable)->upsert(
-            [
+        $this->connection->transaction(function (Connection $connection) use (
+            $failure,
+            $kind,
+            $storedPayload,
+            $failedAt,
+        ): void {
+            $values = [
                 'id' => $failure->id,
                 'queue_name' => $failure->queue,
-                'payload' => $payload,
+                'payload' => $storedPayload,
                 'payload_kind' => $kind,
                 'payload_truncated' => $failure->payloadTruncated ? 1 : 0,
                 'attempt' => $failure->attempt,
-                'failed_at' => Time::fromDate($failure->failedAt),
+                'failed_at' => $failedAt,
                 'failure_class' => $failure->failureClass,
                 'reason' => $failure->reason,
-            ],
-            ['id'],
-            [
-                'queue_name',
-                'payload',
-                'payload_kind',
-                'payload_truncated',
-                'attempt',
-                'failed_at',
-                'failure_class',
-                'reason',
-            ],
-        );
-        if (!$upserted) {
-            throw new \RuntimeException('DBLayer did not persist the failed message.');
-        }
+                'retry_status' => 'failed',
+                'retry_token' => null,
+                'retry_until' => null,
+            ];
+            // Establish row ownership even when concurrent writers first see an absent ID.
+            if (!$connection->table($this->rawTable)->upsert($values, ['id'], ['id'])) {
+                throw new \RuntimeException('DBLayer did not persist the failed message.');
+            }
+            $existing = $this->failureVersionForUpdate($connection, $failure->id);
+            if ($existing === null) {
+                throw new \RuntimeException('DBLayer did not return the persisted failure version.');
+            }
+            if (!self::isNewerFailure($failure->attempt, $failedAt, $existing)) {
+                return;
+            }
+
+            unset($values['id']);
+            if ($connection->table($this->rawTable)->where('id', $failure->id)->update($values) !== 1) {
+                throw new \RuntimeException('DBLayer did not update the owned failure row.');
+            }
+        }, 3);
     }
 
     public function all(int $limit = 100): array
@@ -208,22 +220,49 @@ final readonly class DBLayerFailureStore implements FailureStore
     private static function bool(array $row, string $key): bool
     {
         $value = $row[$key] ?? null;
-        if (!is_bool($value) && !is_int($value) && !is_string($value)) {
-            throw new \UnexpectedValueException(sprintf('Failure row "%s" must be boolean.', $key));
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) && ($value === 0 || $value === 1)) {
+            return $value === 1;
+        }
+        if (is_string($value)) {
+            return match (strtolower($value)) {
+                '0', 'f', 'false' => false,
+                '1', 't', 'true' => true,
+                default => throw new \UnexpectedValueException(sprintf(
+                    'Failure row "%s" must be boolean.',
+                    $key,
+                )),
+            };
         }
 
-        return (bool) $value;
+        throw new \UnexpectedValueException(sprintf('Failure row "%s" must be boolean.', $key));
     }
 
     /** @param array<string, mixed> $row */
     private static function int(array $row, string $key): int
     {
         $value = $row[$key] ?? null;
-        if (!is_int($value) && !is_string($value)) {
+        if (is_int($value)) {
+            return $value;
+        }
+        if (!is_string($value) || filter_var($value, FILTER_VALIDATE_INT) === false) {
             throw new \UnexpectedValueException(sprintf('Failure row "%s" must be an integer.', $key));
         }
 
         return (int) $value;
+    }
+
+    /** @param array<string, mixed> $existing */
+    private static function isNewerFailure(int $attempt, int $failedAt, array $existing): bool
+    {
+        $existingAttempt = self::int($existing, 'attempt');
+        if ($attempt !== $existingAttempt) {
+            return $attempt > $existingAttempt;
+        }
+
+        return $failedAt > self::int($existing, 'failed_at');
     }
 
     /** @param array<string, mixed> $row */
@@ -237,12 +276,29 @@ final readonly class DBLayerFailureStore implements FailureStore
         return $value;
     }
 
+    /** @return array<string, mixed>|null */
+    private function failureVersionForUpdate(Connection $connection, string $id): ?array
+    {
+        $sql = match ($connection->getDriverName()) {
+            'mysql', 'mariadb', 'pgsql' => "SELECT attempt, failed_at FROM {$this->table} WHERE id = ? FOR UPDATE",
+            'mssql' => "SELECT attempt, failed_at FROM {$this->table} WITH (UPDLOCK, ROWLOCK) WHERE id = ?",
+            'sqlite' => "SELECT attempt, failed_at FROM {$this->table} WHERE id = ?",
+            default => throw new \LogicException('Unsupported DBLayer failure-store driver.'),
+        };
+        $rows = $connection->select($sql, [$id]);
+        if (!isset($rows[0])) {
+            return null;
+        }
+
+        return self::associative($rows[0]);
+    }
+
     /** @param array<string, mixed> $row */
     private function hydrate(array $row): FailedMessage
     {
         $id = self::string($row, 'id');
         $queue = self::string($row, 'queue_name');
-        $payload = self::string($row, 'payload');
+        $payload = StoredPayload::decode(self::string($row, 'payload'));
         $attempt = self::int($row, 'attempt');
         $failedAt = Time::toDate(self::int($row, 'failed_at'));
         $failureClass = self::string($row, 'failure_class');

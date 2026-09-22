@@ -109,6 +109,42 @@ test('failure retry claims exclude overlap, recover after expiry, and release af
         ->and($store->find('claimed'))->toBeNull();
 });
 
+test('in-memory failure re-failure invalidates stale retry state and rejects older writes', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $store = new InMemoryFailureStore($clock);
+    $first = FailedMessage::decoded(
+        'same-message',
+        'work',
+        new Envelope(new TestCommand('first')),
+        1,
+        $clock->now(),
+        RuntimeException::class,
+        'first',
+    );
+    $store->add($first);
+    $claim = $store->claimRetry('same-message');
+    expect($store->markRetrySent($claim))->toBeTrue();
+
+    $clock->advance('+1 second');
+    $second = FailedMessage::decoded(
+        'same-message',
+        'work',
+        new Envelope(new TestCommand('second')),
+        2,
+        $clock->now(),
+        DomainException::class,
+        'second',
+    );
+    $store->add($second);
+
+    expect($store->removeRetried($claim))->toBeFalse()
+        ->and($store->find('same-message')?->attempt)->toBe(2)
+        ->and($store->claimRetry('same-message')->failure->attempt)->toBe(2);
+
+    $store->add($first);
+    expect($store->find('same-message')?->attempt)->toBe(2);
+});
+
 test('manual retry strips lifecycle state and rejects workflow replay', function (): void {
     $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
     $store = new InMemoryFailureStore();

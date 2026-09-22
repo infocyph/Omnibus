@@ -53,7 +53,7 @@ final readonly class EventDispatcher implements EventDispatcherInterface
             return $listener;
         }
 
-        if (is_array($listener) && $listener[0] instanceof ShouldQueue) {
+        if (is_array($listener) && ($listener[0] ?? null) instanceof ShouldQueue) {
             return $listener[0];
         }
 

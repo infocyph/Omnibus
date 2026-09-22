@@ -6,6 +6,7 @@ namespace Infocyph\Omnibus;
 
 use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Envelope\HandledStamp;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Envelope\RouteStamp;
 use Infocyph\Omnibus\Routing\RouteMap;
@@ -21,7 +22,7 @@ final readonly class MessageBus
 
     public function dispatch(object $message): Envelope
     {
-        $envelope = Envelope::wrap($message);
+        $envelope = Envelope::wrap($message)->without(RouteStamp::class, HandledStamp::class);
         if ($envelope->last(MessageIdStamp::class) === null) {
             $envelope = $envelope->with(new MessageIdStamp(ULID::generateMonotonic()));
         }

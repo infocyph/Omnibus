@@ -133,10 +133,13 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
                 $ids[] = self::rowString($row, 'id');
             }
             $placeholders = implode(', ', array_fill(0, count($ids), '?'));
-            $connection->update(
+            $changed = $connection->update(
                 "UPDATE {$this->table} SET attempts = attempts + 1, reserved_until = ?, receipt = ? WHERE id IN ({$placeholders})",
                 [$reservedUntil, $token, ...$ids],
             );
+            if ($changed !== count($rows)) {
+                throw new \RuntimeException('Queue reservation changed an unexpected number of rows.');
+            }
 
             return $rows;
         });
@@ -144,7 +147,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         $reservations = [];
         foreach ($rows as $row) {
             $id = self::rowString($row, 'id');
-            $payload = self::rowString($row, 'payload');
+            $payload = StoredPayload::decode(self::rowString($row, 'payload'));
             $messageId = self::rowString($row, 'message_id');
             $attempt = self::rowInt($row, 'attempts') + 1;
             $receipt = ReservationReceipt::encode($id, $token);
@@ -206,7 +209,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
                 $envelope->last(MessageIdStamp::class)->id
                     ?? throw new \LogicException('Queued envelopes must have a message ID.'),
                 $queue,
-                $this->serializer->encode($envelope),
+                StoredPayload::encode($this->serializer->encode($envelope)),
                 Time::add(
                     $now,
                     $delay instanceof DelayStamp ? $delay->seconds : 0.0,

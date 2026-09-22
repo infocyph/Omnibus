@@ -49,7 +49,12 @@ The Omnibus suite covers:
 * SQLite lock contention proving DBLayer transaction attempts are not
   multiplied, plus receipt-guarded acknowledge and release query retries;
 * nested commit/rollback, callback ordering, database/non-database dispatch,
-  and post-commit failure behavior.
+  and post-commit failure behavior;
+* native/Runwire WorkerPool parity, child-factory PID ownership, crash reaping
+  and explicit no-zombie checks;
+* DBLayer construction after fork inside the worker factory;
+* core/FPM-compatible Worker execution without constructing Runwire or a pool
+  backend, while mandatory PCNTL/POSIX Composer requirements remain present.
 
 Commands
 --------
@@ -59,12 +64,55 @@ Commands
    composer ic:tests
    composer ic:ci
    composer benchmark
+   composer benchmark:worker-pool
    composer soak:consumer
    composer soak:durable
+   composer soak:worker-pool
    composer soak:workflow
 
 ``composer ic:tests`` and ``composer ic:ci`` are supplied by PHPForge and are
 the authoritative quality suites.
+
+Both commands include live integration coverage when the matching local service
+configuration is present. In an ordinary local shell, MySQL, MariaDB,
+PostgreSQL, SQL Server, Redis, Valkey and Memcached cases are registered only
+when their required extension and ``IC_*`` service variables are available;
+the rest of the suite remains runnable without provisioning every optional
+service. GitHub Actions is strict: the release workflow provisions all expected
+services/extensions, and test discovery fails if any expected integration
+configuration is missing. Run the full local parity matrix with PHP 8.4 or 8.5
+and the ``pdo_sqlite``, ``pdo_mysql``, ``pdo_pgsql``, ``pdo_sqlsrv``,
+``redis`` and ``memcached`` extensions installed in the PHP runtime executing
+Composer. PCNTL/POSIX are mandatory Omnibus runtime requirements. Starting
+Docker services alone does not install extensions into host PHP. Check that
+runtime with ``composer ic:doctor``.
+
+For disposable local integration services, start the repository's service
+definitions under a separate Compose project:
+
+.. code-block:: console
+
+   docker compose -p omnibus-release-review \
+     -f vendor/infocyph/phpforge/resources/services/compose.yml \
+     --profile mysql --profile mariadb --profile postgres --profile mssql \
+     --profile redis --profile valkey --profile memcached up -d --wait
+
+With the default local service credentials and ports, run the full suite in
+the PHP runtime containing those extensions:
+
+.. code-block:: console
+
+   IC_SERVICE_DATABASE=phpforge IC_SERVICE_USERNAME=phpforge \
+   IC_SERVICE_PASSWORD='Phpforge_123!' \
+   IC_MSSQL_USER=sa IC_MSSQL_PASSWORD='Phpforge_123!' \
+   IC_REDIS_HOST=127.0.0.1 IC_REDIS_PORT=6379 IC_REDIS_PASSWORD='Phpforge_123!' \
+   IC_VALKEY_HOST=127.0.0.1 IC_VALKEY_PORT=6380 IC_VALKEY_PASSWORD='Phpforge_123!' \
+   IC_MEMCACHED_HOST=127.0.0.1 IC_MEMCACHED_PORT=11211 \
+   composer ic:ci
+
+These credentials are for disposable local test services only. A successful
+container run validates that container's PHP runtime and environment; it does
+not make the same command pass in an unconfigured host shell.
 
 The remaining local scripts are intentionally package-specific:
 
@@ -76,6 +124,10 @@ The remaining local scripts are intentionally package-specific:
   durable queue;
 * ``composer soak:workflow`` exercises handled reconciliation and workflow
   aggregate invariants repeatedly;
+* ``composer benchmark:worker-pool`` attributes direct Worker, native pool and
+  explicit Runwire pool overhead, including idle-parent CPU;
+* ``composer soak:worker-pool`` extends the clean-recycle sample and checks
+  parent-memory growth;
 * PHPForge's ``ic:soak:worker`` complements these by monitoring the RSS and
   lifetime of an arbitrary long-running worker command.
 

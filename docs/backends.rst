@@ -35,7 +35,7 @@ No durable backend initializes unless it is explicitly constructed.
 DBLayer
 -------
 
-Install DBLayer 5.x (``infocyph/dblayer:^5.0``) and execute every statement
+Install DBLayer 5.1+ (``infocyph/dblayer:^5.1``) and execute every statement
 returned by ``QueueSchema::statements($driver)`` in an application migration.
 Supported canonical drivers are ``mysql``, ``mariadb``, ``pgsql``, ``mssql``,
 and ``sqlite``. MySQL and MariaDB are independent DBLayer drivers even though
