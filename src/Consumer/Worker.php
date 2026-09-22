@@ -30,58 +30,26 @@ final class Worker
 
     public function run(): void
     {
-        $this->registerSignals();
-
-        try {
-            $startedAt = hrtime(true);
-            $startedMemory = memory_get_usage(true);
-            $processed = 0;
-            $idleSleep = $this->options->idleSleepSeconds;
-            $this->heartbeat();
-
-            while (!$this->shouldStop($startedAt, $startedMemory, $processed)) {
-                $limit = $this->options->prefetch;
-                if ($this->options->maxMessages !== null) {
-                    $limit = min($limit, $this->options->maxMessages - $processed);
-                }
-
-                $result = $this->consumer->run(
-                    $this->options->queue,
-                    $limit,
-                    $this->options->visibilitySeconds,
-                );
-                $processed += $result->received;
-                $this->heartbeat();
-
-                if ($this->externalStopRequested()) {
-                    break;
-                }
-
-                if ($result->received > 0) {
-                    $idleSleep = $this->options->idleSleepSeconds;
-
-                    continue;
-                }
-
-                if ($idleSleep > 0.0) {
-                    usleep((int) round($this->jittered($idleSleep) * 1_000_000));
-                    $idleSleep = min($this->options->maxIdleSleepSeconds, $idleSleep * 2.0);
-                    $this->heartbeat();
-                }
-            }
-        } finally {
-            $this->restoreSignals();
-        }
+        $this->runLoop(null, true);
     }
 
-    private function externalStopRequested(): bool
+    public function runManaged(WorkerLifecycle $lifecycle): void
     {
-        return $this->lifecycle?->stopRequested() ?? false;
+        $this->runLoop($lifecycle, false);
     }
 
-    private function heartbeat(): void
+    private function externalStopRequested(?WorkerLifecycle $managedLifecycle): bool
+    {
+        return ($this->lifecycle?->stopRequested() ?? false)
+            || ($managedLifecycle?->stopRequested() ?? false);
+    }
+
+    private function heartbeat(?WorkerLifecycle $managedLifecycle): void
     {
         $this->lifecycle?->heartbeat();
+        if ($managedLifecycle !== null && $managedLifecycle !== $this->lifecycle) {
+            $managedLifecycle->heartbeat();
+        }
     }
 
     private function jittered(float $seconds): float
@@ -134,12 +102,66 @@ final class Worker
         }
     }
 
-    private function shouldStop(int $startedAt, int $startedMemory, int $processed): bool
+    private function runLoop(?WorkerLifecycle $managedLifecycle, bool $manageSignals): void
     {
+        if ($manageSignals) {
+            $this->registerSignals();
+        }
+
+        try {
+            $startedAt = hrtime(true);
+            $startedMemory = memory_get_usage(true);
+            $processed = 0;
+            $idleSleep = $this->options->idleSleepSeconds;
+            $this->heartbeat($managedLifecycle);
+
+            while (!$this->shouldStop($startedAt, $startedMemory, $processed, $managedLifecycle)) {
+                $limit = $this->options->prefetch;
+                if ($this->options->maxMessages !== null) {
+                    $limit = min($limit, $this->options->maxMessages - $processed);
+                }
+
+                $result = $this->consumer->run(
+                    $this->options->queue,
+                    $limit,
+                    $this->options->visibilitySeconds,
+                );
+                $processed += $result->received;
+                $this->heartbeat($managedLifecycle);
+
+                if ($this->externalStopRequested($managedLifecycle)) {
+                    break;
+                }
+
+                if ($result->received > 0) {
+                    $idleSleep = $this->options->idleSleepSeconds;
+
+                    continue;
+                }
+
+                if ($idleSleep > 0.0) {
+                    usleep((int) round($this->jittered($idleSleep) * 1_000_000));
+                    $idleSleep = min($this->options->maxIdleSleepSeconds, $idleSleep * 2.0);
+                    $this->heartbeat($managedLifecycle);
+                }
+            }
+        } finally {
+            if ($manageSignals) {
+                $this->restoreSignals();
+            }
+        }
+    }
+
+    private function shouldStop(
+        int $startedAt,
+        int $startedMemory,
+        int $processed,
+        ?WorkerLifecycle $managedLifecycle,
+    ): bool {
         if ($this->stopRequested) {
             return true;
         }
-        if ($this->externalStopRequested()) {
+        if ($this->externalStopRequested($managedLifecycle)) {
             return true;
         }
         if ($this->options->maxMessages !== null && $processed >= $this->options->maxMessages) {

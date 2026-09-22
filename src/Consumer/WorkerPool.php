@@ -24,6 +24,8 @@ final readonly class WorkerPool
         private float $restartBackoffSeconds = 0.25,
         private float $shutdownGraceSeconds = 30.0,
         ?WorkerPoolBackend $backend = null,
+        private ?WorkerLifecycle $lifecycle = null,
+        private float $lifecycleIntervalSeconds = 1.0,
     ) {
         if ($concurrency < 1 || $concurrency > 256) {
             throw new \InvalidArgumentException('Worker concurrency must be between 1 and 256.');
@@ -36,6 +38,9 @@ final readonly class WorkerPool
         }
         if (!is_finite($shutdownGraceSeconds) || $shutdownGraceSeconds <= 0.0) {
             throw new \InvalidArgumentException('Worker shutdown grace must be positive and finite.');
+        }
+        if (!is_finite($lifecycleIntervalSeconds) || $lifecycleIntervalSeconds <= 0.0) {
+            throw new \InvalidArgumentException('Worker lifecycle interval must be positive and finite.');
         }
 
         $this->workerFactory = $workerFactory(...);
@@ -55,6 +60,8 @@ final readonly class WorkerPool
             $this->maximumRestarts,
             $this->restartBackoffSeconds,
             $this->shutdownGraceSeconds,
+            $this->lifecycle,
+            $this->lifecycleIntervalSeconds,
         );
     }
 }

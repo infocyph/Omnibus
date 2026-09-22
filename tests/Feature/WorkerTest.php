@@ -329,6 +329,43 @@ test('worker pool stop requests are idempotent before native startup', function 
     expect($created)->toBeFalse();
 });
 
+test('worker pool services a parent lifecycle without alarm signals', function (): void {
+    if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
+        throw new RuntimeException('WorkerPool tests require ext-pcntl and ext-posix.');
+    }
+
+    $lifecycle = new RecordingWorkerLifecycle(
+        onStopRequested: static fn(int $checks): bool => $checks >= 2,
+    );
+    $pool = new WorkerPool(
+        static function (): Worker {
+            $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+
+            return new Worker(
+                new Consumer(
+                    new InMemoryTransport($clock),
+                    new HandlerInvoker(new HandlerMap([])),
+                    new ExponentialRetryStrategy(),
+                    new InMemoryFailureStore(),
+                    $clock,
+                ),
+                new WorkerOptions(
+                    idleSleepSeconds: 0.001,
+                    maxIdleSleepSeconds: 0.001,
+                    handleSignals: false,
+                ),
+            );
+        },
+        lifecycle: $lifecycle,
+        lifecycleIntervalSeconds: 0.01,
+    );
+
+    $pool->run();
+
+    expect($lifecycle->heartbeats)->toBeGreaterThanOrEqual(2)
+        ->and($lifecycle->stopChecks)->toBeGreaterThanOrEqual(2);
+});
+
 test('worker pool stops after the bounded crash restart budget', function (): void {
     if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
         throw new RuntimeException('WorkerPool tests require ext-pcntl and ext-posix.');

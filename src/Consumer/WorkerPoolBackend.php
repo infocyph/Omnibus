@@ -15,5 +15,7 @@ interface WorkerPoolBackend
         int $maximumRestarts,
         float $restartBackoffSeconds,
         float $shutdownGraceSeconds,
+        ?WorkerLifecycle $lifecycle,
+        float $lifecycleIntervalSeconds,
     ): void;
 }

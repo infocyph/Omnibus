@@ -43,6 +43,8 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         int $maximumRestarts,
         float $restartBackoffSeconds,
         float $shutdownGraceSeconds,
+        ?WorkerLifecycle $lifecycle,
+        float $lifecycleIntervalSeconds,
     ): void {
         if ($this->stopRequested) {
             return;
@@ -54,7 +56,14 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
 
         try {
             try {
-                $this->supervise($workerFactory, $concurrency, $maximumRestarts, $restartBackoffSeconds);
+                $this->supervise(
+                    $workerFactory,
+                    $concurrency,
+                    $maximumRestarts,
+                    $restartBackoffSeconds,
+                    $lifecycle,
+                    $lifecycleIntervalSeconds,
+                );
             } catch (\Throwable $failure) {
                 $this->requestStop();
                 $this->drainChildren();
@@ -278,6 +287,27 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         }
     }
 
+    private function serviceLifecycle(
+        ?WorkerLifecycle $lifecycle,
+        float $intervalSeconds,
+        float &$nextAt,
+    ): void {
+        if ($lifecycle === null) {
+            return;
+        }
+
+        $now = self::monotonicSeconds();
+        if ($now < $nextAt) {
+            return;
+        }
+
+        $nextAt = $now + $intervalSeconds;
+        $lifecycle->heartbeat();
+        if ($lifecycle->stopRequested()) {
+            $this->requestStop();
+        }
+    }
+
     private function signalChildren(int $signal): void
     {
         foreach (array_keys($this->children) as $pid) {
@@ -322,16 +352,24 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         int $concurrency,
         int $maximumRestarts,
         float $restartBackoffSeconds,
+        ?WorkerLifecycle $lifecycle,
+        float $lifecycleIntervalSeconds,
     ): void {
         $fatal = null;
         /** @var array<int,int> $restarts */
         $restarts = array_fill(0, $concurrency, 0);
+        $nextLifecycleAt = self::monotonicSeconds();
+        $this->serviceLifecycle($lifecycle, $lifecycleIntervalSeconds, $nextLifecycleAt);
+        if ($this->stopRequested) {
+            return;
+        }
 
         for ($slot = 0; $slot < $concurrency && !$this->stopRequested; $slot++) {
             $this->spawn($slot, $workerFactory);
         }
 
         while ($this->children !== []) {
+            $this->serviceLifecycle($lifecycle, $lifecycleIntervalSeconds, $nextLifecycleAt);
             if ($this->stopRequested) {
                 $this->drainChildren();
 
