@@ -223,10 +223,6 @@ final readonly class DBLayerFailureStore implements FailureStore
         if (!isset($rows[0])) {
             return null;
         }
-        if (!is_array($rows[0])) {
-            throw new \UnexpectedValueException('DBLayer returned an invalid failure version row.');
-        }
-
         return self::associative($rows[0]);
     }
 
