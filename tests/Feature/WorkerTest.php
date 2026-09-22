@@ -262,10 +262,6 @@ test('runtime limits and idle backoff remain cooperative lifecycle boundaries', 
 });
 
 test('worker restores parent signal handlers after execution', function (): void {
-    if (!function_exists('pcntl_signal_get_handler')) {
-        throw new RuntimeException('Worker signal restoration test requires ext-pcntl.');
-    }
-
     $previous = pcntl_signal_get_handler(15);
     $handler = static function (): void {};
     pcntl_signal(15, $handler);
@@ -330,10 +326,6 @@ test('worker pool stop requests are idempotent before native startup', function 
 });
 
 test('worker pool services a parent lifecycle without alarm signals', function (): void {
-    if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
-        throw new RuntimeException('WorkerPool tests require ext-pcntl and ext-posix.');
-    }
-
     $lifecycle = new RecordingWorkerLifecycle(
         onStopRequested: static fn(int $checks): bool => $checks >= 2,
     );
@@ -367,10 +359,6 @@ test('worker pool services a parent lifecycle without alarm signals', function (
 });
 
 test('worker pool stops after the bounded crash restart budget', function (): void {
-    if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
-        throw new RuntimeException('WorkerPool tests require ext-pcntl and ext-posix.');
-    }
-
     $pool = new WorkerPool(
         static function (int $slot): Worker {
             throw new RuntimeException('crash-' . $slot);
@@ -385,10 +373,6 @@ test('worker pool stops after the bounded crash restart budget', function (): vo
 });
 
 test('worker pool replaces cleanly recycled workers without consuming the crash budget', function (): void {
-    if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
-        throw new RuntimeException('WorkerPool tests require ext-pcntl and ext-posix.');
-    }
-
     $counter = tempnam(sys_get_temp_dir(), 'omnibus-worker-recycle-');
     if ($counter === false) {
         throw new RuntimeException('Unable to allocate a worker recycle counter.');
@@ -446,10 +430,6 @@ test('worker pool replaces cleanly recycled workers without consuming the crash 
 });
 
 test('worker pool force kills a child that ignores graceful shutdown', function (): void {
-    if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
-        throw new RuntimeException('WorkerPool tests require ext-pcntl and ext-posix.');
-    }
-
     $pool = new WorkerPool(
         static function (int $slot): Worker {
             if ($slot === 0) {
@@ -492,14 +472,6 @@ test('worker pool force kills a child that ignores graceful shutdown', function 
 });
 
 test('worker pool restores parent signal handlers after execution', function (): void {
-    if (
-        !function_exists('pcntl_fork')
-        || !function_exists('pcntl_signal_get_handler')
-        || !function_exists('posix_kill')
-    ) {
-        throw new RuntimeException('WorkerPool tests require ext-pcntl and ext-posix.');
-    }
-
     $previous = pcntl_signal_get_handler(15);
     $handler = static function (): void {};
     pcntl_signal(15, $handler);

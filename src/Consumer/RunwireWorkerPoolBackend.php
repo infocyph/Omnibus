@@ -40,7 +40,7 @@ final class RunwireWorkerPoolBackend implements WorkerPoolBackend
             return;
         }
 
-        $this->assertSupported();
+        $this->assertRunwireAvailable();
         if ($this->lifecycleRequestsStop($lifecycle)) {
             return;
         }
@@ -68,20 +68,12 @@ final class RunwireWorkerPoolBackend implements WorkerPoolBackend
         $this->throwFailure($lifecycleFailure, $supervisorFailure);
     }
 
-    private function assertSupported(): void
+    private function assertRunwireAvailable(): void
     {
         foreach ([Supervisor::class, WorkerContext::class, WorkerGroup::class] as $class) {
             if (!class_exists($class)) {
                 throw new \RuntimeException(
                     'The Runwire WorkerPool backend requires infocyph/runwire ^1.0.',
-                );
-            }
-        }
-
-        foreach (['pcntl_fork', 'posix_kill'] as $function) {
-            if (!function_exists($function)) {
-                throw new \RuntimeException(
-                    'The Runwire WorkerPool backend requires Runwire native process capabilities.',
                 );
             }
         }

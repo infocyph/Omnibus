@@ -69,8 +69,9 @@ Web and CLI separation
 Web applications may construct ``AfterResponseDispatcher`` and a runtime
 adapter. Worker/CLI applications construct ``Consumer`` and transports. Neither
 path requires booting the other. Ordinary FPM/request and non-pool CLI paths do
-not require Runwire, ``ext-pcntl``, or ``ext-posix``. The native ``WorkerPool``
-uses PCNTL/POSIX; Runwire 1.x is an optional explicitly selected alternative
+not require Runwire or construct a pool backend, while Omnibus 2.6 still has
+mandatory PCNTL/POSIX package requirements. The native ``WorkerPool`` uses
+those extensions; Runwire 1.x is an optional explicitly selected alternative
 pool backend.
 
 Provider integrations

@@ -67,12 +67,7 @@ final class Worker
 
     private function registerSignals(): void
     {
-        if (
-            !$this->options->handleSignals
-            || !function_exists('pcntl_async_signals')
-            || !function_exists('pcntl_signal')
-            || !function_exists('pcntl_signal_get_handler')
-        ) {
+        if (!$this->options->handleSignals) {
             return;
         }
 

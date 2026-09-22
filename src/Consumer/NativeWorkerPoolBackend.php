@@ -50,7 +50,6 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
             return;
         }
 
-        $this->assertSupported();
         $this->shutdownGraceSeconds = $shutdownGraceSeconds;
         $this->registerSignals();
 
@@ -88,30 +87,6 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         }
 
         return $status;
-    }
-
-    private function assertSupported(): void
-    {
-        foreach ([
-            'pcntl_async_signals',
-            'pcntl_fork',
-            'pcntl_get_last_error',
-            'pcntl_signal',
-            'pcntl_signal_get_handler',
-            'pcntl_sigprocmask',
-            'pcntl_waitpid',
-            'pcntl_wifexited',
-            'pcntl_wexitstatus',
-            'pcntl_wifsignaled',
-            'pcntl_wtermsig',
-            'posix_kill',
-        ] as $function) {
-            if (!function_exists($function)) {
-                throw new \RuntimeException(
-                    'The native WorkerPool backend requires ext-pcntl and ext-posix on a Unix-like runtime.',
-                );
-            }
-        }
     }
 
     private function beginShutdown(): void
@@ -188,11 +163,6 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         $this->signalChildren(self::SIGNAL_KILL);
     }
 
-    private function isWaitError(int $error, string $constant): bool
-    {
-        return defined($constant) && $error === constant($constant);
-    }
-
     /** @return array{int,int}|null */
     private function pollChild(): ?array
     {
@@ -206,10 +176,10 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         }
 
         $error = pcntl_get_last_error();
-        if ($this->isWaitError($error, 'PCNTL_EINTR')) {
+        if ($error === PCNTL_EINTR) {
             return null;
         }
-        if ($this->isWaitError($error, 'PCNTL_ECHILD')) {
+        if ($error === PCNTL_ECHILD) {
             $this->children = [];
 
             return null;

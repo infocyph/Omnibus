@@ -246,10 +246,6 @@ if (!is_int($messages) || $messages < 1 || $messages > 10_000) {
 if (!is_int($cycles) || $cycles < 1 || $cycles > 1_000) {
     throw new InvalidArgumentException('Recycle cycles must be between 1 and 1000.');
 }
-if (!function_exists('pcntl_fork') || !function_exists('posix_kill')) {
-    throw new RuntimeException('WorkerPool benchmark requires ext-pcntl and ext-posix.');
-}
-
 $direct = omnibusWorkerPoolMeasure(static function () use ($messages): void {
     omnibusWorkerPoolConsumer($messages)->run('benchmark', $messages);
 });

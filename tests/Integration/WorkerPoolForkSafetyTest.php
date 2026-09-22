@@ -22,9 +22,6 @@ use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 use Infocyph\Omnibus\Tests\Fixtures\TestSerializer;
 
 test('WorkerPool constructs DBLayer resources inside the forked child factory', function (): void {
-    if (!function_exists('pcntl_waitpid') || !function_exists('posix_kill')) {
-        throw new RuntimeException('WorkerPool fork-safety integration requires ext-pcntl and ext-posix.');
-    }
     if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
         throw new RuntimeException('WorkerPool fork-safety integration requires pdo_sqlite.');
     }

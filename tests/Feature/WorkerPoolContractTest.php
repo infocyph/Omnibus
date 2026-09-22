@@ -33,17 +33,11 @@ function omnibusAssertNoWorkerChildren(): void
     $status = 0;
     $pid = pcntl_waitpid(-1, $status, WNOHANG);
 
-    expect($pid)->toBe(-1);
-    if (defined('PCNTL_ECHILD')) {
-        expect(pcntl_get_last_error())->toBe(PCNTL_ECHILD);
-    }
+    expect($pid)->toBe(-1)
+        ->and(pcntl_get_last_error())->toBe(PCNTL_ECHILD);
 }
 
 test('worker pool backends create and execute workers in the child process', function (string $backend): void {
-    if (!function_exists('pcntl_waitpid') || !function_exists('posix_kill')) {
-        throw new RuntimeException('WorkerPool matrix requires ext-pcntl and ext-posix.');
-    }
-
     $report = tempnam(sys_get_temp_dir(), 'omnibus-pool-matrix-');
     if ($report === false) {
         throw new RuntimeException('Unable to allocate a WorkerPool matrix report.');
@@ -140,10 +134,6 @@ test('worker pool backends create and execute workers in the child process', fun
 })->with(['native', 'runwire']);
 
 test('worker pool backends reap crashed children before propagating exhaustion', function (string $backend): void {
-    if (!function_exists('pcntl_waitpid') || !function_exists('posix_kill')) {
-        throw new RuntimeException('WorkerPool matrix requires ext-pcntl and ext-posix.');
-    }
-
     $pool = new WorkerPool(
         static function (): Worker {
             throw new RuntimeException('matrix-crash');

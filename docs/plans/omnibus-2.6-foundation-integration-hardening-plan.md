@@ -923,12 +923,13 @@ Once Omnibus 2.6 is released:
 Omnibus 2.6 is ready when all of the following are true:
 
 - Composer/test metadata targets CacheLayer `^3.4` and DBLayer `^5.1`;
-  Runwire `^1.0`, PCNTL and POSIX remain optional capabilities.
+  Runwire `^1.0` remains optional, while PCNTL and POSIX are mandatory
+  runtime requirements.
 - Ordinary FPM/request, direct dispatch, Consumer and single-process Worker
   paths run without Runwire or pool construction, while the package retains
   mandatory PCNTL/POSIX requirements.
-- Native `WorkerPool` remains operational without Runwire on supported Unix
-  runtimes with PCNTL/POSIX.
+- Native `WorkerPool` remains operational without Runwire on the mandatory
+  PCNTL/POSIX Unix runtime floor.
 - Optional Runwire WorkerPool backend can be selected explicitly and preserves
   the same queue-facing lifecycle/recycle/stop contract.
 - Backend selection is deterministic and cannot change merely because Runwire
@@ -1123,15 +1124,16 @@ SIGALRM watchdog and supplies lifecycle policy through Omnibus.
 
 ### 27.7 Process completion gate
 
-- [X] Native PCNTL/POSIX WorkerPool requirement retained.
+- [X] Native PCNTL/POSIX WorkerPool requirement retained and promoted to the
+  mandatory package runtime floor.
 - [X] Runwire remains optional.
-- [ ] Core/FPM paths are proven independent of both pool dependencies.
-- [ ] Native backend hardening complete.
-- [ ] Explicit Runwire backend complete.
-- [ ] Common behavioral suite green on both backends.
-- [ ] Fork-safety/resource ownership tests green.
+- [X] Core/FPM paths are proven independent of Runwire and pool construction.
+- [X] Native backend hardening complete.
+- [X] Explicit Runwire backend complete.
+- [X] Common behavioral suite green on both backends.
+- [X] Fork-safety/resource ownership tests green.
 - [ ] Foundation migration works with native backend and optional Runwire.
-- [ ] PHP 8.4/8.5 QA and benchmarks green.
+- [X] PHP 8.4/8.5 QA and benchmarks green.
 
 ---
 
@@ -1229,14 +1231,16 @@ exception path without notices/warnings.
 
 ### 28.8 Core/FPM smoke gate
 
-Prove process support is optional:
+Prove pool construction and Runwire remain optional while the Unix process
+extension floor is mandatory:
 
-- mandatory Composer requirements contain no Runwire, PCNTL or POSIX;
+- mandatory Composer requirements include PCNTL/POSIX but no Runwire;
 - ordinary dispatch/serialization/transports/request integrations load without
-  Runwire;
-- `Worker(handleSignals: false)` avoids signal handling while the mandatory
-  PCNTL/POSIX package requirements remain installed;
-- native WorkerPool capability failure is isolated to selecting the feature;
+  Runwire or constructing a pool backend;
+- `Worker(handleSignals: false)` avoids signal registration while mandatory
+  PCNTL/POSIX remain installed;
+- native WorkerPool uses the guaranteed PCNTL/POSIX runtime directly rather
+  than re-probing extension availability;
 - documentation clearly separates FPM/request usage from CLI/persistent pool
   usage.
 

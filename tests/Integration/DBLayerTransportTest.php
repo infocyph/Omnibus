@@ -86,15 +86,6 @@ function omnibusDatabaseQueue(?int $maxParams = null): array
  */
 function omnibusWithSqliteWriteLock(array $configuration, callable $operation, int $holdMicroseconds): mixed
 {
-    if (
-        !function_exists('pcntl_fork')
-        || !function_exists('pcntl_sigprocmask')
-        || !function_exists('pcntl_waitpid')
-        || !function_exists('posix_kill')
-    ) {
-        throw new RuntimeException('SQLite retry integration requires ext-pcntl and ext-posix.');
-    }
-
     $ready = sys_get_temp_dir() . '/omnibus-sqlite-lock-' . bin2hex(random_bytes(8));
     $pid = pcntl_fork();
     if ($pid === -1) {

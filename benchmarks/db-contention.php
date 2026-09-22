@@ -39,10 +39,6 @@ if (!is_int($depth) || $depth < 10_000 || $depth > 1_000_000) {
 if (!in_array($indexSet, ['current', 'candidate', 'candidate-reclaim'], true)) {
     throw new InvalidArgumentException('Index set must be current, candidate, or candidate-reclaim.');
 }
-if (!function_exists('pcntl_fork')) {
-    throw new RuntimeException('The DB contention benchmark requires pcntl.');
-}
-
 $database = getenv('IC_SERVICE_DATABASE');
 $username = getenv('IC_SERVICE_USERNAME');
 $password = getenv('IC_SERVICE_PASSWORD');
