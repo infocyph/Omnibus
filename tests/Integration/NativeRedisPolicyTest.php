@@ -11,7 +11,13 @@ use Infocyph\Omnibus\Integration\CacheLayer\CircuitOpen;
 use Infocyph\Omnibus\Integration\CacheLayer\FixedWindowRateLimitScope;
 use Infocyph\Omnibus\Integration\CacheLayer\RateLimitExceeded;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
+use Infocyph\Omnibus\Tests\Fixtures\IntegrationEnvironment;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
+
+$omnibusRedisPolicyBackends = IntegrationEnvironment::redisBackendCases();
+if ($omnibusRedisPolicyBackends === []) {
+    return;
+}
 
 test('native Redis-compatible counters execute rate-limit and circuit-breaker policies', function (
     string $backend,
@@ -19,14 +25,8 @@ test('native Redis-compatible counters execute rate-limit and circuit-breaker po
     string $portVariable,
     string $passwordVariable,
 ): void {
-    if (!extension_loaded('redis') || !class_exists(Redis::class)) {
-        throw new RuntimeException('The redis extension is required by this integration test.');
-    }
-    $host = getenv($hostVariable);
-    $port = getenv($portVariable);
-    if (!is_string($host) || $host === '' || !is_string($port) || $port === '') {
-        throw new RuntimeException(sprintf('The %s service must be configured for this integration test.', $backend));
-    }
+    $host = (string) getenv($hostVariable);
+    $port = (string) getenv($portVariable);
 
     $redis = new Redis();
     $redis->connect($host, (int) $port, 3);
@@ -77,7 +77,4 @@ test('native Redis-compatible counters execute rate-limit and circuit-breaker po
         ->toBe('recovered');
 
     $redis->close();
-})->with([
-    'redis' => ['redis', 'IC_REDIS_HOST', 'IC_REDIS_PORT', 'IC_REDIS_PASSWORD'],
-    'valkey' => ['valkey', 'IC_VALKEY_HOST', 'IC_VALKEY_PORT', 'IC_VALKEY_PASSWORD'],
-]);
+})->with($omnibusRedisPolicyBackends);

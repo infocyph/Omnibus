@@ -7,8 +7,14 @@ use Infocyph\Omnibus\Integration\Redis\CallbackRedisClient;
 use Infocyph\Omnibus\Integration\Redis\RedisBackendStateCorruption;
 use Infocyph\Omnibus\Integration\Redis\RedisTransport;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
+use Infocyph\Omnibus\Tests\Fixtures\IntegrationEnvironment;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 use Infocyph\Omnibus\Tests\Fixtures\TestSerializer;
+
+$omnibusRedisTransportBackends = IntegrationEnvironment::redisBackendCases();
+if ($omnibusRedisTransportBackends === []) {
+    return;
+}
 
 test('native Redis-compatible service completes reservation and settlement lifecycle', function (
     string $backend,
@@ -16,14 +22,8 @@ test('native Redis-compatible service completes reservation and settlement lifec
     string $portVariable,
     string $passwordVariable,
 ): void {
-    if (!extension_loaded('redis') || !class_exists(Redis::class)) {
-        throw new RuntimeException('The redis extension is required by this integration test.');
-    }
-    $host = getenv($hostVariable);
-    $port = getenv($portVariable);
-    if (!is_string($host) || $host === '' || !is_string($port) || $port === '') {
-        throw new RuntimeException(sprintf('The %s service must be configured for this integration test.', $backend));
-    }
+    $host = (string) getenv($hostVariable);
+    $port = (string) getenv($portVariable);
 
     $redis = new Redis();
     $redis->connect($host, (int) $port, 3);
@@ -83,7 +83,4 @@ test('native Redis-compatible service completes reservation and settlement lifec
         $redis->del($keys);
         $redis->close();
     }
-})->with([
-    'redis' => ['redis', 'IC_REDIS_HOST', 'IC_REDIS_PORT', 'IC_REDIS_PASSWORD'],
-    'valkey' => ['valkey', 'IC_VALKEY_HOST', 'IC_VALKEY_PORT', 'IC_VALKEY_PASSWORD'],
-]);
+})->with($omnibusRedisTransportBackends);

@@ -73,12 +73,19 @@ Commands
 ``composer ic:tests`` and ``composer ic:ci`` are supplied by PHPForge and are
 the authoritative quality suites.
 
-Both commands include live integration tests. Missing services or PHP extensions
-are failures, not automatic skips. Run them with PHP 8.4 or 8.5 and the
-``pcntl``, ``posix``, ``pdo_sqlite``, ``pdo_mysql``, ``pdo_pgsql``,
-``pdo_sqlsrv``, ``redis`` and ``memcached`` extensions installed in the PHP
-runtime executing Composer. Starting Docker services alone does not install
-extensions into host PHP. Check that runtime with ``composer ic:doctor``.
+Both commands include live integration coverage when the matching local service
+configuration is present. In an ordinary local shell, MySQL, MariaDB,
+PostgreSQL, SQL Server, Redis, Valkey and Memcached cases are registered only
+when their required extension and ``IC_*`` service variables are available;
+the rest of the suite remains runnable without provisioning every optional
+service. GitHub Actions is strict: the release workflow provisions all expected
+services/extensions, and test discovery fails if any expected integration
+configuration is missing. Run the full local parity matrix with PHP 8.4 or 8.5
+and the ``pdo_sqlite``, ``pdo_mysql``, ``pdo_pgsql``, ``pdo_sqlsrv``,
+``redis`` and ``memcached`` extensions installed in the PHP runtime executing
+Composer. PCNTL/POSIX are mandatory Omnibus runtime requirements. Starting
+Docker services alone does not install extensions into host PHP. Check that
+runtime with ``composer ic:doctor``.
 
 For disposable local integration services, start the repository's service
 definitions under a separate Compose project:
