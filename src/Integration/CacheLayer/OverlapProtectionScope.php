@@ -10,10 +10,6 @@ use Infocyph\Omnibus\Envelope\Envelope;
 
 final readonly class OverlapProtectionScope implements ExecutionScope
 {
-    /**
-     * The host must keep normal handler duration below its hard worker timeout,
-     * and that timeout below this lock lease. Omnibus does not run heartbeats.
-     */
     /** @var \Closure(Envelope):string */
     private \Closure $key;
 
@@ -33,7 +29,7 @@ final readonly class OverlapProtectionScope implements ExecutionScope
         ) {
             throw new \InvalidArgumentException('Overlap wait and lease values are invalid.');
         }
-        $this->key = \Closure::fromCallable($key);
+        $this->key = $key(...);
     }
 
     public function run(Envelope $envelope, callable $handler): mixed
@@ -53,10 +49,25 @@ final readonly class OverlapProtectionScope implements ExecutionScope
                     $logicalKey,
                 ));
             }
+        } catch (\Throwable $failure) {
+            try {
+                $this->locks->release($handle);
+            } catch (\Throwable) {
+                // Handler/lease failure remains primary.
+            }
 
-            return $result;
-        } finally {
-            $this->locks->release($handle);
+            throw $failure;
         }
+
+        try {
+            $this->locks->release($handle);
+        } catch (\Throwable $failure) {
+            throw new CoordinationCleanupFailedAfterExecution(
+                sprintf('Message overlap lease "%s" could not be released after execution.', $logicalKey),
+                previous: $failure,
+            );
+        }
+
+        return $result;
     }
 }

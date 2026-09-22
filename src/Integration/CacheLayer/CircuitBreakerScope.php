@@ -36,7 +36,7 @@ final readonly class CircuitBreakerScope implements ExecutionScope
         ) {
             throw new \InvalidArgumentException('Circuit-breaker threshold and windows must be positive.');
         }
-        $this->key = \Closure::fromCallable($key);
+        $this->key = $key(...);
     }
 
     public function run(Envelope $envelope, callable $handler): mixed
@@ -51,7 +51,7 @@ final readonly class CircuitBreakerScope implements ExecutionScope
                 $this->recordFailure($key, $probe instanceof LockHandle);
             } catch (\Throwable) {
             }
-            $this->releaseProbe($probe);
+            $this->releaseProbeQuietly($probe);
 
             throw $failure;
         }
@@ -61,9 +61,15 @@ final readonly class CircuitBreakerScope implements ExecutionScope
                 $this->counters->delete($this->failureKey($key));
                 $this->counters->delete($this->openKey($key));
             });
-        } catch (\Throwable) {
+            $this->releaseProbe($probe);
+        } catch (\Throwable $failure) {
+            $this->releaseProbeQuietly($probe);
+
+            throw new CoordinationCleanupFailedAfterExecution(
+                sprintf('Circuit "%s" coordination cleanup failed after execution.', $key),
+                previous: $failure,
+            );
         }
-        $this->releaseProbe($probe);
 
         return $result;
     }
@@ -76,6 +82,7 @@ final readonly class CircuitBreakerScope implements ExecutionScope
             if ($openedAt === null) {
                 return;
             }
+
             $now = (int) $this->clock->now()->format('U');
             if ($openedAt + $this->recoverySeconds > $now) {
                 throw new CircuitOpen(sprintf('Circuit "%s" is open.', $key));
@@ -131,12 +138,15 @@ final readonly class CircuitBreakerScope implements ExecutionScope
 
     private function releaseProbe(?LockHandle $probe): void
     {
-        if (!$probe instanceof LockHandle) {
-            return;
-        }
-
-        try {
+        if ($probe instanceof LockHandle) {
             $this->locks->release($probe);
+        }
+    }
+
+    private function releaseProbeQuietly(?LockHandle $probe): void
+    {
+        try {
+            $this->releaseProbe($probe);
         } catch (\Throwable) {
         }
     }
@@ -151,8 +161,15 @@ final readonly class CircuitBreakerScope implements ExecutionScope
 
         try {
             $operation();
-        } finally {
-            $this->locks->release($handle);
+        } catch (\Throwable $failure) {
+            try {
+                $this->locks->release($handle);
+            } catch (\Throwable) {
+            }
+
+            throw $failure;
         }
+
+        $this->locks->release($handle);
     }
 }

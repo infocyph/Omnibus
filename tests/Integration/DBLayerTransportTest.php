@@ -25,6 +25,7 @@ use Infocyph\Omnibus\Serialization\JsonEnvelopeSerializer;
 use Infocyph\Omnibus\Serialization\MessageCodecRegistry;
 use Infocyph\Omnibus\Serialization\StampCodecRegistry;
 use Infocyph\Omnibus\Retry\ExponentialRetryStrategy;
+use Infocyph\Omnibus\Tests\Fixtures\BinaryEnvelopeSerializer;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
 use Infocyph\Omnibus\Tests\Fixtures\InMemoryLockProvider;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
@@ -206,6 +207,43 @@ test('DBLayer caps queue reservations and workflow claims to the effective bind 
         ->and(count($reservations) + 2)->toBeLessThanOrEqual($connection->effectiveMaxBindParameters())
         ->and($claims)->toHaveCount($claimLimit)
         ->and(count($claims) + 3)->toBeLessThanOrEqual($connection->effectiveMaxBindParameters());
+});
+
+test('DBLayer durable adapters round trip arbitrary serializer bytes on SQLite', function (): void {
+    $connection = new Connection(ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]));
+    foreach (QueueSchema::statements('sqlite') as $statement) {
+        $connection->statement($statement);
+    }
+
+    $serializer = BinaryEnvelopeSerializer::make();
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $transport = new DBLayerTransport($connection, $serializer, $clock);
+    $transport->send(new Envelope(new TestCommand('binary')), 'work');
+    $reservation = [...$transport->receive('work')][0];
+
+    $failures = new DBLayerFailureStore($connection, $serializer, clock: $clock);
+    $raw = "\x00\xFFraw\x80";
+    $failures->add(FailedMessage::undecodable(
+        'binary-raw',
+        'work',
+        $raw,
+        1,
+        $clock->now(),
+        JsonException::class,
+        'binary',
+    ));
+
+    $workflows = new DBLayerWorkflowStore($connection, $serializer, clock: $clock);
+    $workflowId = '01BINARYPAYLOAD00000000000';
+    $workflows->createBatch($workflowId, [new Envelope(new TestCommand('workflow-binary'))], 'work');
+    $claim = $workflows->claimPending($workflowId)[0];
+
+    expect($reservation->envelope()->message)->toEqual(new TestCommand('binary'))
+        ->and($failures->find('binary-raw')?->payload)->toBe($raw)
+        ->and($claim->item->envelope->message)->toEqual(new TestCommand('workflow-binary'));
 });
 
 test('DBLayer transport exposes poison payloads as terminal reservations', function (): void {
@@ -444,6 +482,41 @@ test('DBLayer failure retry claims exclude concurrent retries and recover after 
         ->toThrow(FailureRetryClaimUnavailable::class)
         ->and($failures->removeRetried($current))->toBeTrue()
         ->and($failures->find('retry-claim'))->toBeNull();
+});
+
+test('DBLayer failure re-failure resets stale retry state without allowing older writes to win', function (): void {
+    [, , $failures, $clock] = omnibusDatabaseQueue();
+    $first = FailedMessage::decoded(
+        'refailure',
+        'work',
+        new Envelope(new TestCommand('first')),
+        1,
+        $clock->now(),
+        RuntimeException::class,
+        'first',
+    );
+    $failures->add($first);
+    $claim = $failures->claimRetry('refailure');
+    expect($failures->markRetrySent($claim))->toBeTrue();
+
+    $clock->advance('+1 second');
+    $second = FailedMessage::decoded(
+        'refailure',
+        'work',
+        new Envelope(new TestCommand('second')),
+        2,
+        $clock->now(),
+        DomainException::class,
+        'second',
+    );
+    $failures->add($second);
+
+    expect($failures->removeRetried($claim))->toBeFalse()
+        ->and($failures->find('refailure')?->attempt)->toBe(2)
+        ->and($failures->claimRetry('refailure')->failure->attempt)->toBe(2);
+
+    $failures->add($first);
+    expect($failures->find('refailure')?->attempt)->toBe(2);
 });
 
 test('DBLayer workflow store persists chain progress and batch cancellation', function (): void {

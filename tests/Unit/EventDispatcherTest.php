@@ -18,6 +18,7 @@ use Infocyph\Omnibus\Tests\Fixtures\TestEvent;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
 use Infocyph\Omnibus\Transport\SyncTransport;
 use Infocyph\Omnibus\Transport\TransportRegistry;
+use Psr\EventDispatcher\ListenerProviderInterface;
 use Psr\EventDispatcher\StoppableEventInterface;
 
 test('event dispatcher invokes synchronous listeners in configured order', function (): void {
@@ -99,4 +100,16 @@ test('marker-only queued listeners and stoppable order follow the queued contrac
     ])))->dispatch($event);
 
     expect($calls)->toBe(1);
+});
+
+test('external listener providers returning empty arrays fail through the listener contract', function (): void {
+    $provider = new class implements ListenerProviderInterface {
+        public function getListenersForEvent(object $event): iterable
+        {
+            return [[]];
+        }
+    };
+
+    expect(fn() => (new EventDispatcher($provider))->dispatch(new TestEvent('invalid')))
+        ->toThrow(UnexpectedValueException::class, 'Listener providers must return callables');
 });

@@ -13,6 +13,7 @@ use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\UniqueStamp;
 use Infocyph\Omnibus\Integration\CacheLayer\CircuitBreakerScope;
 use Infocyph\Omnibus\Integration\CacheLayer\CircuitOpen;
+use Infocyph\Omnibus\Integration\CacheLayer\CoordinationCleanupFailedAfterExecution;
 use Infocyph\Omnibus\Integration\CacheLayer\FixedWindowRateLimitScope;
 use Infocyph\Omnibus\Integration\CacheLayer\LeaseLost;
 use Infocyph\Omnibus\Integration\CacheLayer\OverlapProtectionScope;
@@ -96,6 +97,24 @@ test('unique cleanup failure cannot undo durable queue settlement', function ():
 
     expect($reported)->toBe(1)
         ->and($inner->size('work'))->toBe(0);
+});
+
+test('unique sender preserves the primary send failure when lease cleanup also fails', function (): void {
+    $locks = new InMemoryLockProvider();
+    $locks->releaseFails = true;
+    $sender = new UniqueSender(
+        new class implements Infocyph\Omnibus\Transport\Sender {
+            public function send(Envelope $envelope, string $queue): Envelope
+            {
+                throw new DomainException('send-primary');
+            }
+        },
+        $locks,
+        static fn(): string => 'unique-primary',
+    );
+
+    expect(fn() => $sender->send(new Envelope(new TestCommand('one')), 'work'))
+        ->toThrow(DomainException::class, 'send-primary');
 });
 
 test('overlap protection reports lease loss and always releases', function (): void {
@@ -216,7 +235,7 @@ test('circuit recovery admits one probe and reopens or recovers with expiring ba
     expect($scope->run($envelope, static fn(): string => 'after-crash'))->toBe('after-crash');
 });
 
-test('circuit bookkeeping cannot replace a completed handler outcome', function (): void {
+test('circuit cleanup uncertainty is observable after success but never masks handler failure', function (): void {
     $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
     $envelope = new Envelope(new TestCommand('bookkeeping'));
     $successLocks = new InMemoryLockProvider($clock);
@@ -228,7 +247,8 @@ test('circuit bookkeeping cannot replace a completed handler outcome', function 
         $clock,
         static fn(): string => 'success',
     );
-    expect($success->run($envelope, static fn(): string => 'business-result'))->toBe('business-result');
+    expect(fn() => $success->run($envelope, static fn(): string => 'business-result'))
+        ->toThrow(CoordinationCleanupFailedAfterExecution::class);
 
     $failureLocks = new InMemoryLockProvider($clock);
     $failureLocks->failAcquireAt = 2;
@@ -240,6 +260,30 @@ test('circuit bookkeeping cannot replace a completed handler outcome', function 
         static fn(): string => 'failure',
     );
     expect(fn() => $failure->run($envelope, static fn() => throw new DomainException('handler-primary')))
+        ->toThrow(DomainException::class, 'handler-primary');
+});
+
+test('overlap cleanup failure is non-retryable only after successful execution', function (): void {
+    $locks = new InMemoryLockProvider();
+    $locks->releaseFails = true;
+    $scope = new OverlapProtectionScope(
+        new DirectExecutionScope(),
+        $locks,
+        static fn(): string => 'overlap-cleanup',
+    );
+    $envelope = new Envelope(new TestCommand('cleanup'));
+
+    expect(fn() => $scope->run($envelope, static fn(): string => 'done'))
+        ->toThrow(CoordinationCleanupFailedAfterExecution::class);
+
+    $primaryLocks = new InMemoryLockProvider();
+    $primaryLocks->releaseFails = true;
+    $primary = new OverlapProtectionScope(
+        new DirectExecutionScope(),
+        $primaryLocks,
+        static fn(): string => 'overlap-primary',
+    );
+    expect(fn() => $primary->run($envelope, static fn() => throw new DomainException('handler-primary')))
         ->toThrow(DomainException::class, 'handler-primary');
 });
 

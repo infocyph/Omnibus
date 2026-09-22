@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Integration\Redis\CallbackRedisClient;
+use Infocyph\Omnibus\Integration\Redis\RedisBackendStateCorruption;
 use Infocyph\Omnibus\Integration\Redis\RedisTransport;
 use Infocyph\Omnibus\Serialization\CallbackMessageCodec;
 use Infocyph\Omnibus\Serialization\CoreStampCodecs;
@@ -93,17 +94,24 @@ test('Redis transport rejects malformed and overflowing backend responses', func
     'non scalar' => [[]],
 ]);
 
-test('Redis transport surfaces missing payload hash entries as poison reservations', function (): void {
-    $transport = new RedisTransport(
-        new CallbackRedisClient(static fn(): array => ['row-1', '', '1', 'message-id']),
+test('Redis transport rejects structural corruption but keeps malformed serializer payloads as poison', function (): void {
+    $corrupt = new RedisTransport(
+        new CallbackRedisClient(static fn(): array => ['__OMNIBUS_CORRUPT__', 'row-1', 'payload']),
         omnibusRedisSerializer(),
         new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00')),
     );
+    expect(fn() => [...$corrupt->receive('work')])
+        ->toThrow(RedisBackendStateCorruption::class);
 
-    $reservation = [...$transport->receive('work')][0];
+    $poison = new RedisTransport(
+        new CallbackRedisClient(static fn(): array => ['row-2', '{broken', '1', 'message-id']),
+        omnibusRedisSerializer(),
+        new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00')),
+    );
+    $reservation = [...$poison->receive('work')][0];
 
     expect($reservation->decodingFailure())->not->toBeNull()
-        ->and($reservation->decodingFailure()?->payload)->toBe('');
+        ->and($reservation->decodingFailure()?->payload)->toBe('{broken');
 });
 
 test('Redis transport rejects malformed batches hash-tag collisions and excessive limits', function (): void {

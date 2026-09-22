@@ -21,6 +21,8 @@ use Psr\Clock\ClockInterface;
 
 final readonly class RedisTransport implements Transport
 {
+    private const string CORRUPTION_SENTINEL = '__OMNIBUS_CORRUPT__';
+
     private const string ACK = <<<'LUA'
 if redis.call('HGET', KEYS[4], ARGV[1]) ~= ARGV[2] then return 0 end
 redis.call('ZREM', KEYS[1], ARGV[1])
@@ -32,13 +34,31 @@ return 1
 LUA;
 
     private const string RECEIVE = <<<'LUA'
+local function corrupt(ids, requireReceipt)
+    for _, id in ipairs(ids) do
+        if redis.call('HGET', KEYS[3], id) == false then return id, 'payload' end
+        if redis.call('HGET', KEYS[4], id) == false then return id, 'attempt' end
+        if redis.call('HGET', KEYS[6], id) == false then return id, 'message_id' end
+        local receipt = redis.call('HGET', KEYS[5], id)
+        if requireReceipt and receipt == false then return id, 'receipt' end
+        if not requireReceipt and receipt ~= false then return id, 'ready_receipt' end
+    end
+    return nil, nil
+end
+
 local expired = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', ARGV[1], 'LIMIT', 0, ARGV[4])
+local corruptId, corruptField = corrupt(expired, true)
+if corruptId then return {'__OMNIBUS_CORRUPT__', corruptId, corruptField} end
 for _, id in ipairs(expired) do
     redis.call('ZREM', KEYS[2], id)
     redis.call('ZADD', KEYS[1], ARGV[1], id)
     redis.call('HDEL', KEYS[5], id)
 end
+
 local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, ARGV[4])
+corruptId, corruptField = corrupt(ids, false)
+if corruptId then return {'__OMNIBUS_CORRUPT__', corruptId, corruptField} end
+
 local result = {}
 for _, id in ipairs(ids) do
     redis.call('ZREM', KEYS[1], id)
@@ -46,11 +66,9 @@ for _, id in ipairs(ids) do
     local attempt = redis.call('HINCRBY', KEYS[4], id, 1)
     redis.call('HSET', KEYS[5], id, ARGV[3])
     table.insert(result, id)
-    local payload = redis.call('HGET', KEYS[3], id)
-    table.insert(result, payload or '')
+    table.insert(result, redis.call('HGET', KEYS[3], id))
     table.insert(result, tostring(attempt))
-    local messageId = redis.call('HGET', KEYS[6], id)
-    table.insert(result, messageId or '')
+    table.insert(result, redis.call('HGET', KEYS[6], id))
 end
 return result
 LUA;
@@ -120,6 +138,12 @@ LUA;
             $token,
             (string) $limit,
         ]);
+        if (is_array($result) && ($result[0] ?? null) === self::CORRUPTION_SENTINEL) {
+            throw new RedisBackendStateCorruption(
+                self::scalarString($result[1] ?? null, 'corrupt message id'),
+                self::scalarString($result[2] ?? null, 'corrupt field'),
+            );
+        }
         if (!is_array($result) || count($result) % 4 !== 0) {
             throw new \UnexpectedValueException('Redis returned a malformed reservation batch.');
         }

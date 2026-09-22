@@ -6,6 +6,7 @@ use Infocyph\Omnibus\Envelope\HandledStamp;
 use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
+use Infocyph\Omnibus\Envelope\RouteStamp;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Handler\AmbiguousHandler;
@@ -70,6 +71,31 @@ test('explicit envelope delay wins and sync transport refuses positive delay', f
             TestCommand::class => static fn(): null => null,
         ]))))->send($sent, 'work'))
         ->toThrow(UnsupportedDelay::class);
+});
+
+test('redispatch replaces transient route and handled stamps while preserving identity', function (): void {
+    $handlers = new HandlerMap([
+        TestCommand::class => static fn(TestCommand $message): string => strtoupper($message->value),
+    ]);
+    $sync = new MessageBus(
+        new RouteMap(),
+        new TransportRegistry(['sync' => new SyncTransport(new HandlerInvoker($handlers))]),
+    );
+    $handled = $sync->dispatch(new TestCommand('again'));
+    $messageId = $handled->last(MessageIdStamp::class)?->id;
+
+    $sender = new RecordingSender();
+    $async = new MessageBus(
+        new RouteMap([TestCommand::class => new Route('recording', 'work')]),
+        new TransportRegistry(['recording' => $sender]),
+    );
+    $redispatched = $async->dispatch($handled);
+    $redispatched = $async->dispatch($redispatched);
+
+    expect($redispatched->all(RouteStamp::class))->toHaveCount(1)
+        ->and($redispatched->last(HandledStamp::class))->toBeNull()
+        ->and($redispatched->last(MessageIdStamp::class)?->id)->toBe($messageId)
+        ->and($sender->count())->toBe(2);
 });
 
 test('conflicting interface maps fail deterministically', function (): void {

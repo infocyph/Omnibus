@@ -12,6 +12,7 @@ use Infocyph\Omnibus\Integration\DBLayer\DBLayerTransport;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerWorkflowStore;
 use Infocyph\Omnibus\Integration\DBLayer\QueueSchema;
 use Infocyph\Omnibus\Integration\DBLayer\SqlIdentifier;
+use Infocyph\Omnibus\Tests\Fixtures\BinaryEnvelopeSerializer;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 use Infocyph\Omnibus\Tests\Fixtures\TestSerializer;
@@ -147,7 +148,7 @@ test('durable lifecycle runs on each configured service database', function (str
             $connection->statement($statement);
         }
 
-        $serializer = TestSerializer::make();
+        $serializer = BinaryEnvelopeSerializer::make();
         $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
         $transport = new DBLayerTransport($connection, $serializer, $clock, $tables['queue']);
         $transport->send(new Envelope(new TestCommand($driver)), 'work');
@@ -155,6 +156,16 @@ test('durable lifecycle runs on each configured service database', function (str
         $transport->acknowledge($reservation);
 
         $failures = new DBLayerFailureStore($connection, $serializer, $tables['failures']);
+        $rawPayload = "\x00\xFFraw-\x80" . $driver;
+        $failures->add(FailedMessage::undecodable(
+            'binary-failure',
+            'work',
+            $rawPayload,
+            1,
+            $clock->now(),
+            JsonException::class,
+            'binary payload',
+        ));
         $workflows = new DBLayerWorkflowStore(
             $connection,
             $serializer,
@@ -185,7 +196,7 @@ test('durable lifecycle runs on each configured service database', function (str
 
         expect($reservation->envelope()->message)->toEqual(new TestCommand($driver))
             ->and($transport->size('work'))->toBe(0)
-            ->and($failures->all())->toBe([])
+            ->and($failures->find('binary-failure')?->payload)->toBe($rawPayload)
             ->and($transition->state->succeeded)->toBe(1);
     } finally {
         foreach (array_reverse($tables) as $table) {

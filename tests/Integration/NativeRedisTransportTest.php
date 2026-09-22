@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Integration\Redis\CallbackRedisClient;
+use Infocyph\Omnibus\Integration\Redis\RedisBackendStateCorruption;
 use Infocyph\Omnibus\Integration\Redis\RedisTransport;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
@@ -39,6 +40,7 @@ test('native Redis-compatible service completes reservation and settlement lifec
         "{$prefix}:{native}:payloads",
         "{$prefix}:{native}:attempts",
         "{$prefix}:{native}:receipts",
+        "{$prefix}:{native}:message_ids",
     ];
     $redis->del($keys);
 
@@ -64,6 +66,18 @@ test('native Redis-compatible service completes reservation and settlement lifec
             ->and($redelivery->attempt)->toBe(2)
             ->and($redelivery->envelope()->message)->toEqual(new TestCommand($backend.'-native'))
             ->and($transport->size($queue))->toBe(0);
+
+        $transport->send(new Envelope(new TestCommand($backend.'-corrupt')), $queue);
+        $ids = $redis->zRange($keys[0], 0, 0);
+        $corruptId = is_array($ids) ? ($ids[0] ?? null) : null;
+        if (!is_string($corruptId)) {
+            throw new RuntimeException('Unable to locate the Redis corruption-test message.');
+        }
+        $redis->hDel($keys[2], $corruptId);
+
+        expect(fn() => [...$transport->receive($queue)])
+            ->toThrow(RedisBackendStateCorruption::class)
+            ->and($redis->zScore($keys[0], $corruptId))->not->toBeFalse();
     } finally {
         $redis->del($keys);
         $redis->close();
