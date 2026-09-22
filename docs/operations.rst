@@ -1,6 +1,20 @@
 Consumer operations and telemetry
 =================================
 
+Omnibus 2.6 durable-storage cutover
+----------------------------------
+
+Do not leave Omnibus 2.5 readers running against shared DB queue, workflow or
+failure storage once 2.6 writers start. The new payload wrapper is unreadable
+by 2.5 and can cause old workers to classify valid messages as poison.
+Pause producers, gracefully stop workers, workflow dispatchers and failure-retry
+processes, and upgrade every storage participant before resuming. Existing
+legacy rows remain readable by 2.6.
+
+After wrapped rows have been written, a code-only rollback to 2.5 is unsafe.
+Follow the coordinated cutover and data recovery requirements in
+:doc:`upgrading` before attempting rollback.
+
 Consumer and worker lifecycle
 -----------------------------
 
@@ -66,6 +80,10 @@ stable, replaces cleanly recycled workers, and respawns crashed workers with a
 bounded linear backoff. Exhausting the crash restart budget fails the pool and
 signals the remaining children to stop. Parent signal handlers are scoped to
 ``WorkerPool::run()`` and restored before it returns or rethrows.
+
+Native crash backoff uses per-slot monotonic deadlines. While a restart is
+pending, the parent continues lifecycle polling and child reaping; stopping
+cancels pending restarts and drains the remaining children.
 
 The worker factory is invoked only after child process creation. With the native
 backend that means after ``fork()``; the Runwire backend provides the same

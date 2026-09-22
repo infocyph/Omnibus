@@ -73,6 +73,40 @@ Commands
 ``composer ic:tests`` and ``composer ic:ci`` are supplied by PHPForge and are
 the authoritative quality suites.
 
+Both commands include live integration tests. Missing services or PHP extensions
+are failures, not automatic skips. Run them with PHP 8.4 or 8.5 and the
+``pcntl``, ``posix``, ``pdo_sqlite``, ``pdo_mysql``, ``pdo_pgsql``,
+``pdo_sqlsrv``, ``redis`` and ``memcached`` extensions installed in the PHP
+runtime executing Composer. Starting Docker services alone does not install
+extensions into host PHP. Check that runtime with ``composer ic:doctor``.
+
+For disposable local integration services, start the repository's service
+definitions under a separate Compose project:
+
+.. code-block:: console
+
+   docker compose -p omnibus-release-review \
+     -f vendor/infocyph/phpforge/resources/services/compose.yml \
+     --profile mysql --profile mariadb --profile postgres --profile mssql \
+     --profile redis --profile valkey --profile memcached up -d --wait
+
+With the default local service credentials and ports, run the full suite in
+the PHP runtime containing those extensions:
+
+.. code-block:: console
+
+   IC_SERVICE_DATABASE=phpforge IC_SERVICE_USERNAME=phpforge \
+   IC_SERVICE_PASSWORD='Phpforge_123!' \
+   IC_MSSQL_USER=sa IC_MSSQL_PASSWORD='Phpforge_123!' \
+   IC_REDIS_HOST=127.0.0.1 IC_REDIS_PORT=6379 IC_REDIS_PASSWORD='Phpforge_123!' \
+   IC_VALKEY_HOST=127.0.0.1 IC_VALKEY_PORT=6380 IC_VALKEY_PASSWORD='Phpforge_123!' \
+   IC_MEMCACHED_HOST=127.0.0.1 IC_MEMCACHED_PORT=11211 \
+   composer ic:ci
+
+These credentials are for disposable local test services only. A successful
+container run validates that container's PHP runtime and environment; it does
+not make the same command pass in an unconfigured host shell.
+
 The remaining local scripts are intentionally package-specific:
 
 * ``composer benchmark`` runs Omnibus's component lifecycle benchmark;

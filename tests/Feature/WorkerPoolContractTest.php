@@ -148,3 +148,90 @@ test('worker pool backends reap crashed children before propagating exhaustion',
         ->toThrow(RuntimeException::class, 'exhausted its restart budget');
     omnibusAssertNoWorkerChildren();
 })->with(['native', 'runwire']);
+
+test('worker pool backends service lifecycle and cancel crash restarts during backoff', function (
+    string $backend,
+    int $concurrency,
+    bool $failLifecycle,
+): void {
+    $report = tempnam(sys_get_temp_dir(), 'omnibus-backoff-');
+    if ($report === false) {
+        throw new RuntimeException('Unable to allocate backoff report.');
+    }
+    $started = hrtime(true);
+    $beats = [];
+    $lifecycle = new RecordingWorkerLifecycle(
+        onHeartbeat: static function () use (&$beats): void {
+            $beats[] = hrtime(true);
+        },
+        onStopRequested: static function () use ($started, $failLifecycle): bool {
+            if ((hrtime(true) - $started) / 1_000_000_000 < 0.2) {
+                return false;
+            }
+            if ($failLifecycle) {
+                throw new RuntimeException('backoff lifecycle failure');
+            }
+
+            return true;
+        },
+    );
+    try {
+        $pool = new WorkerPool(
+            static function (int $slot) use ($report): Worker {
+                file_put_contents($report, $slot . PHP_EOL, FILE_APPEND | LOCK_EX);
+                if ($slot === 0) {
+                    throw new RuntimeException('backoff crash');
+                }
+                pcntl_signal(SIGTERM, SIG_IGN);
+                while (true) {
+                    usleep(1_000);
+                }
+            },
+            concurrency: $concurrency,
+            maximumRestarts: 2,
+            restartBackoffSeconds: 1.0,
+            shutdownGraceSeconds: 0.05,
+            backend: omnibusMatrixBackend($backend),
+            lifecycle: $lifecycle,
+            lifecycleIntervalSeconds: 0.01,
+        );
+        if ($failLifecycle) {
+            expect(fn() => $pool->run())->toThrow(RuntimeException::class, 'backoff lifecycle failure');
+        } else {
+            $pool->run();
+        }
+        expect((hrtime(true) - $started) / 1_000_000_000)->toBeLessThan(0.8)
+            ->and(count($beats))->toBeGreaterThan(5)
+            ->and(file($report, FILE_IGNORE_NEW_LINES))->toHaveCount($concurrency);
+        for ($index = 1; $index < count($beats); $index++) {
+            expect(($beats[$index] - $beats[$index - 1]) / 1_000_000_000)->toBeLessThan(0.3);
+        }
+        omnibusAssertNoWorkerChildren();
+    } finally {
+        unlink($report);
+    }
+})->with(['native', 'runwire'])->with([1, 2])->with([false, true]);
+
+test('worker pool backends restart pending slots and exhaust the crash budget', function (string $backend): void {
+    $report = tempnam(sys_get_temp_dir(), 'omnibus-restarts-');
+    if ($report === false) {
+        throw new RuntimeException('Unable to allocate restart report.');
+    }
+    try {
+        $pool = new WorkerPool(
+            static function () use ($report): Worker {
+                file_put_contents($report, 'crash' . PHP_EOL, FILE_APPEND | LOCK_EX);
+                throw new RuntimeException('scheduled crash');
+            },
+            maximumRestarts: 2,
+            restartBackoffSeconds: 0.02,
+            shutdownGraceSeconds: 0.1,
+            backend: omnibusMatrixBackend($backend),
+        );
+        expect(fn() => $pool->run())->toThrow(RuntimeException::class, 'exhausted its restart budget');
+        expect(file($report))->toHaveCount(3);
+        omnibusAssertNoWorkerChildren();
+    } finally {
+        unlink($report);
+    }
+})->with(['native', 'runwire']);

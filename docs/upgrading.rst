@@ -27,6 +27,23 @@ supported DB drivers. Existing non-prefixed rows remain readable. Applications
 with custom SQL that reads Omnibus payload columns directly must treat those
 columns as Omnibus-owned encoded storage rather than application JSON.
 
+Deploy this storage change through a coordinated cutover. Omnibus 2.5 readers
+cannot decode the 2.6 wrapper: an old queue worker can treat a new message as
+poison, and old workflow/failure-store readers cannot read the wrapped payloads.
+Do not run 2.5 readers against shared durable storage after 2.6 writers start.
+
+Pause producers and gracefully stop workers, workflow dispatchers and
+failure-retry processes. Upgrade every application and administrative process
+that accesses these durable stores before resuming processing and writes.
+Existing unprefixed rows can remain; 2.6 readers support them.
+
+After 2.6 has written wrapped rows, rolling back application code alone to 2.5
+is unsafe. Keep processing paused until a separately verified data conversion
+or restore procedure makes all queue, workflow and failure payloads compatible
+with the target version. A restore must also account for messages and side
+effects produced since the backup; restoring a snapshot alone is not a lossless
+rollback procedure.
+
 Failure-store re-failure semantics now reject older generations and reset stale
 retry state only when a newer attempt/time wins. Redis/Valkey structural
 corruption is distinguished from a structurally valid poison payload, and

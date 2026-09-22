@@ -44,46 +44,35 @@ final readonly class DBLayerFailureStore implements FailureStore
             $storedPayload,
             $failedAt,
         ): void {
+            $values = [
+                'id' => $failure->id,
+                'queue_name' => $failure->queue,
+                'payload' => $storedPayload,
+                'payload_kind' => $kind,
+                'payload_truncated' => $failure->payloadTruncated ? 1 : 0,
+                'attempt' => $failure->attempt,
+                'failed_at' => $failedAt,
+                'failure_class' => $failure->failureClass,
+                'reason' => $failure->reason,
+                'retry_status' => 'failed',
+                'retry_token' => null,
+                'retry_until' => null,
+            ];
+            // Establish row ownership even when concurrent writers first see an absent ID.
+            if (!$connection->table($this->rawTable)->upsert($values, ['id'], ['id'])) {
+                throw new \RuntimeException('DBLayer did not persist the failed message.');
+            }
             $existing = $this->failureVersionForUpdate($connection, $failure->id);
-            if (
-                $existing !== null
-                && !self::isNewerFailure($failure->attempt, $failedAt, $existing)
-            ) {
+            if ($existing === null) {
+                throw new \RuntimeException('DBLayer did not return the persisted failure version.');
+            }
+            if (!self::isNewerFailure($failure->attempt, $failedAt, $existing)) {
                 return;
             }
 
-            $upserted = $connection->table($this->rawTable)->upsert(
-                [
-                    'id' => $failure->id,
-                    'queue_name' => $failure->queue,
-                    'payload' => $storedPayload,
-                    'payload_kind' => $kind,
-                    'payload_truncated' => $failure->payloadTruncated ? 1 : 0,
-                    'attempt' => $failure->attempt,
-                    'failed_at' => $failedAt,
-                    'failure_class' => $failure->failureClass,
-                    'reason' => $failure->reason,
-                    'retry_status' => 'failed',
-                    'retry_token' => null,
-                    'retry_until' => null,
-                ],
-                ['id'],
-                [
-                    'queue_name',
-                    'payload',
-                    'payload_kind',
-                    'payload_truncated',
-                    'attempt',
-                    'failed_at',
-                    'failure_class',
-                    'reason',
-                    'retry_status',
-                    'retry_token',
-                    'retry_until',
-                ],
-            );
-            if (!$upserted) {
-                throw new \RuntimeException('DBLayer did not persist the failed message.');
+            unset($values['id']);
+            if ($connection->table($this->rawTable)->where('id', $failure->id)->update($values) !== 1) {
+                throw new \RuntimeException('DBLayer did not update the owned failure row.');
             }
         }, 3);
     }

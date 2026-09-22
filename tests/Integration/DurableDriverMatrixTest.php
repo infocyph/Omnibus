@@ -396,3 +396,86 @@ test('workflow claims and terminal transitions remain coherent across service co
         $second->disconnect();
     }
 })->with(['mysql', 'mariadb', 'pgsql', 'mssql']);
+
+test('concurrent first failure inserts preserve the newest generation and retry claim', function (
+    string $driver,
+    bool $firstIsNewer,
+    bool $orderByTime,
+): void {
+    $database = tempnam(sys_get_temp_dir(), 'omnibus-failure-race-');
+    if ($database === false) {
+        throw new RuntimeException('Unable to allocate failure-race database.');
+    }
+    $config = $driver === 'sqlite'
+        ? ['driver' => 'sqlite', 'database' => $database]
+        : omnibusServiceDatabase($driver);
+    if ($config === null) {
+        unlink($database);
+        throw new RuntimeException(sprintf('%s service database must be configured for this integration test.', $driver));
+    }
+    $first = new Connection(ConnectionConfig::fromArray($config));
+    $second = new Connection(ConnectionConfig::fromArray($config));
+    $tables = ['omnibus_race_queue', 'omnibus_race_failures', 'omnibus_race_workflows', 'omnibus_race_items'];
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $storeA = new DBLayerFailureStore($first, TestSerializer::make(), $tables[1], $clock);
+    $storeB = new DBLayerFailureStore($second, TestSerializer::make(), $tables[1], $clock);
+    $failure = static fn(int $attempt): FailedMessage => FailedMessage::decoded(
+        'concurrent-first-failure',
+        'work',
+        new Envelope(new TestCommand('generation-' . $attempt)),
+        $orderByTime ? 1 : $attempt,
+        $clock->now()->modify('+' . $attempt . ' seconds'),
+        RuntimeException::class,
+        'generation-' . $attempt,
+    );
+    $interleaved = false;
+    $claim = null;
+    $listenerFailure = null;
+    $listener = static function (\Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuting $event) use (
+        $first, $storeB, $failure, $firstIsNewer, &$interleaved, &$claim, &$listenerFailure,
+    ): void {
+        if ($event->connection !== $first || $interleaved
+            || preg_match('/^(INSERT|MERGE)\b/i', $event->sql) !== 1) {
+            return;
+        }
+        $interleaved = true;
+        try {
+            $storeB->add($failure($firstIsNewer ? 1 : 2));
+            $claim = $storeB->claimRetry('concurrent-first-failure');
+        } catch (Throwable $error) {
+            $listenerFailure = $error;
+        }
+    };
+    try {
+        foreach (array_reverse($tables) as $table) {
+            $first->statement('DROP TABLE IF EXISTS ' . $table);
+        }
+        foreach (QueueSchema::statements($driver, ...$tables) as $statement) {
+            $first->statement($statement);
+        }
+        \Infocyph\DBLayer\Events\Events::listen('db.query.executing', $listener);
+        $storeA->add($failure($firstIsNewer ? 2 : 1));
+        if ($listenerFailure !== null) {
+            throw $listenerFailure;
+        }
+        expect($interleaved)->toBeTrue()
+            ->and($claim)->not->toBeNull()
+            ->and($storeA->find('concurrent-first-failure')?->attempt)->toBe($orderByTime ? 1 : 2)
+            ->and($storeA->find('concurrent-first-failure')?->reason)->toBe('generation-2');
+        if ($claim === null) {
+            throw new RuntimeException('The competing retry claim was not created.');
+        }
+        expect($storeB->markRetrySent($claim))->toBe(!$firstIsNewer);
+        if ($firstIsNewer) {
+            expect($storeA->claimRetry('concurrent-first-failure')->failure->attempt)->toBe($orderByTime ? 1 : 2);
+        }
+    } finally {
+        \Infocyph\DBLayer\Events\Events::forget('db.query.executing', $listener);
+        foreach (array_reverse($tables) as $table) {
+            $first->statement('DROP TABLE IF EXISTS ' . $table);
+        }
+        $first->disconnect();
+        $second->disconnect();
+        unlink($database);
+    }
+})->with(['sqlite', 'mysql', 'mariadb', 'pgsql', 'mssql'])->with([false, true])->with([false, true]);

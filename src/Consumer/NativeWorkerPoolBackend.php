@@ -13,6 +13,9 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
 
     private bool $killEscalated = false;
 
+    /** @var array<int,float> */
+    private array $pendingRestarts = [];
+
     private ?bool $previousAsyncSignals = null;
 
     /** @var array<int,callable|int> */
@@ -66,6 +69,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         } finally {
             $this->restoreSignals();
             $this->shutdownGraceSeconds = null;
+            $this->pendingRestarts = [];
         }
     }
 
@@ -85,6 +89,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
 
     private function beginShutdown(): void
     {
+        $this->pendingRestarts = [];
         if ($this->children === [] || $this->shutdownGraceSeconds === null) {
             return;
         }
@@ -121,7 +126,6 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         return $this->restartCrashedWorker(
             $slot,
             $restarts,
-            $workerFactory,
             $maximumRestarts,
             $restartBackoffSeconds,
         );
@@ -219,7 +223,6 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
     private function restartCrashedWorker(
         int $slot,
         array &$restarts,
-        \Closure $workerFactory,
         int $maximumRestarts,
         float $restartBackoffSeconds,
     ): ?string {
@@ -228,14 +231,24 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         }
 
         $restarts[$slot]++;
-        if ($restartBackoffSeconds > 0.0) {
-            usleep((int) round($restartBackoffSeconds * $restarts[$slot] * 1_000_000));
-        }
-        if (!$this->stopRequested) {
-            $this->spawn($slot, $workerFactory);
-        }
+        $this->pendingRestarts[$slot] = self::monotonicSeconds()
+            + $restartBackoffSeconds * $restarts[$slot];
 
         return null;
+    }
+
+    /** @param \Closure(int):Worker $workerFactory */
+    private function restartDueWorkers(\Closure $workerFactory): void
+    {
+        foreach ($this->pendingRestarts as $slot => $deadline) {
+            if ($this->stopRequested) {
+                return;
+            }
+            if (self::monotonicSeconds() >= $deadline) {
+                unset($this->pendingRestarts[$slot]);
+                $this->spawn($slot, $workerFactory);
+            }
+        }
     }
 
     private function restoreSignals(): void
@@ -332,7 +345,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
             $this->spawn($slot, $workerFactory);
         }
 
-        while ($this->children !== []) {
+        while ($this->children !== [] || $this->pendingRestarts !== []) {
             $this->serviceLifecycle($lifecycle, $lifecycleIntervalSeconds, $nextLifecycleAt);
             if ($this->stopRequested) {
                 $this->drainChildren();
@@ -340,7 +353,8 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
                 break;
             }
 
-            $child = $this->pollChild();
+            $this->restartDueWorkers($workerFactory);
+            $child = $this->children === [] ? null : $this->pollChild();
             if ($child === null) {
                 usleep(self::SUPERVISION_SLEEP_MICROSECONDS);
 

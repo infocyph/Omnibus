@@ -38,15 +38,15 @@ This release is an additive hardening and ownership-alignment pass. Omnibus rema
 |---|---|---|---|
 | 0 | Plan reconciliation + whole-codebase audit | **COMPLETE** | Current branch/codebase reviewed; FPM/native-PCNTL/optional-Runwire ownership corrected; durable/policy hardening gaps added. |
 | 1 | Dependency and capability alignment | **COMPLETE** | CacheLayer `^3.4`, DBLayer `^5.1`, optional Runwire `^1.0` aligned; `ext-pcntl` + `ext-posix` are mandatory runtime requirements and are absent from `require-dev`/`suggest`; full PHP 8.4/8.5 validation is green in run `35680858522`. |
-| 2 | Native `WorkerPool` extraction + PCNTL/POSIX hardening | **COMPLETE** | Native backend extracted behind `WorkerPoolBackend`; default remains PCNTL/POSIX without Runwire; signal callbacks, child normalization, nonblocking wait/reap with EINTR/ECHILD reconciliation, stop/drain, restart/recycle and parent signal restoration are green in run `35633494360`. |
-| 3 | Optional Runwire backend + lifecycle parity | **COMPLETE** | Explicit `RunwireWorkerPoolBackend` uses Runwire 1.x public Supervisor/WorkerGroup APIs, preserves native/Runwire lifecycle parity, keeps backend choice explicit, and passed the full PHP 8.4/8.5 QA/analysis/benchmark matrix in run `35676264890`. |
-| 4 | Durable transport/store + coordination integrity | **COMPLETE** | Portable binary-safe DB payload encoding, exact DB reservation/claim ownership, strict failure hydration/re-failure state, CacheLayer primary-error/cleanup precedence, Redis/Valkey structural corruption detection, bounded redispatch stamps and PSR-14 provider hardening are green in run `35678113518`. |
-| 5 | Worker/WorkerPool + integration test matrix | **COMPLETE** | Shared native/Runwire child-factory parity, crash/exhaustion reaping, explicit no-zombie checks, DBLayer child-side construction, core/FPM-compatible Worker execution without pool construction, durable drivers and Batch 4 CacheLayer/Redis invariants are green; mandatory PCNTL/POSIX dependency contract revalidated in run `35680858522`. |
-| 6 | Benchmarks, soak and documentation | **COMPLETE** | Component and WorkerPool benchmarks now attribute direct Consumer, single Worker, native pool and explicit Runwire pool costs; parent idle CPU, recycle/startup/shutdown wall time, memory growth and portable DB storage overhead are reported; durable contention/soak guidance and operational docs are updated; PHP 8.4/8.5 QA, analysis, clean install, replica-affinity and benchmarks are green in run `35679889105`. |
-| 7 | Omnibus 2.6 release gate | **COMPLETE** | Final PHP 8.4/8.5 lowest/stable QA, analysis, clean production install, replica-affinity and benchmarks are green in run `35682932960`; runtime floors resolve to tagged UID `5.0`, mandatory PCNTL/POSIX, and optional integration tags CacheLayer `3.4`, DBLayer `5.1`, Runwire `1.0`; release docs and native/Runwire pool coverage are reconciled. |
+| 2 | Native `WorkerPool` extraction + PCNTL/POSIX hardening | **COMPLETE** | Crash restarts now use per-slot monotonic deadlines; parent lifecycle polling, stop/drain and child reaping continue during backoff. New regression tests pass on PHP 8.4/8.5 (§29.1, §29.4). |
+| 3 | Optional Runwire backend + lifecycle parity | **COMPLETE** | Explicit Runwire integration retained. Shared tests prove lifecycle stop/exception behavior during backoff, restart cancellation, escalation and crash-budget exhaustion on both backends (§29.1). |
+| 4 | Durable transport/store + coordination integrity | **COMPLETE** | Failure insertion now establishes row ownership before the locked generation comparison; updates preserve newer payload/version and retry claims. Deterministic two-connection regressions pass on all five durable drivers (§29.2). Earlier Batch 4 hardening remains covered by the full suite. |
+| 5 | Worker/WorkerPool + integration test matrix | **COMPLETE** | PHP 8.4.16 and 8.5.10 release guards each pass 221 tests / 1,220 assertions with MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, Redis, Valkey and Memcached. Replica writer-affinity checks also pass (§29.4). |
+| 6 | Benchmarks, soak and documentation | **COMPLETE** | Upgrade and operations docs now require coordinated durable-storage cutover and explain rollback restrictions (§29.3). Component and native/Runwire pool benchmarks pass on PHP 8.4/8.5 (§29.4). |
+| 7 | Omnibus 2.6 release gate | **AWAITING CANDIDATE CI** | All three review findings are resolved and local release guards pass on PHP 8.4/8.5. Run and record fresh lowest/stable CI on the committed corrected candidate before publication; previous run 35682932960 predates these fixes (§29.4). |
 | 8 | Foundation Point 26.8 post-release migration | **POST-RELEASE** | Not an Omnibus 2.6 release blocker. After publication, Foundation raises Omnibus to `^2.6`, removes `WorkerManager::watchPool()`, keeps parent-clean/app policy, and can use the native pool without Runwire or explicitly opt into Runwire. |
 
-**Current execution status:** **Omnibus 2.6 is release-ready; no pre-release batch remains. Batch 8 starts only after publication.**
+**Current execution status:** **All three release-readiness findings are resolved. Batches 2–6 are complete with local PHP 8.4/8.5 release-guard evidence. Batch 7 awaits fresh lowest/stable CI on the committed corrected candidate before publication. Batch 8 remains post-release.**
 
 **Mandatory PCNTL/POSIX runtime-floor audit:** Batches **1–6** were
 re-audited after promoting `ext-pcntl` and `ext-posix` to mandatory runtime
@@ -59,13 +59,14 @@ PCNTL/POSIX optional-runtime branches. Full PHP 8.4/8.5 QA, analysis, clean
 install, replica-affinity and benchmark validation is green in run
 `35681862645`.
 
-**Release-gate verification:** the release candidate is a clean descendant of
+**Previous release-gate verification:** the reviewed candidate was a clean descendant of
 tag `2.5` with no stray generated/vendor/lock artifacts. Published/tagged
 dependency floors used by the 2.6 graph were rechecked at the gate: UID
 `5.0`, CacheLayer `3.4`, DBLayer `5.1`, and Runwire `1.0`. The final
 documentation-floor cleanup and complete PHP 8.4/8.5 validation are green in
-run `35682932960`.
-
+run `35682932960`. That run tested `603edd83eed3b2e7f25caa42d70b5f2945bf56af`;
+the reviewed HEAD `40ed1697ad591aef5c4ee1b8f7f1a0265439a461` adds only the
+plan-status update. The later review in §29 reopens the gate despite that green run.
 
 Tracker rule: mark a batch **COMPLETE** only after its code, focused tests and
 relevant QA/benchmark evidence are green. Do not advance tracker state from code
@@ -1147,12 +1148,13 @@ SIGALRM watchdog and supplies lifecycle policy through Omnibus.
   mandatory package runtime floor.
 - [X] Runwire remains optional.
 - [X] Core/FPM paths are proven independent of Runwire and pool construction.
-- [X] Native backend hardening complete.
+- [X] Native backend hardening complete, including nonblocking crash backoff (§29.1).
 - [X] Explicit Runwire backend complete.
-- [X] Common behavioral suite green on both backends.
+- [X] Common behavioral suite covers crash-backoff lifecycle parity on both backends (§29.1).
 - [X] Fork-safety/resource ownership tests green.
-- [ ] Foundation migration works with native backend and optional Runwire.
-- [X] PHP 8.4/8.5 QA and benchmarks green.
+- [ ] Foundation migration works with native backend and optional Runwire (Batch 8, post-release; not an Omnibus release blocker).
+- [X] Corrected working tree passes local PHP 8.4/8.5 release guards and benchmarks (§29.4).
+- [ ] Fresh lowest/stable CI recorded for the committed corrected candidate before publication.
 
 ---
 
@@ -1268,3 +1270,154 @@ extension floor is mandatory:
 Sections 28.1–28.5 are Batch 4 correctness/reliability gates.
 Sections 28.6–28.8 are Batch 4/5 hardening gates unless implementation evidence
 justifies an explicitly documented deferral.
+
+---
+
+## 29. Release-readiness review (2026-09-22)
+
+The review initially reopened Batches 2–7. The fixes and new verification below
+close Batches 2–6; Batch 7 still requires fresh candidate CI. Historical review
+evidence is retained separately from the corrected-working-tree results.
+
+### 29.1 Native crash backoff blocks lifecycle polling
+
+**Status: RESOLVED. Owners: Batches 2, 3 and 5.**
+
+Before the fix, `NativeWorkerPoolBackend::restartCrashedWorker()` slept inside the parent
+supervision loop. During that sleep, lifecycle callbacks and child reaping stopped.
+A reproduction with a 10 ms lifecycle interval, a 1 second crash backoff and a
+stop request after 150 ms completed in 1.023 seconds on the native backend,
+versus 0.154 seconds on Runwire. The native heartbeat gap reached 1.002 seconds.
+These are diagnostic measurements, not a stable performance baseline.
+
+Resolution: pending restarts are tracked per slot with monotonic deadlines. The
+supervisor remains active even when all children have exited but restarts are
+pending. Stop and exceptional shutdown cancel pending restarts. Ten added
+backend-contract cases cover lifecycle stop/exception handling with one or two
+slots, a child ignoring SIGTERM, cancellation without respawn, no remaining
+children, and scheduled crash-budget exhaustion. The original native code fails
+the four new native lifecycle cases; the corrected code passes them.
+
+Acceptance criteria:
+
+- schedule per-slot restarts with monotonic deadlines instead of sleeping inside
+  crash handling;
+- continue lifecycle polling, child reaping and shutdown escalation while a
+  restart is pending;
+- cancel pending restarts when stop is requested, without spawning another child;
+- preserve crash-budget and clean-recycle semantics;
+- add bounded regression tests on both backends for heartbeat/stop during crash
+  backoff, including other live children and no remaining child processes.
+
+### 29.2 Concurrent first failure writes bypass generation ordering
+
+**Status: RESOLVED; original defect reproduced on PostgreSQL. Owners: Batches 4 and 5.**
+
+Before the fix, `DBLayerFailureStore::add()` first read the existing version with a locking
+select and then performed an unconditional upsert. On PostgreSQL, two transactions
+can both find no row for a previously absent ID. An older writer can subsequently
+update the newer insertion, replacing its payload/version and resetting retry
+state. Locking existing rows does not close this absent-row race. PostgreSQL's
+[transaction isolation documentation](https://www.postgresql.org/docs/17/transaction-iso.html)
+describes the concurrent `ON CONFLICT DO UPDATE` behavior underpinning this finding.
+
+Resolution: within the existing exact-connection transaction, an upsert inserts
+the failure or updates only its identical ID, establishing row ownership without
+replacing existing failure/retry state. The locked version read then decides
+whether to update the payload and reset retry state. Twenty deterministic
+two-connection cases cover both write orders, attempt/time ordering and retry
+claim preservation/invalidation across SQLite, MySQL, MariaDB, PostgreSQL and
+SQL Server. Against the original implementation, the PostgreSQL stale-writer
+cases fail; the corrected implementation passes all twenty cases on both PHP
+versions.
+
+Acceptance criteria:
+
+- make version comparison atomic with persistence, including the absent-row case;
+- preserve newer attempt/time state and retry ownership against stale writes;
+- add a deterministic two-connection regression for concurrent insertion of the
+  same absent ID with different generations, covering both write orders;
+- verify the implementation on PostgreSQL and the other supported durable drivers;
+- retain DBLayer/in-memory generation semantics and exact connection ownership.
+
+### 29.3 DB payload rollout and rollback restrictions
+
+**Status: RESOLVED. Owner: Batch 6.**
+
+Omnibus 2.6 reads legacy unprefixed payloads but always writes the new versioned
+wrapper. Omnibus 2.5 passes stored payloads directly to its serializer, so an old
+worker can classify a new queue payload as poison. Workflow and failure-store
+readers also lack wrapper support. Backward reading compatibility does not make
+mixed-version operation or rollback safe.
+
+Resolution: `docs/upgrading.rst` and `docs/operations.rst` now cover producers,
+workers, workflow dispatchers and failure-retry processes, coordinated cutover,
+legacy-row compatibility and the need for separately verified conversion or
+restore before rollback. Guidance was checked against the 2.5 decoder and the
+2.6 queue/workflow/failure storage wrappers.
+
+Acceptance criteria:
+
+- upgrade and operations documentation explicitly prohibit 2.5 readers sharing
+  durable storage after 2.6 writers start;
+- document a coordinated stop of producers, workers, workflow dispatchers and
+  failure-retry processes, followed by upgrading every storage participant before
+  resuming writes;
+- explain that existing legacy rows can remain for 2.6 readers;
+- prohibit direct rollback once wrapped rows exist unless all affected durable
+  data is safely converted or restored through a separately verified procedure;
+- review the documented cutover against queue, workflow and failure-store paths.
+
+### 29.4 Verification evidence and release closure
+
+Initial review evidence for HEAD `40ed1697ad591aef5c4ee1b8f7f1a0265439a461`:
+
+- [CI run 35682932960](https://github.com/infocyph/Omnibus/actions/runs/35682932960)
+  passed PHP 8.4/8.5 lowest/stable QA, analysis, clean production installation,
+  replica writer affinity and benchmarks on the preceding code-equivalent commit;
+- local PHP 8.5.4 detailed checks: 178 tests passed, 13 integration tests failed
+  because required database services or Redis/Memcached extensions were missing;
+- formatting, PHPStan, Psalm, architecture and Rector checks passed;
+- component and WorkerPool benchmarks completed; no stable-environment regression
+  comparison was established by this local run;
+- Composer validation and stable runtime constraints passed;
+- the initial release guard stopped at sandbox DNS restrictions; a subsequent
+  network-enabled audit completed with zero advisories and one non-blocking
+  abandoned development dependency, `doctrine/annotations`;
+- Runwire IPC required execution outside the restricted sandbox.
+
+Corrected working-tree verification (2026-09-22):
+
+- `composer ic:process` completed; no detector thresholds or exclusions changed.
+- `composer ic:tests:details` completed analysis; its initial four cache failures
+  were traced to missing test-service passwords and corrected in the local test
+  environment. No application change or test bypass was needed.
+- `composer ic:release:guard` passed independently on PHP **8.4.16** and
+  **8.5.10**, each with **221 tests / 1,220 assertions**, including all durable
+  database and cache integrations, formatting, reference/duplicate/comment
+  detectors, architecture, PHPStan, Psalm and Rector checks.
+- Both security audits report zero advisories; `doctrine/annotations` remains
+  the existing non-blocking abandoned development dependency.
+- Three deliberate-stale-replica writer-affinity cases passed on MySQL,
+  MariaDB and PostgreSQL (6 assertions).
+- A fresh production-only install from the current lock file passed platform
+  checks and a single Worker smoke test with Runwire absent on PHP 8.5.
+- `composer benchmark` completed on both PHP versions; native and Runwire
+  recycle measurements each reported zero parent memory growth. These local
+  measurements are not a stable-environment throughput regression guarantee.
+- PHP 8.5 soak checks passed: 100 recycle cycles per backend with zero parent
+  memory growth; 10,000 durable messages drained with no duplicate delivery;
+  100 workflows / 10,000 items with zero reconciliation errors, duplicate
+  handler executions or terminal regressions.
+- Temporary integration-service containers and their disposable volumes were
+  removed after validation.
+- The new tests were checked against temporary copies of the original classes:
+  the original native backoff fails four lifecycle cases, and the original
+  PostgreSQL failure store fails two stale-writer generation cases.
+
+The three findings are resolved. Batches 2–6 are complete. Before closing Batch 7,
+commit the corrected candidate and run the complete PHP 8.4/8.5 lowest/stable CI
+matrix; record its tested commit and run URL. Local guards used the installed
+lock-file dependency set and do not substitute for fresh lowest/stable
+resolution. No new remote CI run or release has been triggered by this work.
+Batch 8 remains post-release.
