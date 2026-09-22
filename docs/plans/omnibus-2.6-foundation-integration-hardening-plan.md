@@ -48,6 +48,18 @@ This release is an additive hardening and ownership-alignment pass. Omnibus rema
 
 **Current execution batch:** **Batch 7 — Omnibus 2.6 release gate**.
 
+**Mandatory PCNTL/POSIX runtime-floor audit:** Batches **1–6** were
+re-audited after promoting `ext-pcntl` and `ext-posix` to mandatory runtime
+requirements. Dead extension/function capability probes and fallback branches
+were removed from Worker/native/Runwire supervision, WorkerPool and SQLite
+integration tests, DB contention and WorkerPool benchmarks; native PCNTL signal
+and wait-error constants are now used directly. Cross-cutting source, transport,
+integration, workflow, test and documentation sweeps found no remaining stale
+PCNTL/POSIX optional-runtime branches. Full PHP 8.4/8.5 QA, analysis, clean
+install, replica-affinity and benchmark validation is green in run
+`35681862645`.
+
+
 Tracker rule: mark a batch **COMPLETE** only after its code, focused tests and
 relevant QA/benchmark evidence are green. Do not advance tracker state from code
 presence alone.
