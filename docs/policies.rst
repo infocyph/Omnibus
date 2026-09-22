@@ -22,7 +22,7 @@ Unique messages
 
 Queued uniqueness is bounded duplicate suppression while the lease is valid;
 it is not permanent uniqueness or exactly-once delivery. It requires a
-token-based provider implementing ``DetachedLeaseProvider``. CacheLayer 3.1
+token-based provider implementing ``DetachedLeaseProvider``. CacheLayer 3.4
 Redis/Valkey and Memcached providers can be adapted; process/session-bound file
 and advisory locks are rejected. If cleanup fails after durable settlement,
 the queue result remains successful and the lease expires by TTL.

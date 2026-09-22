@@ -116,7 +116,7 @@ synchronous result, or throw into the consumer's existing retry/failure path.
 It does not intercept routing, serialization, transport I/O, PSR events, or
 worker process lifecycle. See the
 [handler middleware guide](docs/handler-middleware.rst) and
-[2.3 upgrade notes](docs/upgrading.rst).
+[2.6 upgrade notes](docs/upgrading.rst).
 
 `Consumer::run()` performs one bounded receive call. `Worker` provides the
 long-running loop for one process. Hosts may supply a framework-neutral
