@@ -40,12 +40,12 @@ This release is an additive hardening and ownership-alignment pass. Omnibus rema
 | 2 | Native `WorkerPool` extraction + PCNTL/POSIX hardening | **COMPLETE** | Native backend extracted behind `WorkerPoolBackend`; default remains PCNTL/POSIX without Runwire; signal callbacks, child normalization, nonblocking wait/reap with EINTR/ECHILD reconciliation, stop/drain, restart/recycle and parent signal restoration are green in run `35633494360`. |
 | 3 | Optional Runwire backend + lifecycle parity | **COMPLETE** | Explicit `RunwireWorkerPoolBackend` uses Runwire 1.x public Supervisor/WorkerGroup APIs, preserves native/Runwire lifecycle parity, keeps backend choice explicit, and passed the full PHP 8.4/8.5 QA/analysis/benchmark matrix in run `35676264890`. |
 | 4 | Durable transport/store + coordination integrity | **COMPLETE** | Portable binary-safe DB payload encoding, exact DB reservation/claim ownership, strict failure hydration/re-failure state, CacheLayer primary-error/cleanup precedence, Redis/Valkey structural corruption detection, bounded redispatch stamps and PSR-14 provider hardening are green in run `35678113518`. |
-| 5 | Worker/WorkerPool + integration test matrix | OPEN | Native and Runwire pool contracts, no-Runwire core/FPM-compatible paths, fork-safety, durable drivers, CacheLayer/Redis invariants and no-zombie tests pass. |
+| 5 | Worker/WorkerPool + integration test matrix | **COMPLETE** | Shared native/Runwire child-factory parity, crash/exhaustion reaping, explicit no-zombie checks, DBLayer child-side construction, no-process core/FPM-compatible Worker paths, durable drivers and Batch 4 CacheLayer/Redis invariants are green in run `35678607318`. |
 | 6 | Benchmarks, soak and documentation | OPEN | Direct Worker vs native WorkerPool vs Runwire WorkerPool attribution, idle CPU, storage overhead, startup/recycle/shutdown cost and durable contention baselines are recorded. |
 | 7 | Foundation Point 26.8 migration | OPEN | Foundation raises Omnibus to `^2.6`, removes `WorkerManager::watchPool()`, keeps parent-clean/app policy, and can use native pool without Runwire or explicitly opt into Runwire. |
 | 8 | Omnibus 2.6 release gate | OPEN | PHP 8.4/8.5 QA green, released-only dependency graph, docs complete, both supported pool backends green, Foundation handoff green. |
 
-**Current execution batch:** **Batch 5 — Worker/WorkerPool + integration test matrix**.
+**Current execution batch:** **Batch 6 — benchmarks, soak and documentation**.
 
 Tracker rule: mark a batch **COMPLETE** only after its code, focused tests and
 relevant QA/benchmark evidence are green. Do not advance tracker state from code
