@@ -43,10 +43,10 @@ This release is an additive hardening and ownership-alignment pass. Omnibus rema
 | 4 | Durable transport/store + coordination integrity | **COMPLETE** | Failure insertion now establishes row ownership before the locked generation comparison; updates preserve newer payload/version and retry claims. Deterministic two-connection regressions pass on all five durable drivers (§29.2). Earlier Batch 4 hardening remains covered by the full suite. |
 | 5 | Worker/WorkerPool + integration test matrix | **COMPLETE** | PHP 8.4.16 and 8.5.10 release guards each pass 221 tests / 1,220 assertions with MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, Redis, Valkey and Memcached. Replica writer-affinity checks also pass (§29.4). |
 | 6 | Benchmarks, soak and documentation | **COMPLETE** | Upgrade and operations docs now require coordinated durable-storage cutover and explain rollback restrictions (§29.3). Component and native/Runwire pool benchmarks pass on PHP 8.4/8.5 (§29.4). |
-| 7 | Omnibus 2.6 release gate | **AWAITING CANDIDATE CI** | All three review findings are resolved and local release guards pass on PHP 8.4/8.5. Run and record fresh lowest/stable CI on the committed corrected candidate before publication; previous run 35682932960 predates these fixes (§29.4). |
+| 7 | Omnibus 2.6 release gate | **COMPLETE** | Review fixes, local-friendly optional integration registration and the committed release candidate are validated by fresh run `35690591740` on `4e0d7ec4`: PHP 8.4/8.5 lowest/stable QA, both analyzers, clean install, replica writer-affinity and both benchmark jobs are green (§29.4). |
 | 8 | Foundation Point 26.8 post-release migration | **POST-RELEASE** | Not an Omnibus 2.6 release blocker. After publication, Foundation raises Omnibus to `^2.6`, removes `WorkerManager::watchPool()`, keeps parent-clean/app policy, and can use the native pool without Runwire or explicitly opt into Runwire. |
 
-**Current execution status:** **All three release-readiness findings are resolved. Batches 2–6 are complete with local PHP 8.4/8.5 release-guard evidence. Batch 7 awaits fresh lowest/stable CI on the committed corrected candidate before publication. Batch 8 remains post-release.**
+**Current execution status:** **Omnibus 2.6 is release-ready; no pre-release batch remains. Batch 8 remains post-release and starts only after publication.**
 
 **Mandatory PCNTL/POSIX runtime-floor audit:** Batches **1–6** were
 re-audited after promoting `ext-pcntl` and `ext-posix` to mandatory runtime
@@ -1154,7 +1154,7 @@ SIGALRM watchdog and supplies lifecycle policy through Omnibus.
 - [X] Fork-safety/resource ownership tests green.
 - [ ] Foundation migration works with native backend and optional Runwire (Batch 8, post-release; not an Omnibus release blocker).
 - [X] Corrected working tree passes local PHP 8.4/8.5 release guards and benchmarks (§29.4).
-- [ ] Fresh lowest/stable CI recorded for the committed corrected candidate before publication.
+- [X] Fresh lowest/stable CI recorded for committed candidate `4e0d7ec4` in run `35690591740`.
 
 ---
 
@@ -1275,9 +1275,9 @@ justifies an explicitly documented deferral.
 
 ## 29. Release-readiness review (2026-09-22)
 
-The review initially reopened Batches 2–7. The fixes and new verification below
-close Batches 2–6; Batch 7 still requires fresh candidate CI. Historical review
-evidence is retained separately from the corrected-working-tree results.
+The review initially reopened Batches 2–7. The fixes and verification below
+close Batches 2–7. Historical review evidence is retained separately from the
+final committed-candidate results.
 
 ### 29.1 Native crash backoff blocks lifecycle polling
 
@@ -1415,9 +1415,10 @@ Corrected working-tree verification (2026-09-22):
   the original native backoff fails four lifecycle cases, and the original
   PostgreSQL failure store fails two stale-writer generation cases.
 
-The three findings are resolved. Batches 2–6 are complete. Before closing Batch 7,
-commit the corrected candidate and run the complete PHP 8.4/8.5 lowest/stable CI
-matrix; record its tested commit and run URL. Local guards used the installed
-lock-file dependency set and do not substitute for fresh lowest/stable
-resolution. No new remote CI run or release has been triggered by this work.
-Batch 8 remains post-release.
+The three findings are resolved and Batches 2–7 are complete. Final candidate
+`4e0d7ec4` passed fresh CI run `35690591740`: PHP 8.4/8.5 lowest/stable QA,
+both analyzer jobs, clean production installation, replica writer-affinity and
+both benchmark jobs are green. Service-backed integration tests now register
+conditionally in ordinary local shells when their extensions and `IC_*`
+configuration are present, while GitHub Actions remains strict for integrations
+enabled by each job. Batch 8 remains post-release.
