@@ -14,7 +14,7 @@ final class IntegrationEnvironment
     {
         $expected = array_values(array_filter(
             $drivers,
-            self::databaseDriverAvailable(...),
+            self::databaseDriverExpected(...),
         ));
         $configured = array_values(array_filter(
             $expected,
@@ -97,6 +97,20 @@ final class IntegrationEnvironment
         }
 
         return $configured;
+    }
+
+    private static function databaseDriverExpected(string $driver): bool
+    {
+        if (!self::databaseDriverAvailable($driver)) {
+            return false;
+        }
+        if ($driver !== 'mssql') {
+            return true;
+        }
+
+        $username = getenv('IC_MSSQL_USER');
+
+        return is_string($username) && $username !== '';
     }
 
     private static function databaseDriverAvailable(string $driver): bool
