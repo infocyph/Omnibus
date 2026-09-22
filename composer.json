@@ -103,10 +103,10 @@
         ],
         "benchmark:db-contention": "@php benchmarks/db-contention.php",
         "benchmark:handler-middleware": "@php benchmarks/handler-middleware.php",
+        "benchmark:worker-pool": "@php benchmarks/worker-pool.php",
         "soak:consumer": "@php benchmarks/consumer-soak.php",
         "soak:durable": "@php benchmarks/durable-soak.php",
-        "soak:workflow": "@php benchmarks/workflow-soak.php",
-        "benchmark:worker-pool": "@php benchmarks/worker-pool.php",
-        "soak:worker-pool": "@php benchmarks/worker-pool.php 100 100"
+        "soak:worker-pool": "@php benchmarks/worker-pool.php 100 100",
+        "soak:workflow": "@php benchmarks/workflow-soak.php"
     }
 }
