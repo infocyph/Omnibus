@@ -63,7 +63,7 @@ test('runwire worker pool services parent lifecycle and drains workers', functio
 
     try {
         $lifecycle = new RecordingWorkerLifecycle(
-            onStopRequested: static fn(int $checks): bool => $checks >= 2,
+            onStopRequested: static fn(int $checks): bool => $checks >= 2 && is_file($marker),
         );
         $pool = new WorkerPool(
             static function () use ($marker): Worker {
