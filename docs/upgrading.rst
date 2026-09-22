@@ -14,6 +14,23 @@ native Unix pool continues to use ``ext-pcntl`` and ``ext-posix`` directly, whil
 ordinary FPM/request, direct dispatch, ``Consumer``, and single-process
 ``Worker`` usage requires neither Runwire nor the process extensions.
 
+``WorkerPool`` now accepts an optional backend, parent ``WorkerLifecycle`` and
+lifecycle polling interval. Existing construction continues to select the
+native PCNTL/POSIX backend. To opt into Runwire, pass
+``RunwireWorkerPoolBackend`` explicitly.
+
+Durable DB queue, workflow and failure payloads are stored through a versioned
+portable text wrapper so arbitrary serializer bytes remain safe across the
+supported DB drivers. Existing non-prefixed rows remain readable. Applications
+with custom SQL that reads Omnibus payload columns directly must treat those
+columns as Omnibus-owned encoded storage rather than application JSON.
+
+Failure-store re-failure semantics now reject older generations and reset stale
+retry state only when a newer attempt/time wins. Redis/Valkey structural
+corruption is distinguished from a structurally valid poison payload, and
+redispatch replaces transient route/handled stamps instead of accumulating
+them.
+
 2.5.0
 -----
 

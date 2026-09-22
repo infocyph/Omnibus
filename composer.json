@@ -97,11 +97,16 @@
         "sort-packages": true
     },
     "scripts": {
-        "benchmark": "@php benchmarks/run.php",
+        "benchmark": [
+            "@php benchmarks/run.php",
+            "@php benchmarks/worker-pool.php"
+        ],
         "benchmark:db-contention": "@php benchmarks/db-contention.php",
         "benchmark:handler-middleware": "@php benchmarks/handler-middleware.php",
         "soak:consumer": "@php benchmarks/consumer-soak.php",
         "soak:durable": "@php benchmarks/durable-soak.php",
-        "soak:workflow": "@php benchmarks/workflow-soak.php"
+        "soak:workflow": "@php benchmarks/workflow-soak.php",
+        "benchmark:worker-pool": "@php benchmarks/worker-pool.php",
+        "soak:worker-pool": "@php benchmarks/worker-pool.php 100 100"
     }
 }

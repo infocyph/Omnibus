@@ -49,7 +49,12 @@ The Omnibus suite covers:
 * SQLite lock contention proving DBLayer transaction attempts are not
   multiplied, plus receipt-guarded acknowledge and release query retries;
 * nested commit/rollback, callback ordering, database/non-database dispatch,
-  and post-commit failure behavior.
+  and post-commit failure behavior;
+* native/Runwire WorkerPool parity, child-factory PID ownership, crash reaping
+  and explicit no-zombie checks;
+* DBLayer construction after fork inside the worker factory;
+* core/FPM-compatible Worker execution with Runwire, PCNTL and POSIX absent
+  from mandatory Composer requirements.
 
 Commands
 --------
@@ -59,8 +64,10 @@ Commands
    composer ic:tests
    composer ic:ci
    composer benchmark
+   composer benchmark:worker-pool
    composer soak:consumer
    composer soak:durable
+   composer soak:worker-pool
    composer soak:workflow
 
 ``composer ic:tests`` and ``composer ic:ci`` are supplied by PHPForge and are
@@ -76,6 +83,10 @@ The remaining local scripts are intentionally package-specific:
   durable queue;
 * ``composer soak:workflow`` exercises handled reconciliation and workflow
   aggregate invariants repeatedly;
+* ``composer benchmark:worker-pool`` attributes direct Worker, native pool and
+  explicit Runwire pool overhead, including idle-parent CPU;
+* ``composer soak:worker-pool`` extends the clean-recycle sample and checks
+  parent-memory growth;
 * PHPForge's ``ic:soak:worker`` complements these by monitoring the RSS and
   lifetime of an arbitrary long-running worker command.
 

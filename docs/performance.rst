@@ -29,11 +29,47 @@ Benchmarks
 * consumer terminal retry;
 * SQLite enqueue and receive/ack batches;
 * workflow creation at 1, 100, and 1000 items;
-* workflow claim and terminal transition throughput.
+* workflow claim and terminal transition throughput;
+* portable DB payload storage expansion;
+* direct ``Consumer`` versus single ``Worker`` execution;
+* native and Runwire ``WorkerPool`` startup/process/shutdown overhead at
+  concurrency 1 and 2;
+* native and Runwire parent idle CPU ratio over a controlled idle window;
+* repeated clean worker recycle cost and parent-memory growth.
 
 These are microbenchmarks, not application requests per second. Application
 throughput also depends on bootstrap, handlers, storage, network latency,
 serialization payloads, contention, and observability exporters.
+
+Worker and pool baselines
+-------------------------
+
+``composer benchmark`` runs both the ordinary component benchmark and the
+worker/process benchmark. Run only the process portion with:
+
+.. code-block:: console
+
+   composer benchmark:worker-pool
+
+The worker/process JSON deliberately separates ``consumer_direct``,
+``single_worker``, native ``WorkerPool`` and explicit Runwire ``WorkerPool``
+measurements. Pool rows report wall time plus parent CPU time/ratio so idle-loop
+cost is attributable to Omnibus supervision rather than message handling.
+Recycle rows report completed cycles and parent-memory growth. The benchmark
+uses small process-local queues to measure supervision mechanics; it does not
+claim shared-queue throughput.
+
+The DB payload benchmark reports serializer bytes, portable stored bytes and
+their expansion ratio. Omnibus's portable text wrapper adds a 16-byte version
+prefix plus base64 expansion (approximately one third for larger payloads).
+This is the portability cost for preserving arbitrary serializer bytes in the
+existing cross-driver text schema.
+
+CI benchmark output is the release baseline. Keep the workflow run referenced
+by the release-plan tracker with the dependency lock and PHP version used for
+comparison. Do not copy one runner's timing into an application capacity claim.
+Foundation should run the same Omnibus benchmark before and after its wrapper
+migration to attribute wrapper overhead separately.
 
 Soak tests
 ----------
@@ -45,6 +81,10 @@ queue drains without duplicate settlement.
 while injecting partial dispatch failure, claim expiry, handled redelivery,
 duplicate settlement, and terminal-listener failure. It reports reconciliation
 attempts/errors, duplicate handler executions, and terminal regressions.
+``composer soak:worker-pool`` runs a longer native/Runwire recycle sample and
+records startup/shutdown wall time, idle parent CPU, completed recycle cycles,
+and parent-memory growth. The WorkerPool contract tests separately assert that
+children are fully reaped after normal stop and restart-budget exhaustion.
 
 The DBLayer 5 baseline removes Omnibus's former outer transaction retry loop.
 Contention results should therefore show no transaction callback amplification:

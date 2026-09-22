@@ -65,15 +65,26 @@ bounded linear backoff. Exhausting the crash restart budget fails the pool and
 signals the remaining children to stop. Parent signal handlers are scoped to
 ``WorkerPool::run()`` and restored before it returns or rethrows.
 
-The worker factory is invoked only after ``fork()``. Create PDO/DBLayer,
-Redis/Valkey, AMQP, SQS and other process-bound resources inside that factory.
+The worker factory is invoked only after child process creation. With the native
+backend that means after ``fork()``; the Runwire backend provides the same
+child-owned factory contract through its worker-group callback. Create
+PDO/DBLayer, Redis/Valkey, Memcached, AMQP, SQS, HTTP connection pools,
+process-scoped telemetry exporters, mutable file descriptors and other
+process-bound resources inside that factory.
 Do not capture or initialize live network/database resources in the parent and
 then fork them into workers. The child also resets the pool's inherited signal
 handlers before constructing the worker, so worker-level signal policy starts
 from a clean process state.
-Construct any process-bound ``WorkerLifecycle`` implementation in this child
-factory as well. ``WorkerPool`` remains intentionally Unix/PCNTL-specific and
-does not emulate a Windows process pool.
+Do not construct those resources in the pool parent and then reuse inherited
+handles in children. Omnibus tests record parent/factory/handler PIDs and build
+DBLayer connections inside the child factory to enforce this ownership model.
+The native and Runwire backends both reap every child before returning or
+propagating restart-budget exhaustion.
+
+A host-owned parent ``WorkerLifecycle`` may be passed to ``WorkerPool`` for
+heartbeat and cooperative stop policy. Process-bound child lifecycle/resources
+still belong inside the worker factory. ``WorkerPool`` remains a Unix process
+feature and does not emulate a Windows process pool.
 
 Example::
 
@@ -118,6 +129,11 @@ children receive SIGKILL and are reaped before the pool returns. This prevents a
 standalone pool from waiting forever on a handler blocked in native database,
 network, filesystem, SDK, or extension code. The default grace period is 30
 seconds.
+
+Runwire selection is explicit: construct ``RunwireWorkerPoolBackend`` and pass
+it as ``backend`` when its supervisor semantics are desired. Installing Runwire
+does not switch the pool automatically. The default remains
+``NativeWorkerPoolBackend``.
 
 External Supervisor, systemd, Docker, Kubernetes or another process manager is
 still the preferred production supervisor when available. In that deployment,
