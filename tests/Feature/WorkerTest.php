@@ -264,7 +264,7 @@ test('runtime limits and idle backoff remain cooperative lifecycle boundaries', 
 test('worker restores parent signal handlers after execution', function (): void {
     $previous = pcntl_signal_get_handler(15);
     $handler = static function (): void {};
-    pcntl_signal(15, $handler);
+    pcntl_signal(SIGTERM, $handler);
 
     try {
         $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
@@ -285,7 +285,7 @@ test('worker restores parent signal handlers after execution', function (): void
 
         expect(pcntl_signal_get_handler(15))->toBe($handler);
     } finally {
-        pcntl_signal(15, $previous);
+        pcntl_signal(SIGTERM, $previous);
     }
 });
 
@@ -437,7 +437,7 @@ test('worker pool force kills a child that ignores graceful shutdown', function 
                 throw new RuntimeException('trigger-pool-stop');
             }
 
-            pcntl_signal(15, SIG_IGN);
+            pcntl_signal(SIGTERM, SIG_IGN);
             $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
 
             return new Worker(
@@ -474,7 +474,7 @@ test('worker pool force kills a child that ignores graceful shutdown', function 
 test('worker pool restores parent signal handlers after execution', function (): void {
     $previous = pcntl_signal_get_handler(15);
     $handler = static function (): void {};
-    pcntl_signal(15, $handler);
+    pcntl_signal(SIGTERM, $handler);
 
     try {
         $pool = new WorkerPool(
@@ -490,6 +490,6 @@ test('worker pool restores parent signal handlers after execution', function ():
             ->toThrow(RuntimeException::class, 'exhausted its restart budget');
         expect(pcntl_signal_get_handler(15))->toBe($handler);
     } finally {
-        pcntl_signal(15, $previous);
+        pcntl_signal(SIGTERM, $previous);
     }
 });

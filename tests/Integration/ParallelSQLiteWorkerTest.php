@@ -157,7 +157,7 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
             $status = 0;
             pcntl_waitpid($pid, $status);
             $exitCode = pcntl_wifexited($status) ? pcntl_wexitstatus($status) : null;
-            $cleanSignal = pcntl_wifsignaled($status) && pcntl_wtermsig($status) === 15;
+            $cleanSignal = pcntl_wifsignaled($status) && pcntl_wtermsig($status) === SIGTERM;
             if ($exitCode !== 0 && !$cleanSignal) {
                 $detail = 'no child report was written';
                 $report = $reports[$index] ?? null;
@@ -211,7 +211,7 @@ test('parallel SQLite consumers reserve every message exactly once', function ()
         $verificationConnection->disconnect();
     } finally {
         foreach ($children as $pid) {
-            posix_kill($pid, 15);
+            posix_kill($pid, SIGTERM);
             $status = 0;
             pcntl_waitpid($pid, $status);
         }

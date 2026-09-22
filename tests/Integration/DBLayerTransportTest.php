@@ -122,7 +122,7 @@ function omnibusWithSqliteWriteLock(array $configuration, callable $operation, i
         if (is_file($ready)) {
             unlink($ready);
         }
-        if (!pcntl_wifsignaled($status) || pcntl_wtermsig($status) !== 15) {
+        if (!pcntl_wifsignaled($status) || pcntl_wtermsig($status) !== SIGTERM) {
             throw new RuntimeException('SQLite lock holder failed.');
         }
     }

@@ -6,12 +6,6 @@ namespace Infocyph\Omnibus\Consumer;
 
 final class NativeWorkerPoolBackend implements WorkerPoolBackend
 {
-    private const int SIGNAL_INTERRUPT = 2;
-
-    private const int SIGNAL_KILL = 9;
-
-    private const int SIGNAL_TERMINATE = 15;
-
     private const int SUPERVISION_SLEEP_MICROSECONDS = 10_000;
 
     /** @var array<int,int> */
@@ -96,7 +90,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         }
         $this->shutdownDeadline ??= self::monotonicSeconds() + $this->shutdownGraceSeconds;
 
-        $this->signalChildren(self::SIGNAL_TERMINATE);
+        $this->signalChildren(SIGTERM);
     }
 
     /** @param array<int,int> $restarts */
@@ -116,7 +110,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
 
         $cleanExit = pcntl_wifexited($status) && pcntl_wexitstatus($status) === 0;
         $cleanSignal = pcntl_wifsignaled($status)
-            && pcntl_wtermsig($status) === self::SIGNAL_TERMINATE;
+            && pcntl_wtermsig($status) === SIGTERM;
         if ($cleanExit || $cleanSignal) {
             $restarts[$slot] = 0;
             $this->spawn($slot, $workerFactory);
@@ -160,7 +154,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         }
 
         $this->killEscalated = true;
-        $this->signalChildren(self::SIGNAL_KILL);
+        $this->signalChildren(SIGKILL);
     }
 
     /** @return array{int,int}|null */
@@ -202,21 +196,21 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
 
     private function registerSignals(): void
     {
-        foreach ([self::SIGNAL_TERMINATE, self::SIGNAL_INTERRUPT] as $signal) {
+        foreach ([SIGTERM, SIGINT] as $signal) {
             $this->previousSignalHandlers[$signal] = pcntl_signal_get_handler($signal);
         }
         $this->previousAsyncSignals = pcntl_async_signals();
         pcntl_async_signals(true);
-        pcntl_signal(self::SIGNAL_TERMINATE, $this->stopFromSignal(...), false);
-        pcntl_signal(self::SIGNAL_INTERRUPT, $this->stopFromSignal(...), false);
+        pcntl_signal(SIGTERM, $this->stopFromSignal(...), false);
+        pcntl_signal(SIGINT, $this->stopFromSignal(...), false);
     }
 
     private function resetSignalsForChild(): void
     {
-        pcntl_signal(self::SIGNAL_TERMINATE, SIG_DFL);
-        pcntl_signal(self::SIGNAL_INTERRUPT, SIG_DFL);
+        pcntl_signal(SIGTERM, SIG_DFL);
+        pcntl_signal(SIGINT, SIG_DFL);
         pcntl_async_signals(false);
-        if (!pcntl_sigprocmask(SIG_UNBLOCK, [self::SIGNAL_TERMINATE, self::SIGNAL_INTERRUPT])) {
+        if (!pcntl_sigprocmask(SIG_UNBLOCK, [SIGTERM, SIGINT])) {
             throw new \RuntimeException('Unable to unblock Omnibus worker child signals.');
         }
     }
@@ -295,7 +289,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         if ($pid > 0) {
             $this->children[$pid] = $slot;
             if ($this->stopRequested) {
-                posix_kill($pid, self::SIGNAL_TERMINATE);
+                posix_kill($pid, SIGTERM);
             }
 
             return;
@@ -305,9 +299,9 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
             $this->resetSignalsForChild();
             $worker = $workerFactory($slot);
             $worker->run();
-            $this->terminateChild(self::SIGNAL_TERMINATE);
+            $this->terminateChild(SIGTERM);
         } catch (\Throwable) {
-            $this->terminateChild(self::SIGNAL_KILL);
+            $this->terminateChild(SIGKILL);
         }
     }
 

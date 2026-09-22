@@ -6,10 +6,6 @@ namespace Infocyph\Omnibus\Consumer;
 
 final class Worker
 {
-    private const int SIGNAL_INTERRUPT = 2;
-
-    private const int SIGNAL_TERMINATE = 15;
-
     private ?bool $previousAsyncSignals = null;
 
     /** @var array<int,callable|int> */
@@ -71,15 +67,15 @@ final class Worker
             return;
         }
 
-        foreach ([self::SIGNAL_TERMINATE, self::SIGNAL_INTERRUPT] as $signal) {
+        foreach ([SIGTERM, SIGINT] as $signal) {
             $this->previousSignalHandlers[$signal] = pcntl_signal_get_handler($signal);
         }
         $this->previousAsyncSignals = pcntl_async_signals();
         pcntl_async_signals(true);
-        pcntl_signal(self::SIGNAL_TERMINATE, function (): void {
+        pcntl_signal(SIGTERM, function (): void {
             $this->stopRequested = true;
         });
-        pcntl_signal(self::SIGNAL_INTERRUPT, function (): void {
+        pcntl_signal(SIGINT, function (): void {
             $this->stopRequested = true;
         });
     }
