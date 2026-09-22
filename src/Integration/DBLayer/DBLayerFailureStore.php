@@ -210,33 +210,6 @@ final readonly class DBLayerFailureStore implements FailureStore
         ) === 1;
     }
 
-    /** @return array<string, mixed>|null */
-    private function failureVersionForUpdate(Connection $connection, string $id): ?array
-    {
-        $sql = match ($connection->getDriverName()) {
-            'mysql', 'mariadb', 'pgsql' => "SELECT attempt, failed_at FROM {$this->table} WHERE id = ? FOR UPDATE",
-            'mssql' => "SELECT attempt, failed_at FROM {$this->table} WITH (UPDLOCK, ROWLOCK) WHERE id = ?",
-            'sqlite' => "SELECT attempt, failed_at FROM {$this->table} WHERE id = ?",
-            default => throw new \LogicException('Unsupported DBLayer failure-store driver.'),
-        };
-        $rows = $connection->select($sql, [$id]);
-        if (!isset($rows[0])) {
-            return null;
-        }
-        return self::associative($rows[0]);
-    }
-
-    /** @param array<string, mixed> $existing */
-    private static function isNewerFailure(int $attempt, int $failedAt, array $existing): bool
-    {
-        $existingAttempt = self::int($existing, 'attempt');
-        if ($attempt !== $existingAttempt) {
-            return $attempt > $existingAttempt;
-        }
-
-        return $failedAt > self::int($existing, 'failed_at');
-    }
-
     /**
      * @param array<mixed, mixed> $row
      * @return array<string, mixed>
@@ -292,6 +265,17 @@ final readonly class DBLayerFailureStore implements FailureStore
         return (int) $value;
     }
 
+    /** @param array<string, mixed> $existing */
+    private static function isNewerFailure(int $attempt, int $failedAt, array $existing): bool
+    {
+        $existingAttempt = self::int($existing, 'attempt');
+        if ($attempt !== $existingAttempt) {
+            return $attempt > $existingAttempt;
+        }
+
+        return $failedAt > self::int($existing, 'failed_at');
+    }
+
     /** @param array<string, mixed> $row */
     private static function string(array $row, string $key): string
     {
@@ -301,6 +285,22 @@ final readonly class DBLayerFailureStore implements FailureStore
         }
 
         return $value;
+    }
+
+    /** @return array<string, mixed>|null */
+    private function failureVersionForUpdate(Connection $connection, string $id): ?array
+    {
+        $sql = match ($connection->getDriverName()) {
+            'mysql', 'mariadb', 'pgsql' => "SELECT attempt, failed_at FROM {$this->table} WHERE id = ? FOR UPDATE",
+            'mssql' => "SELECT attempt, failed_at FROM {$this->table} WITH (UPDLOCK, ROWLOCK) WHERE id = ?",
+            'sqlite' => "SELECT attempt, failed_at FROM {$this->table} WHERE id = ?",
+            default => throw new \LogicException('Unsupported DBLayer failure-store driver.'),
+        };
+        $rows = $connection->select($sql, [$id]);
+        if (!isset($rows[0])) {
+            return null;
+        }
+        return self::associative($rows[0]);
     }
 
     /** @param array<string, mixed> $row */

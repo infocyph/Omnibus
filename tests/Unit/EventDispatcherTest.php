@@ -106,6 +106,8 @@ test('external listener providers returning empty arrays fail through the listen
     $provider = new class implements ListenerProviderInterface {
         public function getListenersForEvent(object $event): iterable
         {
+            unset($event);
+
             return [[]];
         }
     };

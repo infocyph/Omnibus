@@ -34,13 +34,14 @@ test('native Redis-compatible service completes reservation and settlement lifec
 
     $prefix = 'omnibus_'.$backend.'_matrix_'.getmypid();
     $queue = 'native';
+    $tag = sprintf('{%s:%s}', $prefix, $queue);
     $keys = [
-        "{$prefix}:{native}:ready",
-        "{$prefix}:{native}:reserved",
-        "{$prefix}:{native}:payloads",
-        "{$prefix}:{native}:attempts",
-        "{$prefix}:{native}:receipts",
-        "{$prefix}:{native}:message_ids",
+        $tag . ':ready',
+        $tag . ':reserved',
+        $tag . ':payloads',
+        $tag . ':attempts',
+        $tag . ':receipts',
+        $tag . ':message_ids',
     ];
     $redis->del($keys);
 

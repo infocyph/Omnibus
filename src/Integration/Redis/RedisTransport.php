@@ -21,8 +21,6 @@ use Psr\Clock\ClockInterface;
 
 final readonly class RedisTransport implements Transport
 {
-    private const string CORRUPTION_SENTINEL = '__OMNIBUS_CORRUPT__';
-
     private const string ACK = <<<'LUA'
 if redis.call('HGET', KEYS[4], ARGV[1]) ~= ARGV[2] then return 0 end
 redis.call('ZREM', KEYS[1], ARGV[1])
@@ -32,6 +30,8 @@ redis.call('HDEL', KEYS[4], ARGV[1])
 redis.call('HDEL', KEYS[5], ARGV[1])
 return 1
 LUA;
+
+    private const string CORRUPTION_SENTINEL = '__OMNIBUS_CORRUPT__';
 
     private const string RECEIVE = <<<'LUA'
 local function corrupt(ids, requireReceipt)

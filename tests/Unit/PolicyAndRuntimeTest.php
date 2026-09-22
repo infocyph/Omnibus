@@ -106,6 +106,8 @@ test('unique sender preserves the primary send failure when lease cleanup also f
         new class implements Infocyph\Omnibus\Transport\Sender {
             public function send(Envelope $envelope, string $queue): Envelope
             {
+                unset($envelope, $queue);
+
                 throw new DomainException('send-primary');
             }
         },
