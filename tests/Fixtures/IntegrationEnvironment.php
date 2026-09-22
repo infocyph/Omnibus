@@ -12,13 +12,17 @@ final class IntegrationEnvironment
      */
     public static function configuredDatabaseDrivers(array $drivers): array
     {
-        $configured = array_values(array_filter(
+        $expected = array_values(array_filter(
             $drivers,
+            self::databaseDriverAvailable(...),
+        ));
+        $configured = array_values(array_filter(
+            $expected,
             self::databaseConfigured(...),
         ));
 
-        if (self::githubActions() && count($configured) !== count($drivers)) {
-            $missing = array_values(array_diff($drivers, $configured));
+        if (self::githubActions() && count($configured) !== count($expected)) {
+            $missing = array_values(array_diff($expected, $configured));
 
             throw new \RuntimeException(sprintf(
                 'GitHub Actions is missing required database integration configuration: %s.',
@@ -31,13 +35,7 @@ final class IntegrationEnvironment
 
     public static function databaseConfigured(string $driver): bool
     {
-        $pdoDriver = match ($driver) {
-            'mysql', 'mariadb' => 'mysql',
-            'pgsql' => 'pgsql',
-            'mssql' => 'sqlsrv',
-            default => $driver,
-        };
-        if (!in_array($pdoDriver, \PDO::getAvailableDrivers(), true)) {
+        if (!self::databaseDriverAvailable($driver)) {
             return false;
         }
 
@@ -99,6 +97,18 @@ final class IntegrationEnvironment
         }
 
         return $configured;
+    }
+
+    private static function databaseDriverAvailable(string $driver): bool
+    {
+        $pdoDriver = match ($driver) {
+            'mysql', 'mariadb' => 'mysql',
+            'pgsql' => 'pgsql',
+            'mssql' => 'sqlsrv',
+            default => $driver,
+        };
+
+        return in_array($pdoDriver, \PDO::getAvailableDrivers(), true);
     }
 
     private static function environmentPairConfigured(string $first, string $second): bool
