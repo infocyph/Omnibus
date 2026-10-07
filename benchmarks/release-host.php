@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\Omnibus\Envelope\HandledStamp;
 use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\MessageBus;
@@ -36,7 +37,9 @@ header('Content-Type: application/json');
 $failurePath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) === '/failure';
 
 try {
-    $value = $bus->dispatch(new OmnibusReleaseHttpMessage($failurePath ? -1 : 42));
+    $envelope = $bus->dispatch(new OmnibusReleaseHttpMessage($failurePath ? -1 : 42));
+    $handled = $envelope->last(HandledStamp::class);
+    $value = $handled instanceof HandledStamp ? $handled->result : null;
     if ($failurePath || $value !== 42) {
         throw new RuntimeException('Unexpected benchmark result.');
     }
