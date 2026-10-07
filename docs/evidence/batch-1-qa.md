@@ -21,4 +21,17 @@ The import-order defect was corrected in `4a4be385310411dc5bc7cff8796a691856dd09
 
 ## Final gate
 
-Batch 1 is not considered exact-SHA certified until the GitHub Actions run attached to the corrected head confirms the expected state. The remaining native O07 finding is intentionally tracked for Batch 2 and is not a Batch 1 regression.
+Exact-SHA GitHub Actions run `37643068219` on `49944de40c7197631f8953e083f172802b67aaa0` completed with:
+
+- QA PHP 8.4 prefer-stable: passed.
+- QA PHP 8.4 prefer-lowest: passed.
+- QA PHP 8.5 prefer-stable: passed.
+- QA PHP 8.5 prefer-lowest: passed.
+- representative benchmark PHP 8.4: passed.
+- representative benchmark PHP 8.5: passed.
+- clean install: passed.
+- replica writer-affinity: passed.
+- Psalm and Composer audit in analysis: passed.
+- PHPStan: one remaining inherited finding only, `NativeWorkerPoolBackend::supervise()` cognitive complexity 14 with budget 12. This is the Batch 2 O07 item.
+
+Batch 1 is complete. The remaining native O07 failure is not accepted as release-ready; it is explicitly the next batch's blocker.
