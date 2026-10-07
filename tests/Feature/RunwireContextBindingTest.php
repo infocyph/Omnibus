@@ -232,3 +232,86 @@ test('Worker idle waiting borrows a Runwire coroutine scope and retains synchron
     $fallback->sleep(0.001);
     expect((hrtime(true) - $started) / 1_000_000_000)->toBeGreaterThanOrEqual(0.0005);
 });
+
+
+test('Runwire binding restores nested ownership after exceptions', function (): void {
+    $runtime = omnibusRunwireRuntime();
+    $request = RequestContext::create($runtime, requestId: 'nested-request');
+    $binding = new RunwireBinding();
+
+    expect(fn() => $binding->withRunwire(
+        $runtime,
+        function () use ($binding, $runtime, $request): void {
+            expect($binding->runtime())->toBe($runtime)
+                ->and($binding->request())->toBe($request);
+
+            $binding->withRunwire(
+                $runtime,
+                function () use ($binding, $runtime, $request): void {
+                    expect($binding->runtime())->toBe($runtime)
+                        ->and($binding->request())->toBe($request);
+                },
+            );
+
+            throw new DomainException('nested-binding-failure');
+        },
+        $request,
+    ))->toThrow(DomainException::class, 'nested-binding-failure');
+
+    expect($binding->runtime())->toBeNull()
+        ->and($binding->request())->toBeNull()
+        ->and($binding->scope())->toBeNull();
+});
+
+test('Runwire binding isolates concurrent request ownership by Fiber', function (): void {
+    $runtime = omnibusRunwireRuntime(coroutines: true);
+    $leftRequest = RequestContext::create($runtime, requestId: 'left-request');
+    $rightRequest = RequestContext::create($runtime, requestId: 'right-request');
+    $binding = new RunwireBinding();
+    $seen = [];
+    $coroutines = new CoroutineRuntime();
+
+    $coroutines->run(function (CoroutineScope $scope) use (
+        $runtime,
+        $leftRequest,
+        $rightRequest,
+        $binding,
+        &$seen,
+    ): void {
+        $left = $scope->spawn(function () use ($scope, $runtime, $leftRequest, $binding, &$seen): void {
+            $binding->withRunwire(
+                $runtime,
+                function () use ($scope, $binding, &$seen): void {
+                    $seen[] = 'left-before:' . $binding->request()?->requestId;
+                    $scope->yieldNow();
+                    $seen[] = 'left-after:' . $binding->request()?->requestId;
+                },
+                $leftRequest,
+                $scope,
+            );
+        });
+        $right = $scope->spawn(function () use ($scope, $runtime, $rightRequest, $binding, &$seen): void {
+            $binding->withRunwire(
+                $runtime,
+                function () use ($scope, $binding, &$seen): void {
+                    $seen[] = 'right-before:' . $binding->request()?->requestId;
+                    $scope->yieldNow();
+                    $seen[] = 'right-after:' . $binding->request()?->requestId;
+                },
+                $rightRequest,
+                $scope,
+            );
+        });
+
+        $left->await();
+        $right->await();
+    });
+
+    expect($seen)->toContain(
+        'left-before:left-request',
+        'left-after:left-request',
+        'right-before:right-request',
+        'right-after:right-request',
+    )->and($binding->runtime())->toBeNull()
+        ->and($binding->request())->toBeNull();
+});
