@@ -20,16 +20,14 @@ const AUDITED_REVISION = '17a86f28215b36f237a9db3e014c5425c4d6ea0a';
 
 final readonly class ReleaseDurableMessage
 {
-    public function __construct(public int $sequence)
-    {
-    }
+    public function __construct(public int $sequence) {}
 }
 
 /** @return array{status:int,latency:float,body:array<mixed>|null} */
 function httpRequest(string $url): array
 {
     $started = hrtime(true);
-    $body = @file_get_contents($url, false, stream_context_create([
+    $body = file_get_contents($url, false, stream_context_create([
         'http' => ['ignore_errors' => true, 'timeout' => 5.0],
     ]));
     $status = 0;
@@ -71,12 +69,13 @@ function httpClient(string $url, int $requests, int $status, array $body): array
 }
 
 if (($argv[1] ?? '') === 'http-client') {
-    echo json_encode(httpClient(
+    fwrite(STDOUT, json_encode(httpClient(
         $argv[2],
         (int) $argv[3],
         (int) $argv[4],
         json_decode($argv[5], true, 512, JSON_THROW_ON_ERROR),
-    ), JSON_THROW_ON_ERROR);
+    ), JSON_THROW_ON_ERROR));
+
     exit(0);
 }
 
@@ -217,7 +216,7 @@ function httpBaselines(): array
         $deadline = microtime(true) + 5.0;
         $ready = false;
         do {
-            $probe = @stream_socket_client("tcp://127.0.0.1:$port", $code, $error, 0.1);
+            $probe = stream_socket_client("tcp://127.0.0.1:$port", $code, $error, 0.1);
             if (is_resource($probe)) {
                 fclose($probe);
                 $ready = true;
@@ -251,7 +250,9 @@ function httpBaselines(): array
     } finally {
         proc_terminate($process);
         proc_close($process);
-        @unlink($log);
+        if (is_file($log)) {
+            unlink($log);
+        }
     }
 }
 
@@ -317,13 +318,15 @@ function durableBaselines(): array
             'latency_phase' => 'receive',
         ])];
     } finally {
-        @unlink($path);
+        if (is_file($path)) {
+            unlink($path);
+        }
     }
 }
 
 function cpuModel(): string
 {
-    $contents = @file_get_contents('/proc/cpuinfo');
+    $contents = is_readable('/proc/cpuinfo') ? file_get_contents('/proc/cpuinfo') : false;
     if (is_string($contents) && preg_match('/^model name\s*:\s*(.+)$/m', $contents, $match) === 1) {
         return trim($match[1]);
     }
@@ -357,4 +360,4 @@ $document = [
     'workloads' => [...httpBaselines(), ...durableBaselines()],
 ];
 file_put_contents($output, json_encode($document, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL);
-echo json_encode([$document], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL;
+fwrite(STDOUT, json_encode([$document], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL);

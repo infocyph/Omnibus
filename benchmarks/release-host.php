@@ -14,9 +14,7 @@ require dirname(__DIR__) . '/vendor/autoload.php';
 
 final readonly class OmnibusReleaseHttpMessage
 {
-    public function __construct(public int $value)
-    {
-    }
+    public function __construct(public int $value) {}
 }
 
 $handlers = new HandlerMap([
@@ -45,15 +43,15 @@ try {
     }
 
     http_response_code(200);
-    echo json_encode(['ok' => true, 'value' => $value], JSON_THROW_ON_ERROR);
+    fwrite(STDOUT, json_encode(['ok' => true, 'value' => $value], JSON_THROW_ON_ERROR));
 } catch (Throwable $failure) {
     if (!$failurePath || $failure->getMessage() !== 'expected benchmark failure') {
         http_response_code(500);
-        echo json_encode(['ok' => false, 'error' => 'unexpected'], JSON_THROW_ON_ERROR);
+        fwrite(STDOUT, json_encode(['ok' => false, 'error' => 'unexpected'], JSON_THROW_ON_ERROR));
 
         return;
     }
 
     http_response_code(503);
-    echo json_encode(['ok' => false, 'error' => 'expected'], JSON_THROW_ON_ERROR);
+    fwrite(STDOUT, json_encode(['ok' => false, 'error' => 'expected'], JSON_THROW_ON_ERROR));
 }
