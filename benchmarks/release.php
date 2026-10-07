@@ -34,6 +34,7 @@ function httpRequest(string $url): array
     foreach ($http_response_header ?? [] as $header) {
         if (preg_match('/^HTTP\/\S+\s+(\d{3})\b/', $header, $match) === 1) {
             $status = (int) $match[1];
+
             break;
         }
     }
@@ -102,7 +103,8 @@ function workload(
     array $latencies,
     array $metadata = [],
     int $warmup = 0,
-): array {
+): array
+{
     $failed = $attempted - $successful;
     $average = $latencies === [] ? null : array_sum($latencies) / count($latencies);
 
@@ -221,6 +223,7 @@ function httpBaselines(): array
             if (is_resource($probe)) {
                 fclose($probe);
                 $ready = true;
+
                 break;
             }
             usleep(20_000);
