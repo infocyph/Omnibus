@@ -30,6 +30,9 @@ final class InMemoryWorkflowStore implements WorkflowStore
      */
     private array $workflows = [];
 
+    /** @var array<string, array{workflow_id:string,index:int}> */
+    private array $messageIndex = [];
+
     public function __construct(private readonly ClockInterface $clock = new SystemClock()) {}
 
     public function cancel(string $id): WorkflowTransition
@@ -179,16 +182,17 @@ final class InMemoryWorkflowStore implements WorkflowStore
 
     public function findItemByMessageId(string $messageId): ?WorkflowItem
     {
-        foreach ($this->workflows as $workflow) {
-            foreach ($workflow['items'] as $entry) {
-                $stamp = $entry['item']->envelope->last(MessageIdStamp::class);
-                if ($stamp instanceof MessageIdStamp && $stamp->id === $messageId) {
-                    return $entry['item'];
-                }
-            }
+        $location = $this->messageIndex[$messageId] ?? null;
+        if ($location === null) {
+            return null;
         }
 
-        return null;
+        $entry = $this->workflows[$location['workflow_id']]['items'][$location['index']] ?? null;
+        if ($entry === null) {
+            throw new \LogicException('Workflow message index references a missing item.');
+        }
+
+        return $entry['item'];
     }
 
     public function itemStatus(string $id, string $itemId, int $index): WorkflowItemStatus
@@ -421,12 +425,19 @@ final class InMemoryWorkflowStore implements WorkflowStore
         }
         QueueName::assert($queue);
         $items = [];
+        $messageIds = [];
         foreach ($envelopes as $index => $envelope) {
             $itemId = ULID::generateMonotonic();
             $envelope = $envelope->without(ChainStamp::class, BatchStamp::class);
-            if (!$envelope->last(MessageIdStamp::class) instanceof MessageIdStamp) {
-                $envelope = $envelope->with(new MessageIdStamp(ULID::generateMonotonic()));
+            $messageId = $envelope->last(MessageIdStamp::class);
+            if (!$messageId instanceof MessageIdStamp) {
+                $messageId = new MessageIdStamp(ULID::generateMonotonic());
+                $envelope = $envelope->with($messageId);
             }
+            if (isset($messageIds[$messageId->id]) || isset($this->messageIndex[$messageId->id])) {
+                throw new \InvalidArgumentException('Workflow message IDs must be unique across retained workflows.');
+            }
+            $messageIds[$messageId->id] = $index;
             $stamp = $kind === 'chain'
                 ? new ChainStamp($id, $itemId, $index)
                 : new BatchStamp($id, $itemId, $index);
@@ -437,11 +448,15 @@ final class InMemoryWorkflowStore implements WorkflowStore
                 'claim_until' => null,
             ];
         }
+
         $this->workflows[$id] = [
             'kind' => $kind,
             'status' => WorkflowStatus::Pending,
             'items' => $items,
         ];
+        foreach ($messageIds as $messageId => $index) {
+            $this->messageIndex[$messageId] = ['workflow_id' => $id, 'index' => $index];
+        }
     }
 
     private function releaseExpiredClaims(string $id, int $now): void

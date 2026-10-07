@@ -10,6 +10,7 @@ use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Event\EventDispatcher;
 use Infocyph\Omnibus\Event\ListenerMap;
+use Infocyph\Omnibus\Failure\FailedMessage;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\Handler\HandlerInvoker;
@@ -599,4 +600,88 @@ test('workflow lifecycle listener failures are best effort after durable transit
     $coordinator->succeed($envelope);
 
     expect($store->find($id)?->status)->toBe(WorkflowStatus::Completed);
+});
+
+
+test('conflicting and repeated workflow stamps are rejected before business execution', function (): void {
+    $store = new InMemoryWorkflowStore();
+    $workflowId = str_repeat('w', 26);
+    $store->createBatch($workflowId, [new Envelope(new TestCommand('guarded'))], 'work');
+    $claim = $store->claimPending($workflowId)[0];
+    $store->confirmDispatched($workflowId, $claim->item->itemId, $claim->token);
+    $batch = $claim->item->envelope->last(BatchStamp::class);
+    if (!$batch instanceof BatchStamp) {
+        throw new RuntimeException('Expected batch identity stamp.');
+    }
+
+    $conflicting = $claim->item->envelope->with(new ChainStamp(
+        str_repeat('c', 26),
+        str_repeat('i', 26),
+        0,
+    ));
+    $repeated = $claim->item->envelope->with($batch);
+    $scope = new WorkflowExecutionScope(new DirectExecutionScope(), $store);
+    $coordinator = new WorkflowCoordinator($store, new RecordingSender());
+    $executions = 0;
+    $handler = static function () use (&$executions): void {
+        $executions++;
+    };
+
+    $innerFailures = new InMemoryFailureStore();
+    $guardedFailures = new WorkflowFailureStore($innerFailures, $coordinator);
+
+    expect(fn() => $scope->run($conflicting, $handler))
+        ->toThrow(WorkflowInconsistentDelivery::class)
+        ->and(fn() => $scope->run($repeated, $handler))
+        ->toThrow(WorkflowInconsistentDelivery::class)
+        ->and(fn() => $coordinator->fail($conflicting))
+        ->toThrow(WorkflowInconsistentDelivery::class)
+        ->and(fn() => $coordinator->succeed($repeated))
+        ->toThrow(WorkflowInconsistentDelivery::class)
+        ->and(fn() => $guardedFailures->add(FailedMessage::decoded(
+            'ambiguous-workflow-failure',
+            'work',
+            $conflicting,
+            1,
+            new DateTimeImmutable('2026-01-01T00:00:00+00:00'),
+            RuntimeException::class,
+            'ambiguous workflow',
+        )))
+        ->toThrow(WorkflowInconsistentDelivery::class)
+        ->and($innerFailures->all())->toBe([])
+        ->and($executions)->toBe(0)
+        ->and($store->itemStatus($workflowId, $claim->item->itemId, 0))
+        ->toBe(WorkflowItemStatus::Dispatched);
+});
+
+test('in-memory workflows reject duplicate message identities atomically', function (): void {
+    $store = new InMemoryWorkflowStore();
+    $messageId = 'workflow-message-id';
+    $duplicate = new Envelope(new TestCommand('duplicate'), [new MessageIdStamp($messageId)]);
+    $sameWorkflow = str_repeat('a', 26);
+
+    expect(fn() => $store->createBatch($sameWorkflow, [$duplicate, $duplicate], 'work'))
+        ->toThrow(InvalidArgumentException::class)
+        ->and($store->find($sameWorkflow))->toBeNull();
+
+    $owner = str_repeat('b', 26);
+    $store->createBatch($owner, [$duplicate], 'work');
+    $other = str_repeat('c', 26);
+    expect(fn() => $store->createChain($other, [$duplicate], 'work'))
+        ->toThrow(InvalidArgumentException::class)
+        ->and($store->find($other))->toBeNull()
+        ->and($store->findItemByMessageId($messageId)?->workflowId)->toBe($owner);
+
+    $unstamped = str_repeat('d', 26);
+    $store->createBatch($unstamped, [
+        new Envelope(new TestCommand('one')),
+        new Envelope(new TestCommand('two')),
+    ], 'work');
+    $claims = $store->claimPending($unstamped, 2);
+    $first = $claims[0]->item->envelope->last(MessageIdStamp::class);
+    $second = $claims[1]->item->envelope->last(MessageIdStamp::class);
+
+    expect($first)->toBeInstanceOf(MessageIdStamp::class)
+        ->and($second)->toBeInstanceOf(MessageIdStamp::class)
+        ->and($first?->id)->not->toBe($second?->id);
 });

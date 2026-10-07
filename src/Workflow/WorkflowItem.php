@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\Omnibus\Workflow;
 
+use Infocyph\Omnibus\Envelope\BatchStamp;
+use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Transport\QueueName;
 
@@ -26,5 +28,30 @@ final readonly class WorkflowItem
             throw new \InvalidArgumentException('Workflow item fields are invalid.');
         }
         QueueName::assert($queue);
+    }
+
+    /** @return array{kind:'batch'|'chain',workflow_id:string,item_id:string,index:int}|null */
+    public static function identity(Envelope $envelope): ?array
+    {
+        $batches = $envelope->all(BatchStamp::class);
+        $chains = $envelope->all(ChainStamp::class);
+        $count = count($batches) + count($chains);
+        if ($count === 0) {
+            return null;
+        }
+        if ($count !== 1) {
+            throw new WorkflowInconsistentDelivery(
+                'Workflow delivery must contain exactly one workflow identity stamp.',
+            );
+        }
+
+        $stamp = $chains[0] ?? $batches[0];
+
+        return [
+            'kind' => $stamp instanceof ChainStamp ? 'chain' : 'batch',
+            'workflow_id' => $stamp->workflowId,
+            'item_id' => $stamp->itemId,
+            'index' => $stamp->index,
+        ];
     }
 }

@@ -6,6 +6,7 @@ use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\Omnibus\Consumer\DirectExecutionScope;
 use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Failure\FailedMessage;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerFailureStore;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerTransport;
@@ -159,8 +160,19 @@ if ($omnibusServiceDrivers !== []) {
             $serializer = BinaryEnvelopeSerializer::make();
             $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
             $transport = new DBLayerTransport($connection, $serializer, $clock, $tables['queue']);
+            $storedPoison = '~omnibus:b64:v1~%%%';
+            $connection->insert(
+                sprintf(
+                    'INSERT INTO %s (id, message_id, queue_name, payload, available_at, attempts, reserved_until, receipt, created_at) VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, ?)',
+                    $tables['queue'],
+                ),
+                ['00000000000000000000000001', 'matrix-poison', 'work', $storedPoison, 0, 0],
+            );
             $transport->send(new Envelope(new TestCommand($driver)), 'work');
-            $reservation = [...$transport->receive('work')][0];
+            $reservations = [...$transport->receive('work', 2)];
+            $poison = $reservations[0];
+            $reservation = $reservations[1];
+            $transport->reject($poison);
             $transport->acknowledge($reservation);
 
             $failures = new DBLayerFailureStore($connection, $serializer, $tables['failures']);
@@ -202,7 +214,22 @@ if ($omnibusServiceDrivers !== []) {
                 0,
             );
 
-            expect($reservation->envelope()->message)->toEqual(new TestCommand($driver))
+            $duplicateWorkflowId = '01DRIVERDUPLICATE0000000000';
+            $duplicateEnvelope = new Envelope(
+                new TestCommand('duplicate-workflow-message'),
+                [new MessageIdStamp('matrix-duplicate-message')],
+            );
+            expect(fn() => $workflows->createBatch(
+                $duplicateWorkflowId,
+                [$duplicateEnvelope, $duplicateEnvelope],
+                'work',
+            ))->toThrow(Throwable::class)
+                ->and($workflows->find($duplicateWorkflowId))->toBeNull()
+                ->and($workflows->findItemByMessageId('matrix-duplicate-message'))->toBeNull();
+
+            expect($reservations)->toHaveCount(2)
+                ->and($poison->decodingFailure()?->payload)->toBe($storedPoison)
+                ->and($reservation->envelope()->message)->toEqual(new TestCommand($driver))
                 ->and($transport->size('work'))->toBe(0)
                 ->and($failures->find('binary-failure')?->payload)->toBe($rawPayload)
                 ->and($transition->state->succeeded)->toBe(1);
