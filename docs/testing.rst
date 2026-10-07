@@ -64,6 +64,7 @@ Commands
    composer ic:tests
    composer ic:ci
    composer benchmark
+   composer benchmark:release
    composer benchmark:worker-pool
    composer soak:consumer
    composer soak:durable
@@ -78,14 +79,24 @@ configuration is present. In an ordinary local shell, MySQL, MariaDB,
 PostgreSQL, SQL Server, Redis, Valkey and Memcached cases are registered only
 when their required extension and ``IC_*`` service variables are available;
 the rest of the suite remains runnable without provisioning every optional
-service. GitHub Actions is strict: the release workflow provisions all expected
-services/extensions, and test discovery fails if any expected integration
-configuration is missing. Run the full local parity matrix with PHP 8.4 or 8.5
-and the ``pdo_sqlite``, ``pdo_mysql``, ``pdo_pgsql``, ``pdo_sqlsrv``,
-``redis`` and ``memcached`` extensions installed in the PHP runtime executing
-Composer. PCNTL/POSIX are mandatory Omnibus runtime requirements. Starting
-Docker services alone does not install extensions into host PHP. Check that
-runtime with ``composer ic:doctor``.
+service.
+
+Required CI or release lanes declare an explicit JSON string list in
+``INTEGRATION_SERVICES``. A non-empty manifest is strict: every selected SQL
+service must have its PDO driver, credentials and a matching test dataset;
+selected Redis, Valkey and Memcached services must have their extension and
+service configuration. Discovery fails before the suite can silently register
+zero cases. An absent, empty or ``[]`` manifest keeps ordinary local discovery
+optional. The dedicated replica lane uses the narrower
+``["mysql","mariadb","postgres"]`` manifest rather than inheriting the full
+release matrix.
+
+Run the full local parity matrix with PHP 8.4 or 8.5 and the ``pdo_sqlite``,
+``pdo_mysql``, ``pdo_pgsql``, ``pdo_sqlsrv``, ``redis`` and
+``memcached`` extensions installed in the PHP runtime executing Composer.
+PCNTL/POSIX are mandatory Omnibus runtime requirements. Starting Docker
+services alone does not install extensions into host PHP. Check that runtime
+with ``composer ic:doctor``.
 
 For disposable local integration services, start the repository's service
 definitions under a separate Compose project:
@@ -102,6 +113,7 @@ the PHP runtime containing those extensions:
 
 .. code-block:: console
 
+   INTEGRATION_SERVICES='["mysql","mariadb","postgres","mssql","sqlite","redis","valkey","memcached"]' \
    IC_SERVICE_DATABASE=phpforge IC_SERVICE_USERNAME=phpforge \
    IC_SERVICE_PASSWORD='Phpforge_123!' \
    IC_MSSQL_USER=sa IC_MSSQL_PASSWORD='Phpforge_123!' \
@@ -118,6 +130,12 @@ The remaining local scripts are intentionally package-specific:
 
 * ``composer benchmark`` runs Omnibus's component lifecycle benchmark;
   PHPForge's ``ic:benchmark`` command runs PHPBench subjects instead;
+* ``composer benchmark:release`` writes ``build/benchmark-result.json`` using
+  PHPForge's representative benchmark schema. It validates a real HTTP host
+  response on cold and warmed paths at several concurrency levels, validates an
+  expected failure response, and drains a two-connection SQLite durable queue.
+  GitHub-hosted results remain marked as unstable evidence and are not used to
+  enforce the final 2% release regression budget;
 * ``composer soak:consumer`` proves that the process-local queue drains without
   progressive memory growth;
 * ``composer soak:durable`` proves that alternating SQLite consumers drain the
@@ -133,4 +151,5 @@ The remaining local scripts are intentionally package-specific:
 
 CI runs supported PHP versions with lowest and stable dependency resolution,
 clean production installation, static analysis, architecture checks, live
-database/Redis services, and strict Sphinx documentation.
+database/Redis services, strict integration discovery, representative benchmark
+artifact validation, and strict Sphinx documentation.

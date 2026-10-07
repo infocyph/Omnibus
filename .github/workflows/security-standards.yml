@@ -18,12 +18,15 @@ jobs:
     with:
       php_versions: '["8.4","8.5"]'
       php_extensions: "memcached, pdo, pdo_mysql, pdo_pgsql, pdo_sqlite, redis, pdo_sqlsrv"
-      fail_on_skipped_tests: false
+      fail_on_skipped_tests: true
       integration_services: '["mysql","mariadb","postgres","mssql","sqlite","redis","valkey","memcached"]'
       service_topologies: '{}'
       service_db_name: "phpforge"
       service_db_user: "phpforge"
       service_password: "Phpforge_123!"
+      benchmark_composer_script: "benchmark:release"
+      benchmark_result_file: "build/benchmark-result.json"
+      benchmark_stable_environment: false
 
   replica-affinity:
     name: "Replica writer affinity"
@@ -39,6 +42,7 @@ jobs:
       IC_SERVICE_USERNAME: "phpforge"
       IC_SERVICE_PASSWORD: "Phpforge_123!"
       IC_SERVICE_REPLICA_DATABASE: "phpforge_lagging"
+      INTEGRATION_SERVICES: '["mysql","mariadb","postgres"]'
     steps:
       - name: "Check out repository"
         uses: actions/checkout@v7
