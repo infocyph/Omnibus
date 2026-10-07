@@ -20,11 +20,33 @@ use RuntimeException;
 use stdClass;
 
 $autoload = $argv[1] ?? '';
-if ($autoload === '' || !is_file($autoload)) {
-    throw new RuntimeException('Portable-core probe requires the isolated consumer autoloader path.');
-}
+if ($autoload === '--source') {
+    $root = dirname(__DIR__, 2);
+    $prefixes = [
+        'Infocyph\\Omnibus\\' => $root . '/src/',
+        'Infocyph\\UID\\' => $root . '/vendor/infocyph/uid/src/',
+        'Psr\\Clock\\' => $root . '/vendor/psr/clock/src/',
+        'Psr\\EventDispatcher\\' => $root . '/vendor/psr/event-dispatcher/src/',
+    ];
+    spl_autoload_register(static function (string $class) use ($prefixes): void {
+        foreach ($prefixes as $prefix => $directory) {
+            if (!str_starts_with($class, $prefix)) {
+                continue;
+            }
 
-require $autoload;
+            $path = $directory . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
+            if (is_file($path)) {
+                require $path;
+            }
+
+            return;
+        }
+    });
+} elseif ($autoload !== '' && is_file($autoload)) {
+    require $autoload;
+} else {
+    throw new RuntimeException('Portable-core probe requires an isolated consumer autoloader or --source.');
+}
 
 if (extension_loaded('pcntl') || extension_loaded('posix')) {
     throw new RuntimeException('Portable-core probe must run with PCNTL and POSIX unavailable.');
