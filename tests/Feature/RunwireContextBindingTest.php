@@ -166,7 +166,7 @@ test('Runwire binding rejects invalid ownership, cancellation, and stale runtime
         ->toThrow(LogicException::class, 'Completed');
 
     $cancelled = RequestContext::create($runtime, requestId: 'cancelled');
-    $cancelled->cancel(CancellationReason::CLIENT_DISCONNECTED);
+    $cancelled->cancel(CancellationReason::HOST_CANCELLED);
     expect(fn() => $binding->withRunwire($runtime, static fn(): null => null, $cancelled))
         ->toThrow(Infocyph\Runwire\Exception\CancelledException::class);
 

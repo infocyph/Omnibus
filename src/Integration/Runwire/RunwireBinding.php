@@ -200,9 +200,7 @@ final class RunwireBinding
             return $this->rootContext;
         }
 
-        return isset($this->fiberContexts[$fiber])
-            ? $this->fiberContexts[$fiber]
-            : null;
+        return $this->fiberContexts[$fiber] ?? null;
     }
 
     private function rememberGeneration(RuntimeContext $runtime): void
