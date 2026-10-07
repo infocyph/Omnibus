@@ -34,6 +34,24 @@ final class Worker
         $this->runLoop($lifecycle, false);
     }
 
+    private function assertSignalSupport(): void
+    {
+        foreach (['pcntl_async_signals', 'pcntl_signal', 'pcntl_signal_get_handler'] as $function) {
+            if (!function_exists($function)) {
+                throw new \RuntimeException(
+                    'Worker signal handling requires ext-pcntl. Install it or use WorkerOptions(handleSignals: false).',
+                );
+            }
+        }
+        foreach (['SIGINT', 'SIGTERM'] as $constant) {
+            if (!defined($constant)) {
+                throw new \RuntimeException(
+                    'Worker signal handling requires ext-pcntl signal constants. Install ext-pcntl or disable signal handling.',
+                );
+            }
+        }
+    }
+
     private function externalStopRequested(?WorkerLifecycle $managedLifecycle): bool
     {
         return ($this->lifecycle?->stopRequested() ?? false)
@@ -67,6 +85,7 @@ final class Worker
             return;
         }
 
+        $this->assertSignalSupport();
         foreach ([SIGTERM, SIGINT] as $signal) {
             $this->previousSignalHandlers[$signal] = pcntl_signal_get_handler($signal);
         }

@@ -19,7 +19,7 @@ final readonly class WorkerOptions
         public ?float $maxRuntimeSeconds = null,
         public ?int $memoryLimitBytes = null,
         public ?int $maxMemoryGrowthBytes = null,
-        public bool $handleSignals = true,
+        public bool $handleSignals = false,
     ) {
         QueueName::assert($queue);
         $this->validateReceiveOptions();

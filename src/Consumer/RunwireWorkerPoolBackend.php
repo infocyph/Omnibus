@@ -73,7 +73,14 @@ final class RunwireWorkerPoolBackend implements WorkerPoolBackend
         foreach ([Supervisor::class, WorkerContext::class, WorkerGroup::class] as $class) {
             if (!class_exists($class)) {
                 throw new \RuntimeException(
-                    'The Runwire WorkerPool backend requires infocyph/runwire ^1.0.',
+                    'The Runwire WorkerPool backend requires infocyph/runwire 2.1.1 or later within the supported 2.x line.',
+                );
+            }
+        }
+        foreach (['pcntl_fork', 'pcntl_waitpid', 'posix_kill'] as $function) {
+            if (!function_exists($function)) {
+                throw new \RuntimeException(
+                    'The standalone Runwire WorkerPool backend requires ext-pcntl and ext-posix process support.',
                 );
             }
         }

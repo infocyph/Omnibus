@@ -278,7 +278,7 @@ test('worker restores parent signal handlers after execution', function (): void
                 new InMemoryFailureStore(),
                 $clock,
             ),
-            new WorkerOptions(queue: 'work', maxMessages: 1),
+            new WorkerOptions(queue: 'work', maxMessages: 1, handleSignals: true),
         );
 
         $worker->run();

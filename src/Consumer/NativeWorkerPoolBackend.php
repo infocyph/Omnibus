@@ -47,6 +47,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
             return;
         }
 
+        $this->assertProcessSupport();
         $this->shutdownGraceSeconds = $shutdownGraceSeconds;
         $this->registerSignals();
 
@@ -85,6 +86,46 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         }
 
         return $status;
+    }
+
+    private function assertProcessSupport(): void
+    {
+        foreach ([
+            'pcntl_async_signals',
+            'pcntl_fork',
+            'pcntl_get_last_error',
+            'pcntl_signal',
+            'pcntl_signal_get_handler',
+            'pcntl_sigprocmask',
+            'pcntl_waitpid',
+            'pcntl_wifexited',
+            'pcntl_wifsignaled',
+            'pcntl_wexitstatus',
+            'pcntl_wtermsig',
+            'posix_kill',
+        ] as $function) {
+            if (!function_exists($function)) {
+                throw new \RuntimeException(
+                    'The native WorkerPool backend requires ext-pcntl and ext-posix. Install them or choose a host-managed execution path.',
+                );
+            }
+        }
+        foreach ([
+            'PCNTL_ECHILD',
+            'PCNTL_EINTR',
+            'SIG_DFL',
+            'SIG_UNBLOCK',
+            'SIGINT',
+            'SIGKILL',
+            'SIGTERM',
+            'WNOHANG',
+        ] as $constant) {
+            if (!defined($constant)) {
+                throw new \RuntimeException(
+                    'The native WorkerPool backend requires ext-pcntl and ext-posix process constants.',
+                );
+            }
+        }
     }
 
     private function beginShutdown(): void

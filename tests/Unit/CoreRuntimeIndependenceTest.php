@@ -15,21 +15,33 @@ use Infocyph\Omnibus\Tests\Fixtures\RecordingWorkerLifecycle;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
 
-test('core and FPM-compatible paths keep Runwire optional with mandatory process extensions', function (): void {
+test('core and FPM-compatible paths keep optional integrations and process extensions optional', function (): void {
     $composerPath = dirname(__DIR__, 2) . '/composer.json';
     $composer = json_decode((string) file_get_contents($composerPath), true, flags: JSON_THROW_ON_ERROR);
-    if (!is_array($composer['require'] ?? null) || !is_array($composer['require-dev'] ?? null)) {
+    if (
+        !is_array($composer['require'] ?? null)
+        || !is_array($composer['require-dev'] ?? null)
+        || !is_array($composer['conflict'] ?? null)
+        || !is_array($composer['suggest'] ?? null)
+    ) {
         throw new RuntimeException('Composer dependency sections are invalid.');
     }
 
     expect($composer['require'])
-        ->not->toHaveKey('infocyph/runwire')
-        ->and($composer['require']['ext-pcntl'] ?? null)->toBe('*')
-        ->and($composer['require']['ext-posix'] ?? null)->toBe('*');
-    expect($composer['require-dev'])
         ->not->toHaveKey('ext-pcntl')
         ->not->toHaveKey('ext-posix')
-        ->and($composer['require-dev']['infocyph/runwire'] ?? null)->toBe('^1.0');
+        ->not->toHaveKey('infocyph/cachelayer')
+        ->not->toHaveKey('infocyph/dblayer')
+        ->not->toHaveKey('infocyph/runwire')
+        ->and($composer['require']['infocyph/uid'] ?? null)->toBe('^6.0');
+    expect($composer['require-dev']['infocyph/cachelayer'] ?? null)->toBe('^4.0')
+        ->and($composer['require-dev']['infocyph/dblayer'] ?? null)->toBe('^6.0')
+        ->and($composer['require-dev']['infocyph/runwire'] ?? null)->toBe('2.1.1')
+        ->and($composer['conflict']['infocyph/cachelayer'] ?? null)->toBe('<4.0 || >=5.0')
+        ->and($composer['conflict']['infocyph/dblayer'] ?? null)->toBe('<6.0 || >=7.0')
+        ->and($composer['conflict']['infocyph/runwire'] ?? null)->toBe('<2.1.1 || >=3.0')
+        ->and($composer['suggest'])->toHaveKeys(['ext-pcntl', 'ext-posix']);
+    expect((new WorkerOptions())->handleSignals)->toBeFalse();
 
     $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
     $transport = new InMemoryTransport($clock);
@@ -55,7 +67,6 @@ test('core and FPM-compatible paths keep Runwire optional with mandatory process
             prefetch: 1,
             idleSleepSeconds: 0,
             maxIdleSleepSeconds: 0,
-            handleSignals: false,
         ),
         $lifecycle,
     );
