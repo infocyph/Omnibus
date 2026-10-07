@@ -11,6 +11,7 @@ use Infocyph\Omnibus\Envelope\AttemptStamp;
 use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
+use Infocyph\Omnibus\Integration\Runwire\RunwireBinding;
 use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Serialization\DecodeFailure;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
@@ -44,8 +45,10 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         private EnvelopeSerializer $serializer,
         private ClockInterface $clock,
         string $table = 'omnibus_messages',
+        ?RunwireBinding $runwire = null,
     ) {
         $this->table = SqlIdentifier::quote($table, $connection->getDriverName());
+        $runwire?->registerConnection($connection);
     }
 
     public function acknowledge(Reservation $reservation): void
@@ -337,7 +340,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         // Receipt-guarded settlement changes are safe to replay: only the
         // currently active reservation can be deleted or released once.
         return $this->connection->withQueryRetryPolicy(
-            static function (\Throwable $failure, int $attempt, string $sql, array $bindings) use ($driver): bool {
+            function (\Throwable $failure, int $attempt, string $sql, array $bindings) use ($driver): bool {
                 unset($sql, $bindings);
                 if (
                     $attempt >= self::SETTLEMENT_ATTEMPTS
@@ -346,7 +349,9 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
                     return false;
                 }
 
-                usleep(self::SETTLEMENT_BACKOFF_US * $attempt + random_int(0, self::SETTLEMENT_JITTER_US));
+                $microseconds = self::SETTLEMENT_BACKOFF_US * $attempt
+                    + random_int(0, self::SETTLEMENT_JITTER_US);
+                $this->connection->cooperativeSleep($microseconds / 1_000_000);
 
                 return true;
             },

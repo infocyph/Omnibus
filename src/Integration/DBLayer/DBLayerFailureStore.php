@@ -11,6 +11,7 @@ use Infocyph\Omnibus\Failure\FailureNotFound;
 use Infocyph\Omnibus\Failure\FailureRetryClaim;
 use Infocyph\Omnibus\Failure\FailureRetryClaimUnavailable;
 use Infocyph\Omnibus\Failure\FailureStore;
+use Infocyph\Omnibus\Integration\Runwire\RunwireBinding;
 use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Serialization\DecodeFailure;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
@@ -26,8 +27,10 @@ final readonly class DBLayerFailureStore implements FailureStore
         private EnvelopeSerializer $serializer,
         private string $rawTable = 'omnibus_failures',
         private ClockInterface $clock = new SystemClock(),
+        ?RunwireBinding $runwire = null,
     ) {
         $this->table = SqlIdentifier::quote($this->rawTable, $connection->getDriverName());
+        $runwire?->registerConnection($connection);
     }
 
     public function add(FailedMessage $failure): void

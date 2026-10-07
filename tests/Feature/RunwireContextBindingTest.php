@@ -1,0 +1,227 @@
+<?php
+
+declare(strict_types=1);
+
+use Infocyph\CacheLayer\Integration\Runwire\RunwireIntegration as CacheRunwireIntegration;
+use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\Omnibus\Consumer\Consumer;
+use Infocyph\Omnibus\Consumer\Worker;
+use Infocyph\Omnibus\Consumer\WorkerOptions;
+use Infocyph\Omnibus\Envelope\Envelope;
+use Infocyph\Omnibus\Failure\InMemoryFailureStore;
+use Infocyph\Omnibus\Handler\HandlerInvoker;
+use Infocyph\Omnibus\Handler\HandlerMap;
+use Infocyph\Omnibus\Integration\Runwire\RunwireBinding;
+use Infocyph\Omnibus\MessageBus;
+use Infocyph\Omnibus\Retry\ExponentialRetryStrategy;
+use Infocyph\Omnibus\Routing\Route;
+use Infocyph\Omnibus\Routing\RouteMap;
+use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
+use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
+use Infocyph\Omnibus\Transport\InMemoryTransport;
+use Infocyph\Omnibus\Transport\Sender;
+use Infocyph\Omnibus\Transport\TransportRegistry;
+use Infocyph\Runwire\Coroutine\CoroutineRuntime;
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\Runtime\Enum\CancellationReason;
+use Infocyph\Runwire\Runtime\Enum\RuntimeDriver;
+use Infocyph\Runwire\RuntimeCapabilities;
+use Infocyph\Runwire\RuntimeContext;
+
+function omnibusRunwireRuntime(int $generation = 1, bool $coroutines = false): RuntimeContext
+{
+    return RuntimeContext::fromCapabilities(
+        new RuntimeCapabilities(
+            RuntimeDriver::NATIVE,
+            persistentProcess: true,
+            persistentApplication: true,
+            runwireLoopAvailable: $coroutines,
+            supportsRunwireCoroutines: $coroutines,
+        ),
+        'omnibus-test',
+        workerSlot: 0,
+        generation: $generation,
+        concurrent: $coroutines,
+    );
+}
+
+test('Runwire binding forwards exact host identities and restores every borrowed owner', function (): void {
+    $runtime = omnibusRunwireRuntime();
+    $request = RequestContext::create($runtime, requestId: 'omnibus-request-1');
+    $binding = new RunwireBinding();
+    $connection = new Connection(ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]));
+    $binding->registerConnection($connection);
+    CacheRunwireIntegration::bind($runtime);
+
+    $observed = [];
+    $sender = new class($binding, $connection, $observed) implements Sender {
+        /** @param array<string, mixed> $observed */
+        public function __construct(
+            private RunwireBinding $binding,
+            private Connection $connection,
+            private array &$observed,
+        ) {}
+
+        public function send(Envelope $envelope, string $queue): Envelope
+        {
+            unset($queue);
+            $db = $this->connection->runwireBinding();
+            $cache = CacheRunwireIntegration::current();
+            $this->observed = [
+                'runtime' => $this->binding->runtime(),
+                'request' => $this->binding->request(),
+                'db_runtime' => $db['runtime'] ?? null,
+                'db_request' => $db['request'] ?? null,
+                'cache_runtime' => $cache?->runtime,
+                'cache_request' => $cache?->request,
+            ];
+
+            return $envelope;
+        }
+    };
+    $bus = new MessageBus(
+        new RouteMap(default: new Route('recording')),
+        new TransportRegistry(['recording' => $sender]),
+        $binding,
+    );
+
+    try {
+        $bus->withRunwire(
+            $runtime,
+            fn(): Envelope => $bus->dispatch(new TestCommand('bound')),
+            $request,
+        );
+
+        expect($observed['runtime'])->toBe($runtime)
+            ->and($observed['request'])->toBe($request)
+            ->and($observed['db_runtime'])->toBe($runtime)
+            ->and($observed['db_request'])->toBe($request)
+            ->and($observed['cache_runtime'])->toBe($runtime)
+            ->and($observed['cache_request'])->toBe($request)
+            ->and($binding->runtime())->toBeNull()
+            ->and($binding->request())->toBeNull()
+            ->and($connection->runwireBinding())->toBeNull()
+            ->and(CacheRunwireIntegration::current())->toBeNull();
+    } finally {
+        CacheRunwireIntegration::release($runtime);
+    }
+});
+
+test('one Consumer can be reused across completed Runwire requests without retaining context', function (): void {
+    $runtime = omnibusRunwireRuntime();
+    $binding = new RunwireBinding();
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $transport = new InMemoryTransport($clock);
+    $seen = [];
+    $consumer = new Consumer(
+        $transport,
+        new HandlerInvoker(new HandlerMap([
+            TestCommand::class => static function () use (&$seen, $binding): void {
+                $seen[] = $binding->request()?->requestId;
+            },
+        ])),
+        new ExponentialRetryStrategy(),
+        new InMemoryFailureStore(),
+        $clock,
+        runwire: $binding,
+    );
+
+    foreach (['first', 'second'] as $index => $requestId) {
+        $request = RequestContext::create($runtime, requestId: $requestId);
+        $transport->send(new Envelope(new TestCommand($requestId)), 'work');
+        $consumer->withRunwire(
+            $runtime,
+            fn() => $consumer->run('work'),
+            $request,
+        );
+        $request->complete();
+
+        expect($binding->runtime())->toBeNull()
+            ->and($binding->request())->toBeNull();
+    }
+
+    expect($seen)->toBe(['first', 'second']);
+});
+
+test('Runwire binding rejects invalid ownership, cancellation, and stale runtime generations', function (): void {
+    $binding = new RunwireBinding();
+    $runtime = omnibusRunwireRuntime(generation: 2);
+    $other = omnibusRunwireRuntime(generation: 2);
+    $request = RequestContext::create($runtime, requestId: 'valid');
+
+    $binding->withRunwire($runtime, static fn(): null => null, $request);
+
+    $wrongRequest = RequestContext::create($other, requestId: 'wrong-runtime');
+    expect(fn() => $binding->withRunwire($runtime, static fn(): null => null, $wrongRequest))
+        ->toThrow(LogicException::class, 'different runtime');
+
+    $completed = RequestContext::create($runtime, requestId: 'completed');
+    $completed->complete();
+    expect(fn() => $binding->withRunwire($runtime, static fn(): null => null, $completed))
+        ->toThrow(LogicException::class, 'Completed');
+
+    $cancelled = RequestContext::create($runtime, requestId: 'cancelled');
+    $cancelled->cancel(CancellationReason::CLIENT_DISCONNECTED);
+    expect(fn() => $binding->withRunwire($runtime, static fn(): null => null, $cancelled))
+        ->toThrow(Infocyph\Runwire\Exception\CancelledException::class);
+
+    expect(fn() => $binding->withRunwire(
+        omnibusRunwireRuntime(generation: 1),
+        static fn(): null => null,
+    ))->toThrow(LogicException::class, 'Stale');
+
+    $wrongPid = new RuntimeContext(
+        driver: $runtime->driver,
+        mode: $runtime->mode,
+        workerSlot: $runtime->workerSlot,
+        generation: 3,
+        pid: $runtime->pid + 1,
+        persistent: $runtime->persistent,
+        concurrent: $runtime->concurrent,
+        ownsListener: $runtime->ownsListener,
+        ownsEventLoop: $runtime->ownsEventLoop,
+        ownsWorkerPool: $runtime->ownsWorkerPool,
+        capabilities: $runtime->capabilities,
+    );
+    expect(fn() => $binding->withRunwire($wrongPid, static fn(): null => null))
+        ->toThrow(LogicException::class, 'PID');
+});
+
+test('Worker idle waiting borrows a Runwire coroutine scope and retains synchronous fallback', function (): void {
+    $runtime = omnibusRunwireRuntime(coroutines: true);
+    $request = RequestContext::create($runtime, requestId: 'coroutine-worker');
+    $binding = new RunwireBinding();
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $consumer = new Consumer(
+        new InMemoryTransport($clock),
+        new HandlerInvoker(new HandlerMap([])),
+        new ExponentialRetryStrategy(),
+        new InMemoryFailureStore(),
+        $clock,
+        runwire: $binding,
+    );
+    $worker = new Worker(
+        $consumer,
+        new WorkerOptions(
+            idleSleepSeconds: 0.001,
+            maxIdleSleepSeconds: 0.001,
+            idleJitterRatio: 0,
+            maxRuntimeSeconds: 0.003,
+        ),
+    );
+
+    $coroutines = new CoroutineRuntime();
+    $coroutines->run(function (CoroutineScope $scope) use ($worker, $runtime, $request): void {
+        $worker->withRunwire($runtime, fn(): null => $worker->run() ?? null, $request, $scope);
+    });
+
+    $fallback = new RunwireBinding();
+    $started = hrtime(true);
+    $fallback->sleep(0.001);
+    expect((hrtime(true) - $started) / 1_000_000_000)->toBeGreaterThanOrEqual(0.0005);
+});

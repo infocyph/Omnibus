@@ -10,12 +10,18 @@ use Infocyph\Omnibus\Failure\FailureInput;
 use Infocyph\Omnibus\Failure\FailureStore;
 use Infocyph\Omnibus\Handler\HandlerContext;
 use Infocyph\Omnibus\Handler\HandlerInvoker;
+use Infocyph\Omnibus\Integration\Runwire\RunwireBinding;
 use Infocyph\Omnibus\Retry\RetryStrategy;
 use Infocyph\Omnibus\Transport\Receiver;
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\RuntimeContext;
 use Psr\Clock\ClockInterface;
 
 final readonly class Consumer
 {
+    private RunwireBinding $runwire;
+
     public function __construct(
         private Receiver $receiver,
         private HandlerInvoker $invoker,
@@ -23,13 +29,37 @@ final readonly class Consumer
         private FailureStore $failures,
         private ClockInterface $clock,
         private ExecutionScope $scope = new DirectExecutionScope(),
-    ) {}
+        ?RunwireBinding $runwire = null,
+    ) {
+        $this->runwire = $runwire ?? new RunwireBinding();
+    }
 
     public function run(
         string $queue = 'default',
         int $limit = 1,
         float $visibilitySeconds = 60.0,
     ): ConsumerResult {
+        return $this->runwire->run(
+            fn(): ConsumerResult => $this->consume($queue, $limit, $visibilitySeconds),
+        );
+    }
+
+    public function runwireBinding(): RunwireBinding
+    {
+        return $this->runwire;
+    }
+
+    public function withRunwire(
+        RuntimeContext $runtime,
+        callable $callback,
+        ?RequestContext $request = null,
+        ?CoroutineScope $scope = null,
+    ): mixed {
+        return $this->runwire->withRunwire($runtime, $callback, $request, $scope);
+    }
+
+    private function consume(string $queue, int $limit, float $visibilitySeconds): ConsumerResult
+    {
         $received = $succeeded = $released = $failed = 0;
         foreach ($this->receiver->receive($queue, $limit, $visibilitySeconds) as $reservation) {
             $received++;
