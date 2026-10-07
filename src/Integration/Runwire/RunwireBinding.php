@@ -19,7 +19,12 @@ final class RunwireBinding
     /** @var WeakMap<Connection, bool> */
     private WeakMap $connections;
 
-    /** @var WeakMap<Fiber, array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null}> */
+    /**
+     * @var WeakMap<
+     *   Fiber<mixed, mixed, mixed, mixed>,
+     *   array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null}
+     * >
+     */
     private WeakMap $fiberContexts;
 
     /** @var array<string, int> */
@@ -44,6 +49,11 @@ final class RunwireBinding
         return $this->context()['request'] ?? null;
     }
 
+    /**
+     * @template TResult
+     * @param callable():TResult $callback
+     * @return TResult
+     */
     public function run(callable $callback): mixed
     {
         $context = $this->context();
@@ -118,6 +128,11 @@ final class RunwireBinding
         $this->assertContext($context['runtime'], $context['request'], $context['scope']);
     }
 
+    /**
+     * @template TResult
+     * @param callable():TResult $callback
+     * @return TResult
+     */
     public function withRunwire(
         RuntimeContext $runtime,
         callable $callback,
@@ -210,6 +225,7 @@ final class RunwireBinding
     }
 
     /**
+     * @param Fiber<mixed, mixed, mixed, mixed>|null $fiber
      * @param array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null}|null $context
      */
     private function setContext(?Fiber $fiber, ?array $context): void

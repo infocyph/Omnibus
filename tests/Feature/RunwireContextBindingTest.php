@@ -217,7 +217,14 @@ test('Worker idle waiting borrows a Runwire coroutine scope and retains synchron
 
     $coroutines = new CoroutineRuntime();
     $coroutines->run(function (CoroutineScope $scope) use ($worker, $runtime, $request): void {
-        $worker->withRunwire($runtime, fn(): null => $worker->run() ?? null, $request, $scope);
+        $worker->withRunwire(
+            $runtime,
+            static function () use ($worker): void {
+                $worker->run();
+            },
+            $request,
+            $scope,
+        );
     });
 
     $fallback = new RunwireBinding();
