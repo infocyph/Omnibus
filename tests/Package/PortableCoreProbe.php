@@ -17,6 +17,7 @@ use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\Retry\ExponentialRetryStrategy;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
 use RuntimeException;
+use stdClass;
 
 $autoload = $argv[1] ?? '';
 if ($autoload === '' || !is_file($autoload)) {
@@ -29,19 +30,16 @@ if (extension_loaded('pcntl') || extension_loaded('posix')) {
     throw new RuntimeException('Portable-core probe must run with PCNTL and POSIX unavailable.');
 }
 
-final readonly class PortableCoreMessage
-{
-    public function __construct(public string $value) {}
-}
-
 $clock = new SystemClock();
 $transport = new InMemoryTransport($clock);
-$transport->send(new Envelope(new PortableCoreMessage('portable')), 'portable');
+$message = new stdClass();
+$message->value = 'portable';
+$transport->send(new Envelope($message), 'portable');
 $handled = 0;
 $consumer = new Consumer(
     $transport,
     new HandlerInvoker(new HandlerMap([
-        PortableCoreMessage::class => static function (PortableCoreMessage $message) use (&$handled): void {
+        stdClass::class => static function (stdClass $message) use (&$handled): void {
             if ($message->value !== 'portable') {
                 throw new RuntimeException('Portable worker received the wrong message.');
             }
