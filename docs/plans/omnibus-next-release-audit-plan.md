@@ -4,7 +4,7 @@ Date: 2026-10-07 (Asia/Dhaka). Audited production revision: `17a86f28215b36f237a
 
 Target: **3.0.0 directly from 2.6**. The user has selected the next major and the full improvement scope; there is no intermediate patch/minor release in this plan.
 
-Status: audit and plan update complete; all implementation batches remain pending. The checkout is not ready to certify 3.0.0. Updating this plan does not implement, tag, or publish the release.
+Status: **Batch 0 implementation complete; Batch 1 is next.** The checkout is not ready to certify 3.0.0. O07 remains an explicit inherited release blocker until Batches 1–2 remove both complexity violations. No release has been tagged or published.
 
 Engineering authority: [PHPForge engineering principles](../../vendor/infocyph/phpforge/resources/engineering-principles.md) and [agent workflow](../../vendor/infocyph/phpforge/resources/AGENTS.md), as installed during this audit.
 
@@ -215,17 +215,17 @@ No new NATS/Kafka/AMQP/SQS SDK adapter, default parallel handler execution, time
 
 ## Implementation batches and acceptance gates
 
-| Batch | Deliverable | Depends on | Findings / updates |
-| --- | --- | --- | --- |
-| 0 | Reliable inventory and reproducible 2.6 baselines | Audit | O08, baseline evidence |
-| 1 | Queue, storage, and workflow integrity | 0 | O02, O03, O05, O06; DB part of O07 |
-| 2 | Child ownership, circuit recovery, remaining static repairs | 1 | O01, O04; remaining O07 |
-| 3 | New dependency baseline and portable core | 2 | UID 6, CacheLayer 4, DBLayer 6, Runwire 2.1.1; U01 |
-| 4 | Passed-instance Runwire composition | 3 | Full runtime contract above |
-| 5 | Lease, cancellation, ambiguous-delivery recovery | 4 | U02, U06 |
-| 6 | Measured performance, structure, and storage improvements | 5 | U03, U04, U05, U07 |
-| 7 | 3.0 migration, executable examples, consumer packaging | 6 | U08, all public changes |
-| 8 | Exact-candidate release certification | 7 | All release gates |
+| Batch | Deliverable | Depends on | Findings / updates | Status |
+| --- | --- | --- | --- | --- |
+| 0 | Reliable inventory and reproducible 2.6 baselines | Audit | O08, baseline evidence | **Complete** |
+| 1 | Queue, storage, and workflow integrity | 0 | O02, O03, O05, O06; DB part of O07 | **Next** |
+| 2 | Child ownership, circuit recovery, remaining static repairs | 1 | O01, O04; remaining O07 | Pending |
+| 3 | New dependency baseline and portable core | 2 | UID 6, CacheLayer 4, DBLayer 6, Runwire 2.1.1; U01 | Pending |
+| 4 | Passed-instance Runwire composition | 3 | Full runtime contract above | Pending |
+| 5 | Lease, cancellation, ambiguous-delivery recovery | 4 | U02, U06 | Pending |
+| 6 | Measured performance, structure, and storage improvements | 5 | U03, U04, U05, U07 | Pending |
+| 7 | 3.0 migration, executable examples, consumer packaging | 6 | U08, all public changes | Pending |
+| 8 | Exact-candidate release certification | 7 | All release gates | Pending |
 
 Implement in this order; keep source-mutating processors sequential and reuse successful analyzer results. Each batch should be reviewable with its production changes, focused regressions, updated relevant docs, and recorded validation. Any production change after certification requires checks appropriate to that change and renewed final-SHA evidence.
 
@@ -233,13 +233,13 @@ Implement in this order; keep source-mutating processors sequential and reuse su
 
 Owners: integration fixtures, repository CI wrapper, existing benchmark/soak scripts, evidence tracker.
 
-- [ ] Fix O08 with explicit required-service manifests for full, replica, and optional local lanes. Add focused discovery regressions and require nonzero expected case counts per selected driver.
-- [ ] Capture the current 2.6 revision, resolved dependency lock, PHP/extensions, service versions, test inventory, and existing O07 failures. Keep the historical 192-test result distinct from the expanded matrix.
-- [ ] Establish request-host and durable-consumer baselines **before production changes**, with warm/cold runs, representative payload/backlog sizes, failure paths, and several concurrency levels. Do not count incorrect responses as successful throughput.
-- [ ] Declare workload-specific throughput, tail-latency, error/timeout, queue-growth, CPU/connection, and RSS budgets using those baselines. Keep measured workload definitions stable through the remaining batches.
-- [ ] Preserve logs/results and harness metadata in reproducible artifacts; reuse PHPForge's installed benchmark/soak support where it covers the workload.
+- [x] Fix O08 with explicit required-service manifests for full, replica, and optional local lanes. Focused discovery regressions now fail required lanes on missing drivers/credentials/datasets; the full manifest accounts for MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, Redis, Valkey, and Memcached, while the replica lane remains intentionally narrower.
+- [x] Capture the current 2.6 revision, exact resolved direct integration versions, PHP/extensions, PHPForge workflow/service image versions, historical test inventory, expanded strict-matrix evidence, and the two inherited O07 failures. The repository intentionally keeps no tracked `composer.lock`; exact CI resolution metadata is retained instead of changing that policy.
+- [x] Establish request-host and durable-consumer baselines **before production changes**, with cold/warm HTTP paths, validated success/failure responses, concurrency 1/2/4, and a 2,000-message two-connection durable SQLite drain.
+- [x] Declare workload-specific throughput, tail-latency, error/timeout, queue-growth, CPU/connection, and RSS budgets. Stable matched-environment release comparison keeps the plan-wide maximum 2% median successful-RPM regression; resource/tail budgets are recorded with the baseline artifact.
+- [x] Preserve baseline metrics, environment/harness metadata, dependency/service versions, budgets, and source/run identities in `docs/evidence/omnibus-2.6-baseline.json`. PHPForge representative benchmark validation passed on PHP 8.4 and 8.5.
 
-Exit gate: a missing required backend fails discovery; the intended full matrix is accounted for, and immutable baseline artifacts exist. The known 2.6 defects/static failures remain explicitly labelled, not converted into acceptable candidate failures.
+Exit gate: **met.** Missing required backends fail discovery, the intended full matrix is explicitly accounted for, and the committed baseline artifact fixes the comparison inputs. The two O07 complexity violations remain labelled as inherited 2.6 release blockers and are not accepted as candidate failures.
 
 ### Batch 1 — Queue, storage, and workflow integrity
 
