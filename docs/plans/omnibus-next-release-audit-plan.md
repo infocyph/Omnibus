@@ -218,8 +218,8 @@ No new NATS/Kafka/AMQP/SQS SDK adapter, default parallel handler execution, time
 | Batch | Deliverable | Depends on | Findings / updates | Status |
 | --- | --- | --- | --- | --- |
 | 0 | Reliable inventory and reproducible 2.6 baselines | Audit | O08, baseline evidence | **Complete** |
-| 1 | Queue, storage, and workflow integrity | 0 | O02, O03, O05, O06; DB part of O07 | **Next** |
-| 2 | Child ownership, circuit recovery, remaining static repairs | 1 | O01, O04; remaining O07 | Pending |
+| 1 | Queue, storage, and workflow integrity | 0 | O02, O03, O05, O06; DB part of O07 | **Complete** |
+| 2 | Child ownership, circuit recovery, remaining static repairs | 1 | O01, O04; remaining O07 | **Next** |
 | 3 | New dependency baseline and portable core | 2 | UID 6, CacheLayer 4, DBLayer 6, Runwire 2.1.1; U01 | Pending |
 | 4 | Passed-instance Runwire composition | 3 | Full runtime contract above | Pending |
 | 5 | Lease, cancellation, ambiguous-delivery recovery | 4 | U02, U06 | Pending |
@@ -245,14 +245,14 @@ Exit gate: **met.** Missing required backends fail discovery, the intended full 
 
 Owners: DB/Redis transports, `StoredPayload`, failure hydration, workflow stores/coordinator/scope, focused settlement tests.
 
-- [ ] Turn O02/O03/O05/O06 reproductions into regressions that fail against the audited code.
-- [ ] Handle malformed DB wrappers inside the poison boundary, keep healthy neighbors consumable, preserve bounded inspection bytes, and persist terminal failure before destructive rejection.
-- [ ] Enforce one legal workflow identity before handlers or mutations; reject conflicting/repeated stamps and duplicate in-memory workflow message IDs without partial insertion.
-- [ ] Preflight Redis/Valkey batch metadata and key types before mutations, including exact increment boundaries and reclaim candidates; compare all affected keys on rejection.
-- [ ] Simplify `DBLayerTransport::acknowledgeWorkflow()` under the unchanged O07 budgets while retaining same-connection atomic settlement and cross-store recovery semantics.
-- [ ] Run relevant SQL tests on all durable drivers and Lua tests on real Redis/Valkey; retain legacy/binary envelope compatibility and stale-receipt protections.
+- [x] Turn O02/O03/O05/O06 reproductions into regressions that fail against the audited code.
+- [x] Handle malformed DB wrappers inside the poison boundary, keep healthy neighbors consumable, preserve bounded inspection bytes, and persist terminal failure before destructive rejection.
+- [x] Enforce one legal workflow identity before handlers or mutations; reject conflicting/repeated stamps and duplicate in-memory workflow message IDs without partial insertion.
+- [x] Preflight Redis/Valkey batch metadata and key types before mutations, including exact increment boundaries and reclaim candidates; compare all affected keys on rejection.
+- [x] Simplify `DBLayerTransport::acknowledgeWorkflow()` under the unchanged O07 budgets while retaining same-connection atomic settlement and cross-store recovery semantics.
+- [x] Run relevant SQL tests on all durable drivers and Lua tests on real Redis/Valkey; retain legacy/binary envelope compatibility and stale-receipt protections.
 
-Exit gate: O02/O03/O05/O06 regressions pass, no healthy reservation is silently stranded by a poison neighbor, invalid receive leaves Redis state unchanged, and the DB O07 violation is resolved. The remaining native O07 violation is tracked for Batch 2.
+Exit gate: **met.** O02/O03/O05/O06 regressions pass under the strict service matrix; malformed storage wrappers no longer strand healthy neighbors; corrupt Redis/Valkey receive preflight leaves state unchanged; and the DBLayer O07 violation is resolved. Exact-SHA GitHub Actions on `49944de40c7197631f8953e083f172802b67aaa0` passed all four QA combinations, both representative benchmarks, clean install, and replica-affinity. Analysis reports only the native `NativeWorkerPoolBackend::supervise()` complexity violation, intentionally carried into Batch 2.
 
 ### Batch 2 — Process ownership and shared circuit state
 
