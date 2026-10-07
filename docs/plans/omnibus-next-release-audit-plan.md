@@ -283,14 +283,14 @@ Exit gate: **met.** Composer resolves UID 6.0, CacheLayer 4.0, DBLayer 6.0, and 
 
 Owners: existing bus/consumer/worker entry points, minimal cohesive binding owner, execution scopes, DB/Cache integration forwarding.
 
-- [ ] Implement the operation-bounded passed-instance contract for runtime/request/scope, with `finally` restoration and no global discovery.
-- [ ] Cover framework-to-Omnibus and intermediary forwarding with exact object identity, nested bindings, throws, cross-runtime requests, stale/completed scopes, process changes, and host-provided replacement contexts.
-- [ ] Extend context coverage across dispatch, receive, handler admission, retry, durable mutations, settlement, and idle waits. Use DBLayer's `withRunwire()`/cooperative backoff and CacheLayer's matching host-owned `share()` boundary.
-- [ ] Preserve normal behavior when Runwire or a relevant capability is absent; distinguish absence from invalid binding. Test coroutine-capable and synchronous fallback waits without inventing asynchronous PDO/SDK guarantees.
-- [ ] Keep standalone supervisor selection explicit. Verify no implicit loop start/stop, forks, foreign child reaping, host signal changes, resource closure, request completion, or borrowed scope cancellation.
-- [ ] Reuse one bus/consumer across requests/tasks/tenants and check that runtime, attributes, leases, and connection state are restored; use task-isolated leased DB connections where concurrency requires them.
+- [x] Implement the operation-bounded passed-instance contract for runtime/request/scope, with `finally` restoration and no global discovery.
+- [x] Cover framework-to-Omnibus and intermediary forwarding with exact object identity, nested bindings, throws, cross-runtime requests, stale/completed scopes, process changes, and host-provided replacement contexts.
+- [x] Extend context coverage across dispatch, receive, handler admission, retry, durable mutations, settlement, and idle waits. Use DBLayer's `withRunwire()`/cooperative backoff and CacheLayer's matching host-owned `share()` boundary.
+- [x] Preserve normal behavior when Runwire or a relevant capability is absent; distinguish absence from invalid binding. Test coroutine-capable and synchronous fallback waits without inventing asynchronous PDO/SDK guarantees.
+- [x] Keep standalone supervisor selection explicit. Verify no implicit loop start/stop, forks, foreign child reaping, host signal changes, resource closure, request completion, or borrowed scope cancellation.
+- [x] Reuse one bus/consumer across requests/tasks/tenants and check that runtime, attributes, leases, and connection state are restored; use task-isolated leased DB connections where concurrency requires them.
 
-Exit gate: all forwarding/ownership/fallback regressions pass, host replacement invalidates old admissions, and the integration's claimed capabilities are demonstrated with the released APIs.
+Exit gate: **met.** `RunwireBinding` is the single fiber-local passed-instance owner used by `MessageBus`, `Consumer`, and `Worker`; it restores nested/throwing bindings, rejects cross-runtime/completed/cancelled/stale-generation/cross-process admissions, and isolates concurrent request contexts. Registered DBLayer 6 connections borrow the exact runtime/request/scope through native `Connection::withRunwire()`; CacheLayer 4 execution is shared only when the host has already bound that exact runtime. Worker idle waits and DB settlement backoff use borrowed coroutine/cooperative waits with synchronous fallback, without starting loops or supervisors. Exact-SHA GitHub Actions run `37655035078` on `88762effecc3c86adf1b600a5ffa6515f2e86f12` passed both analysis jobs, all four QA combinations, both representative benchmarks, clean install, and replica-affinity.
 
 ### Batch 5 — Lease and recovery semantics
 
