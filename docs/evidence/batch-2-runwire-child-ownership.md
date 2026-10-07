@@ -17,3 +17,5 @@ Batch 2 fixes the native Omnibus backend so it polls only PIDs in its owned-chil
 The Runwire backend remains an explicitly selected **standalone supervisor**. It is not a host-composition path and must not be selected merely because a host later supplies Runwire runtime/request/task capabilities. Batch 4 must keep passed-instance host composition separate from `RunwireWorkerPoolBackend`.
 
 This upstream ownership limitation remains visible until the dependency floor can point at a Runwire release whose supervisor reaps only its owned children. It must not be hidden by an Omnibus test exclusion or by claiming global child ownership is host-safe.
+
+Implementation SHA before exact workflow synchronization: `9362efddae450a3f8daf8a48a072e4775aa0ab26`.
