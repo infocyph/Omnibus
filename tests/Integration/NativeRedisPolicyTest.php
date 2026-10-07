@@ -174,3 +174,46 @@ test('native Redis-compatible receive preflight leaves corrupt state unchanged',
         $redis->close();
     }
 })->with($omnibusRedisPolicyBackends);
+
+
+test('native Redis-compatible circuit state fences an older success from a newer open', function (
+    string $backend,
+    string $hostVariable,
+    string $portVariable,
+    string $passwordVariable,
+): void {
+    $redis = new Redis();
+    $redis->connect((string) getenv($hostVariable), (int) getenv($portVariable), 3);
+    $password = getenv($passwordVariable);
+    if (is_string($password) && $password !== '') {
+        $redis->auth($password);
+    }
+
+    $namespace = 'omnibus_' . $backend . '_circuit_fence_' . getmypid() . '_' . bin2hex(random_bytes(4));
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $scope = new CircuitBreakerScope(
+        new DirectExecutionScope(),
+        AtomicCounters::redis($namespace, client: $redis),
+        new RedisLockProvider($redis, $namespace . ':locks:'),
+        $clock,
+        static fn(): string => 'provider:shared-generation',
+        failureThreshold: 1,
+        recoverySeconds: 30,
+    );
+    $envelope = new Envelope(new TestCommand('shared-generation'));
+
+    try {
+        expect($scope->run($envelope, function () use ($scope, $envelope): string {
+            expect(fn() => $scope->run(
+                $envelope,
+                static fn() => throw new RuntimeException('newer shared failure'),
+            ))->toThrow(RuntimeException::class, 'newer shared failure');
+
+            return 'older shared success';
+        }))->toBe('older shared success')
+            ->and(fn() => $scope->run($envelope, static fn(): string => 'must remain open'))
+            ->toThrow(CircuitOpen::class);
+    } finally {
+        $redis->close();
+    }
+})->with($omnibusRedisPolicyBackends);
