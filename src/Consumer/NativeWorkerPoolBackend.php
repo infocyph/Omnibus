@@ -403,7 +403,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         $this->spawnInitialWorkers($concurrency, $workerFactory);
         $fatal = null;
         while ($this->children !== [] || $this->pendingRestarts !== []) {
-            $fatal ??= $this->supervisionCycle(
+            $cycleFailure = $this->supervisionCycle(
                 $restarts,
                 $workerFactory,
                 $maximumRestarts,
@@ -412,6 +412,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
                 $lifecycleIntervalSeconds,
                 $nextLifecycleAt,
             );
+            $fatal ??= $cycleFailure;
         }
 
         if ($fatal !== null) {
