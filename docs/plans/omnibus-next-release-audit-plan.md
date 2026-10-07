@@ -83,7 +83,7 @@ Every successful invocation deletes both failure and open-state keys. A determin
 
 Change: fence successful cleanup by the circuit state/generation admitted by that call. Ordinary successful calls must not erase an open state established after their admission. Only the currently owned recovery probe may close its matching open generation. Cover delayed successful/failed probes and expired probe ownership. Reuse CacheLayer's atomic counters and token locks; do not create a competing cache implementation.
 
-Acceptance: replay the above interleaving with real Redis/Valkey and Memcached providers; test state changes within the same clock second, multiple failures, recovery expiry, stale probes, and cleanup failure. Coordination failures after business success must not trigger automatic duplicate execution.
+Acceptance: replay the shared-state interleaving with real Redis and Valkey counters/locks; test state changes within the same clock second, multiple failures, recovery expiry, stale probes, and cleanup failure. Memcached remains covered for the token-lease capabilities it actually provides; it is not an atomic-counter circuit-state backend. Coordination failures after business success must not trigger automatic duplicate execution.
 
 ### O05 — In-memory workflow store permits duplicate message IDs (medium)
 
@@ -258,13 +258,13 @@ Exit gate: **met.** O02/O03/O05/O06 regressions pass under the strict service ma
 
 Owners: `NativeWorkerPoolBackend`, `CircuitBreakerScope`, fork-safety/policy fixtures.
 
-- [ ] Fix O01 by reaping only owned PIDs; cover unrelated child status, concurrent owned exits, EINTR, missing owned children, restart exhaustion, clean recycle, stop-time restart cancellation, and shutdown escalation.
-- [ ] Fence O04 success/probe transitions with admission generation and current token ownership. Reproduce stale success and expired-probe interleavings deterministically on shared providers.
-- [ ] Check standalone Runwire supervisor child ownership separately, using its released implementation and tests. Keep host-managed operation outside standalone supervision.
-- [ ] Resolve the native `supervise()` O07 violation through cohesive private logic; keep class 80 / function 12 and the installed detector.
-- [ ] Run focused lifecycle/cache tests, `composer ic:test:static`, and the full existing quality suite; retain signal restoration and primary-exception behavior.
+- [x] Fix O01 by reaping only owned PIDs; cover unrelated child status, concurrent owned exits, EINTR, missing owned children, restart exhaustion, clean recycle, stop-time restart cancellation, and shutdown escalation.
+- [x] Fence O04 success/probe transitions with admission generation and current token ownership. Reproduce stale success and expired-probe interleavings deterministically on shared providers.
+- [x] Check standalone Runwire supervisor child ownership separately, using its released implementation and tests. Keep host-managed operation outside standalone supervision.
+- [x] Resolve the native `supervise()` O07 violation through cohesive private logic; keep class 80 / function 12 and the installed detector.
+- [x] Run focused lifecycle/cache tests, `composer ic:test:static`, and the full existing quality suite; retain signal restoration and primary-exception behavior.
 
-Exit gate: O01/O04 and both O07 failures are closed, the host retains ownership of external children/signals, and CacheLayer policies cannot erase a newer circuit state.
+Exit gate: **met.** O01/O04 and both O07 failures are closed. The native backend reaps only its owned PID registry and preserves unrelated host children; circuit success cleanup is generation-fenced and recovery probes must retain current token ownership. Redis/Valkey real-provider interleavings pass, Memcached remains covered for its supported token-lease contract, and released Runwire standalone supervision is explicitly documented as process-wide rather than host-composable. Exact-SHA GitHub Actions run `37648347700` on `d73a85c90648014e64b24bff9e5a25bc165531fa` passed both analysis jobs, all four QA combinations, both representative benchmarks, clean install, and replica-affinity.
 
 ### Batch 3 — Dependency adoption and portability
 
