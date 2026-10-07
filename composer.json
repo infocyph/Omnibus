@@ -40,14 +40,14 @@
     "suggest": {
         "ext-memcached": "Optional for Memcached-backed uniqueness and overlap leases.",
         "ext-msgpack": "One option for a CallbackEnvelopeSerializer binary codec.",
+        "ext-pcntl": "Required for standalone native worker pools and explicit Worker signal handling.",
+        "ext-posix": "Required for standalone process signaling and native/Runwire worker-pool supervision.",
         "ext-redis": "Required by the native Redis/Valkey transport.",
         "aws/aws-sdk-php": "One option for implementing the native SQS backend boundary.",
         "infocyph/cachelayer": "Enables Omnibus CacheLayer coordination integrations; supported with CacheLayer 4.x.",
         "infocyph/dblayer": "Enables DB queue, workflow, failure-store, and after-commit integrations; supported with DBLayer 6.x.",
         "infocyph/runwire": "Enables the optional standalone WorkerPool backend and host-context integration; supported with Runwire 2.x from 2.1.1.",
-        "php-amqplib/php-amqplib": "One option for implementing the native AMQP backend boundary.",
-        "ext-pcntl": "Required for standalone native worker pools and explicit Worker signal handling.",
-        "ext-posix": "Required for standalone process signaling and native/Runwire worker-pool supervision."
+        "php-amqplib/php-amqplib": "One option for implementing the native AMQP backend boundary."
     },
     "minimum-stability": "stable",
     "prefer-stable": true,

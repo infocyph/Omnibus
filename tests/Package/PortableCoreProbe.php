@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+namespace Infocyph\Omnibus\Tests\Package;
+
 use Infocyph\Omnibus\Clock\SystemClock;
 use Infocyph\Omnibus\Consumer\Consumer;
 use Infocyph\Omnibus\Consumer\NativeWorkerPoolBackend;
@@ -14,6 +16,7 @@ use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\Retry\ExponentialRetryStrategy;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
+use RuntimeException;
 
 $autoload = $argv[1] ?? '';
 if ($autoload === '' || !is_file($autoload)) {
