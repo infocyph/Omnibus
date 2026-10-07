@@ -6,7 +6,7 @@ use Infocyph\CacheLayer\Cache\Lock\MemcachedLockProvider;
 use Infocyph\Omnibus\Consumer\DirectExecutionScope;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Integration\CacheLayer\CircuitBreakerScope;
-use Infocyph\Omnibus\Integration\CacheLayer\CircuitOpen;
+use Infocyph\Omnibus\Integration\CacheLayer\CoordinationCleanupFailedAfterExecution;
 use Infocyph\Omnibus\Integration\CacheLayer\DetachedLeaseAdapter;
 use Infocyph\Omnibus\Integration\CacheLayer\DuplicateMessage;
 use Infocyph\Omnibus\Integration\CacheLayer\UniqueSender;
@@ -68,8 +68,7 @@ test('native Memcached service preserves the unique-message lease lifecycle', fu
     expect($transport->size('work'))->toBe(0);
 });
 
-
-test('native Memcached probe ownership preserves a newer circuit generation', function (): void {
+test('native Memcached recovery probe cannot close after losing ownership', function (): void {
     $memcached = new Memcached();
     $memcached->addServer((string) getenv('IC_MEMCACHED_HOST'), (int) getenv('IC_MEMCACHED_PORT'));
 
@@ -80,22 +79,28 @@ test('native Memcached probe ownership preserves a newer circuit generation', fu
         new InMemoryCounterStore($clock),
         new MemcachedLockProvider($memcached, $namespace),
         $clock,
-        static fn(): string => 'provider:memcached-fence',
+        static fn(): string => 'provider:memcached-probe',
         failureThreshold: 1,
-        recoverySeconds: 30,
+        recoverySeconds: 2,
+        probeLeaseSeconds: 1,
     );
-    $envelope = new Envelope(new TestCommand('memcached-fence'));
+    $envelope = new Envelope(new TestCommand('memcached-probe'));
 
-    expect($scope->run($envelope, function () use ($scope, $envelope): string {
-        expect(fn() => $scope->run(
-            $envelope,
-            static fn() => throw new RuntimeException('newer memcached failure'),
-        ))->toThrow(RuntimeException::class, 'newer memcached failure');
+    expect(fn() => $scope->run(
+        $envelope,
+        static fn() => throw new RuntimeException('open memcached circuit'),
+    ))->toThrow(RuntimeException::class, 'open memcached circuit');
 
-        return 'older memcached success';
-    }))->toBe('older memcached success')
-        ->and(fn() => $scope->run($envelope, static fn(): string => 'must remain open'))
-        ->toThrow(CircuitOpen::class);
+    $clock->advance('+3 seconds');
+
+    expect(fn() => $scope->run($envelope, static function (): string {
+        usleep(1_500_000);
+
+        return 'business succeeded';
+    }))->toThrow(CoordinationCleanupFailedAfterExecution::class);
+
+    expect($scope->run($envelope, static fn(): string => 'fresh recovery'))
+        ->toBe('fresh recovery');
 
     $memcached->quit();
 });
