@@ -219,9 +219,9 @@ No new NATS/Kafka/AMQP/SQS SDK adapter, default parallel handler execution, time
 | --- | --- | --- | --- | --- |
 | 0 | Reliable inventory and reproducible 2.6 baselines | Audit | O08, baseline evidence | **Complete** |
 | 1 | Queue, storage, and workflow integrity | 0 | O02, O03, O05, O06; DB part of O07 | **Complete** |
-| 2 | Child ownership, circuit recovery, remaining static repairs | 1 | O01, O04; remaining O07 | **Next** |
-| 3 | New dependency baseline and portable core | 2 | UID 6, CacheLayer 4, DBLayer 6, Runwire 2.1.1; U01 | Pending |
-| 4 | Passed-instance Runwire composition | 3 | Full runtime contract above | Pending |
+| 2 | Child ownership, circuit recovery, remaining static repairs | 1 | O01, O04; remaining O07 | **Complete** |
+| 3 | New dependency baseline and portable core | 2 | UID 6, CacheLayer 4, DBLayer 6, Runwire 2.1.1; U01 | **Complete** |
+| 4 | Passed-instance Runwire composition | 3 | Full runtime contract above | **Next** |
 | 5 | Lease, cancellation, ambiguous-delivery recovery | 4 | U02, U06 | Pending |
 | 6 | Measured performance, structure, and storage improvements | 5 | U03, U04, U05, U07 | Pending |
 | 7 | 3.0 migration, executable examples, consumer packaging | 6 | U08, all public changes | Pending |
@@ -270,14 +270,14 @@ Exit gate: **met.** O01/O04 and both O07 failures are closed. The native backend
 
 Owners: Composer declarations, adapter bootstrap, `Worker`/options/pools, core independence tests, integration matrix.
 
-- [ ] Adopt the dependency table and optional `conflict` policy, refresh the local resolution, and update package suggestions/platform documentation. Do not commit an ignored library lockfile accidentally.
-- [ ] Implement U01: remove universal PCNTL/POSIX requirements, keep standalone native capabilities explicit, and make ordinary/default worker execution safe when signal functions/constants are unavailable. A caller explicitly requesting unsupported signal handling gets an actionable startup error.
-- [ ] Verify genuine no-PCNTL/no-POSIX production installation and execution; a mock with those extensions still loaded is insufficient. Preserve supported standalone Unix signal behavior.
-- [ ] Test exact released dependencies, lowest supported resolution, and current stable supported ranges on PHP 8.4/8.5. Prove optional packages remain optional in isolated consumers.
-- [ ] Revalidate DBLayer batch sizing, writer affinity, query/transaction attempt limits, nested after-commit/rollback callbacks, and binary payloads on each SQL driver.
-- [ ] Revalidate CacheLayer detached/token leases, retry TTL extension, atomic counters, overlap loss, rate limiting, and circuit recovery on Redis/Valkey/Memcached; check cold/warm and post-fork UID generation with unchanged durable IDs.
+- [x] Adopt the dependency table and optional `conflict` policy, refresh the local resolution, and update package suggestions/platform documentation. Do not commit an ignored library lockfile accidentally.
+- [x] Implement U01: remove universal PCNTL/POSIX requirements, keep standalone native capabilities explicit, and make ordinary/default worker execution safe when signal functions/constants are unavailable. A caller explicitly requesting unsupported signal handling gets an actionable startup error.
+- [x] Verify genuine no-PCNTL/no-POSIX production installation and execution; a mock with those extensions still loaded is insufficient. Preserve supported standalone Unix signal behavior.
+- [x] Test exact released dependencies, lowest supported resolution, and current stable supported ranges on PHP 8.4/8.5. Prove optional packages remain optional in isolated consumers.
+- [x] Revalidate DBLayer batch sizing, writer affinity, query/transaction attempt limits, nested after-commit/rollback callbacks, and binary payloads on each SQL driver.
+- [x] Revalidate CacheLayer detached/token leases, retry TTL extension, atomic counters, overlap loss, rate limiting, and circuit recovery on Redis/Valkey/Memcached; check cold/warm and post-fork UID generation with unchanged durable IDs.
 
-Exit gate: supported Composer combinations resolve, unsupported generations fail at resolution, no-optional/no-process-extension consumers work, and released integrations pass their real backend matrix. Intentional signal-option changes have migration coverage.
+Exit gate: **met.** Composer resolves UID 6.0, CacheLayer 4.0, DBLayer 6.0, and Runwire 2.1.1 on PHP 8.4/8.5 under lowest and stable dependency modes; unsupported optional generations are rejected by explicit conflicts. Production `--no-dev` installation installs UID only from the Infocyph integration stack and its platform check requires `ext-ctype`, PHP, and 64-bit PHP but not PCNTL/POSIX. The CI-only Alpine PHP 8.4 probe executes a normal Worker with PCNTL/POSIX genuinely absent and verifies explicit signal/native-pool requests fail cleanly. The strict SQL/Redis/Valkey/Memcached matrix remains green, and the UID 6 fixed-timestamp fork regression proves post-fork monotonic state separation without changing the canonical 26-character ULID format. Exact-SHA GitHub Actions run `37651523235` on `cbe521d1f701cd779d7c3669770532c645fdba5b` passed both analysis jobs, all four QA combinations, both representative benchmarks, clean install, and replica-affinity. Intentional signal-default changes are documented in the 3.0 migration guide.
 
 ### Batch 4 — Borrow the host's Runwire context
 
