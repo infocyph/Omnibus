@@ -215,6 +215,7 @@ function httpBaselines(): array
     try {
         $deadline = microtime(true) + 5.0;
         $ready = false;
+        usleep(100_000);
         do {
             $probe = stream_socket_client("tcp://127.0.0.1:$port", $code, $error, 0.1);
             if (is_resource($probe)) {

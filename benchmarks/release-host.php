@@ -43,15 +43,15 @@ try {
     }
 
     http_response_code(200);
-    fwrite(STDOUT, json_encode(['ok' => true, 'value' => $value], JSON_THROW_ON_ERROR));
+    file_put_contents('php://output', json_encode(['ok' => true, 'value' => $value], JSON_THROW_ON_ERROR));
 } catch (Throwable $failure) {
     if (!$failurePath || $failure->getMessage() !== 'expected benchmark failure') {
         http_response_code(500);
-        fwrite(STDOUT, json_encode(['ok' => false, 'error' => 'unexpected'], JSON_THROW_ON_ERROR));
+        file_put_contents('php://output', json_encode(['ok' => false, 'error' => 'unexpected'], JSON_THROW_ON_ERROR));
 
         return;
     }
 
     http_response_code(503);
-    fwrite(STDOUT, json_encode(['ok' => false, 'error' => 'expected'], JSON_THROW_ON_ERROR));
+    file_put_contents('php://output', json_encode(['ok' => false, 'error' => 'expected'], JSON_THROW_ON_ERROR));
 }
