@@ -1,6 +1,42 @@
 Upgrading
 =========
 
+3.0.0
+-----
+
+Omnibus 3.0 raises the supported integration floor to UID 6, CacheLayer 4,
+DBLayer 6, and Runwire 2.1.1. CacheLayer, DBLayer, and Runwire remain optional
+consumer integrations. Composer rejects unsupported installed generations
+rather than requiring those packages for consumers that do not select them.
+
+``ext-pcntl`` and ``ext-posix`` are no longer universal package requirements.
+Ordinary request/FPM, dispatch, ``Consumer``, and single-process ``Worker``
+usage can install without them. ``WorkerOptions::handleSignals`` now defaults
+to ``false``. Applications that relied on Worker-installed SIGTERM/SIGINT
+handlers must opt in explicitly:
+
+.. code-block:: php
+
+   $worker = new Worker(
+       $consumer,
+       new WorkerOptions(handleSignals: true),
+   );
+
+That opt-in requires PCNTL. The standalone native ``WorkerPool`` requires
+PCNTL/POSIX and fails immediately with an actionable capability error when they
+are unavailable. ``RunwireWorkerPoolBackend`` remains explicitly selected and
+targets Runwire 2.x from 2.1.1; installing Runwire never changes the selected
+backend automatically.
+
+UID 6 preserves Omnibus's canonical monotonic ULID storage format while adding
+its own Composer-enforced 64-bit PHP and ``ext-ctype`` platform requirements.
+No durable identifier/schema migration is introduced by this dependency bump.
+
+Database and coordination adapters now target DBLayer 6.x and CacheLayer 4.x.
+The adapter ownership boundaries remain unchanged: DBLayer owns database
+execution/transaction policy, CacheLayer owns lock/counter primitives, and
+Omnibus owns delivery/workflow semantics.
+
 2.6.0
 -----
 

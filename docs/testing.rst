@@ -54,7 +54,8 @@ The Omnibus suite covers:
   and explicit no-zombie checks;
 * DBLayer construction after fork inside the worker factory;
 * core/FPM-compatible Worker execution without constructing Runwire or a pool
-  backend, while mandatory PCNTL/POSIX Composer requirements remain present.
+  backend, with PCNTL/POSIX absent from Omnibus's production requirements and
+  explicit process features guarded at startup.
 
 Commands
 --------
@@ -94,8 +95,9 @@ release matrix.
 Run the full local parity matrix with PHP 8.4 or 8.5 and the ``pdo_sqlite``,
 ``pdo_mysql``, ``pdo_pgsql``, ``pdo_sqlsrv``, ``redis`` and
 ``memcached`` extensions installed in the PHP runtime executing Composer.
-PCNTL/POSIX are mandatory Omnibus runtime requirements. Starting Docker
-services alone does not install extensions into host PHP. Check that runtime
+PCNTL/POSIX are needed only for standalone process/signal tests that select
+those capabilities; they are not Omnibus core runtime requirements. Starting
+Docker services alone does not install extensions into host PHP. Check that runtime
 with ``composer ic:doctor``.
 
 For disposable local integration services, start the repository's service
@@ -150,6 +152,9 @@ The remaining local scripts are intentionally package-specific:
   lifetime of an arbitrary long-running worker command.
 
 CI runs supported PHP versions with lowest and stable dependency resolution,
-clean production installation, static analysis, architecture checks, live
-database/Redis services, strict integration discovery, representative benchmark
-artifact validation, and strict Sphinx documentation.
+including UID 6, CacheLayer 4, DBLayer 6, and Runwire 2.1.1; clean production
+installation; static analysis; architecture checks; live database/Redis
+services; strict integration discovery; representative benchmark artifact
+validation; and strict Sphinx documentation. The package-level portable-core
+probe is kept separate so it can be executed in a runtime where PCNTL/POSIX are
+actually unavailable rather than simulated as missing.

@@ -10,13 +10,18 @@ Install the standalone library:
 
    composer require infocyph/omnibus
 
-The core runtime requires UID and the PSR clock and event-dispatcher contracts.
-Install an optional integration only when it is selected:
+The core runtime requires UID 6 and the PSR clock and event-dispatcher
+contracts. UID 6 carries its own 64-bit PHP and ``ext-ctype`` platform
+requirements. Install an optional integration only when it is selected:
 
 .. code-block:: console
 
-   composer require infocyph/dblayer:^5.1
-   composer require infocyph/cachelayer:^3.4
+   composer require infocyph/dblayer:^6.0
+   composer require infocyph/cachelayer:^4.0
+
+PCNTL and POSIX are not core installation requirements. Explicit
+``WorkerOptions(handleSignals: true)`` requires PCNTL, while standalone
+process-pool backends require the process extensions they use.
 
 The Redis adapter uses the ``RedisClient`` contract. ``CallbackRedisClient`` can
 adapt phpredis, Predis, or another client without making that client a core

@@ -36,7 +36,7 @@ worker factory after fork.
 DBLayer integration
 -------------------
 
-The optional database adapters target DBLayer 5.1 and use an existing
+The optional database adapters target DBLayer 6.x and use an existing
 ``Connection``. Migrations execute ``QueueSchema`` statements outside Omnibus
 runtime paths. DBLayer owns driver behavior, bind sizing, database execution,
 transaction retry, and after-commit callback lifecycle. Omnibus owns message
@@ -51,7 +51,7 @@ uses only ``AfterCommitDispatcher`` and the connection's transaction callbacks.
 CacheLayer integration
 ----------------------
 
-The policy adapters target CacheLayer 3.4. Uniqueness, overlap protection,
+The policy adapters target CacheLayer 4.x. Uniqueness, overlap protection,
 fixed-window rate limiting, and circuit breaking
 adapt CacheLayer's existing lock and atomic-counter contracts. Omnibus does not
 introduce a competing cache-provider hierarchy.

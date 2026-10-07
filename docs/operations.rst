@@ -24,14 +24,15 @@ primitive and never creates concurrency itself.
 
 ``Worker`` adds a long-running loop around one ``Consumer``. ``WorkerOptions``
 controls queue, prefetch, visibility, idle backoff and jitter, optional
-message/runtime/absolute-memory/memory-growth recycling limits, and graceful
-SIGTERM/SIGINT handling. Prefetch and concurrency are independent: prefetch
+message/runtime/absolute-memory/memory-growth recycling limits, and optional
+graceful SIGTERM/SIGINT handling. Signal handling is disabled by default in
+3.0 so an ordinary Worker remains portable. Prefetch and concurrency are independent: prefetch
 bounds one receive call; concurrency is the number of worker processes.
 
 Hosts may pass an optional ``WorkerLifecycle`` runtime integration to
 ``Worker``. It provides heartbeat and external graceful-stop polling without
-depending on signal delivery for those lifecycle decisions. Omnibus 2.6 still
-requires PCNTL and POSIX at package/runtime installation level:
+depending on signal delivery for those lifecycle decisions. PCNTL and POSIX are
+not package-level requirements in 3.0:
 
 .. code-block:: php
 
@@ -66,14 +67,16 @@ handler already executing. Long-running handlers that need mid-execution
 cancellation must use their own cooperative cancellation mechanism.
 
 Signals and ``WorkerLifecycle`` may be used together. Lifecycle integration
-can run with ``WorkerOptions::handleSignals`` disabled, but Omnibus itself now
-requires the PCNTL and POSIX extensions. ``WorkerOptions`` remains
-value/configuration policy and does not contain the lifecycle object.
+works with the default ``WorkerOptions::handleSignals=false``. Set
+``handleSignals: true`` only when the process should install SIGTERM/SIGINT
+handlers; Omnibus then requires PCNTL and fails at startup with an actionable
+error when it is unavailable. ``WorkerOptions`` remains value/configuration
+policy and does not contain the lifecycle object.
 
 ``WorkerPool`` is an optional fixed-process supervisor. Its native Unix/Linux
-backend uses the mandatory ``ext-pcntl`` and ``ext-posix`` runtime
-extensions and remains usable without Runwire. Runwire 1.x is an optional
-alternative backend and must be selected explicitly; ordinary FPM/request,
+backend requires ``ext-pcntl`` and ``ext-posix`` when selected and remains
+usable without Runwire. Runwire 2.x from 2.1.1 is an optional alternative
+standalone backend and must be selected explicitly; ordinary FPM/request,
 Consumer, and single-process Worker usage does not construct either pool
 backend. The pool keeps the configured concurrency
 stable, replaces cleanly recycled workers, and respawns crashed workers with a
@@ -98,8 +101,11 @@ from a clean process state.
 Do not construct those resources in the pool parent and then reuse inherited
 handles in children. Omnibus tests record parent/factory/handler PIDs and build
 DBLayer connections inside the child factory to enforce this ownership model.
-The native and Runwire backends both reap every child before returning or
-propagating restart-budget exhaustion.
+The native backend reaps only the child PIDs it owns before returning or
+propagating restart-budget exhaustion. The released standalone Runwire
+supervisor remains a process-wide child reaper, so do not embed that standalone
+backend inside a host that owns unrelated child processes; host-context Runwire
+composition is a separate integration boundary.
 
 A host-owned parent ``WorkerLifecycle`` may be passed to ``WorkerPool`` for
 heartbeat and cooperative stop policy. Process-bound child lifecycle/resources
@@ -166,7 +172,7 @@ The in-memory transport is process-local and therefore does not become shared
 by using ``WorkerPool``. Parallel workers require a durable/shared transport
 such as DBLayer, Redis/Valkey, AMQP or SQS.
 
-DBLayer integrations are tested against DBLayer 5.1. MySQL, MariaDB,
+DBLayer integrations are tested against DBLayer 6.x. MySQL, MariaDB,
 PostgreSQL, SQLite and Microsoft SQL Server use their own DBLayer driver paths;
 Omnibus keeps vendor-specific claim/locking syntax inside the DBLayer adapter
 rather than exposing database knobs through the worker API. SQLite parallel

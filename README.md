@@ -24,20 +24,18 @@ composer require infocyph/omnibus
 Requirements:
 
 - PHP `^8.4`
-- `ext-pcntl`
-- `ext-posix`
-- `infocyph/uid`
-- `psr/clock`
-- `psr/event-dispatcher`
+- `infocyph/uid:^6.0`
+- `psr/clock:^1.0`
+- `psr/event-dispatcher:^1.0`
 
-DBLayer, CacheLayer, Redis/Valkey clients, broker SDKs, and Runwire are optional
-and load only when their adapters/backends are constructed. PCNTL and POSIX are
-mandatory Omnibus runtime extensions in 2.6. Request/FPM, direct CLI, Consumer,
-and single-process Worker paths still avoid creating a process-pool backend
-unless one is explicitly used.
+DBLayer, CacheLayer, Redis/Valkey clients, broker SDKs, Runwire, PCNTL, and POSIX
+remain optional capabilities. Ordinary request/FPM, direct dispatch, Consumer,
+and single-process Worker paths do not require process extensions. Explicit
+Worker signal handling requires `ext-pcntl`; the standalone native and Runwire
+WorkerPool backends require the process capabilities they use.
 
-Database integrations are tested against DBLayer 5.1. CacheLayer coordination
-integrations are tested against CacheLayer 3.4. DBLayer owns database
+Database integrations support DBLayer 6.x. CacheLayer coordination integrations
+support CacheLayer 4.x. Runwire integration supports Runwire 2.x from 2.1.1. DBLayer owns database
 execution, driver behavior, effective bind limits, transaction retries, and
 after-commit callback lifecycle. Omnibus owns reservations, workflows,
 failure-state transitions, and delivery guarantees. Queue receive and workflow
@@ -121,11 +119,11 @@ worker process lifecycle. See the
 `Consumer::run()` performs one bounded receive call. `Worker` provides the
 long-running loop for one process. Hosts may supply a framework-neutral
 `WorkerLifecycle` for heartbeat and graceful external-stop policy without
-requiring signal delivery for each lifecycle decision. SIGTERM/SIGINT support
-remains available on Unix. Omnibus 2.6
-requires `ext-pcntl` and `ext-posix`; the optional `WorkerPool` uses them for
-its native fixed-process backend. Runwire 1.x remains an optional alternative
-backend and is never selected implicitly; construct PDO,
+requiring signal delivery for each lifecycle decision. `WorkerOptions`
+defaults to signal-free operation; opt into SIGTERM/SIGINT handling explicitly
+with `handleSignals: true` when `ext-pcntl` is available. The optional native
+`WorkerPool` requires `ext-pcntl` and `ext-posix`. Runwire 2.x from 2.1.1
+remains an optional explicitly selected alternative backend; construct PDO,
 Redis/Valkey, AMQP, SQS, and other process-bound resources inside its worker
 factory after fork. External Supervisor, systemd, Docker, or Kubernetes remains
 the preferred production supervisor when available.
