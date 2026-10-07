@@ -227,6 +227,7 @@ final readonly class WorkflowCoordinator
         return $envelopes;
     }
 
+    /** @param array{kind:'batch'|'chain',workflow_id:string,item_id:string,index:int} $identity */
     private function advance(array $identity, WorkflowTransition $transition): void
     {
         if (!$transition->itemChanged) {
@@ -259,6 +260,7 @@ final readonly class WorkflowCoordinator
         }
     }
 
+    /** @param array{kind:'batch'|'chain',workflow_id:string,item_id:string,index:int} $identity */
     private function emitFailureEvents(
         array $identity,
         WorkflowTransition $transition,

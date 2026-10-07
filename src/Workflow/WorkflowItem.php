@@ -28,6 +28,20 @@ final readonly class WorkflowItem
             throw new \InvalidArgumentException('Workflow item fields are invalid.');
         }
         QueueName::assert($queue);
+
+        $identity = self::identity($envelope);
+        if (
+            $identity !== null
+            && (
+                $identity['workflow_id'] !== $workflowId
+                || $identity['item_id'] !== $itemId
+                || $identity['index'] !== $index
+            )
+        ) {
+            throw new WorkflowInconsistentDelivery(
+                'Workflow item fields must match the envelope workflow identity.',
+            );
+        }
     }
 
     /** @return array{kind:'batch'|'chain',workflow_id:string,item_id:string,index:int}|null */

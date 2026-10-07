@@ -204,83 +204,6 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         return $store instanceof DBLayerWorkflowStore && $store->usesConnection($this->connection);
     }
 
-    private function rethrowWorkflowSettlementCause(TransactionException $failure): void
-    {
-        $cause = $failure->getPrevious();
-        if (
-            $cause instanceof WorkflowInconsistentDelivery
-            || $cause instanceof WorkflowNotFound
-            || $cause instanceof InvalidReservation
-        ) {
-            throw $cause;
-        }
-    }
-
-    /** @param array<string, mixed> $row */
-    private function reservationFromRow(array $row, string $queue, string $token): Reservation
-    {
-        $id = self::rowString($row, 'id');
-        $storedPayload = self::rowString($row, 'payload');
-        $messageId = self::rowString($row, 'message_id');
-        $attempt = self::rowInt($row, 'attempts') + 1;
-        $receipt = ReservationReceipt::encode($id, $token);
-
-        try {
-            $payload = StoredPayload::decode($storedPayload);
-        } catch (\Throwable $failure) {
-            return Reservation::undecodable(
-                $receipt,
-                $queue,
-                DecodeFailure::fromThrowable($storedPayload, $failure),
-                $attempt,
-                $messageId,
-            );
-        }
-
-        try {
-            $envelope = $this->serializer
-                ->decode($payload)
-                ->with(new AttemptStamp($attempt));
-
-            return Reservation::decoded($receipt, $queue, $envelope, $attempt, $messageId);
-        } catch (\Throwable $failure) {
-            return Reservation::undecodable(
-                $receipt,
-                $queue,
-                DecodeFailure::fromThrowable($payload, $failure),
-                $attempt,
-                $messageId,
-            );
-        }
-    }
-
-    private function settleWorkflow(
-        Reservation $reservation,
-        DBLayerWorkflowStore $store,
-        array $identity,
-        Connection $connection,
-    ): WorkflowTransition {
-        if (
-            $store->itemStatusForUpdate(
-                $identity['workflow_id'],
-                $identity['item_id'],
-                $identity['index'],
-            ) !== WorkflowItemStatus::Handled
-        ) {
-            throw new WorkflowInconsistentDelivery(
-                'Atomic workflow settlement requires a handled item.',
-            );
-        }
-
-        $this->deleteReservation($reservation, $connection);
-
-        return $store->succeed(
-            $identity['workflow_id'],
-            $identity['item_id'],
-            $identity['index'],
-        );
-    }
-
     /** @param array<string, mixed> $row */
     private static function rowInt(array $row, string $key): int
     {
@@ -352,6 +275,56 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         return ReservationReceipt::decode($reservation->receipt);
     }
 
+    /** @param array<string, mixed> $row */
+    private function reservationFromRow(array $row, string $queue, string $token): Reservation
+    {
+        $id = self::rowString($row, 'id');
+        $storedPayload = self::rowString($row, 'payload');
+        $messageId = self::rowString($row, 'message_id');
+        $attempt = self::rowInt($row, 'attempts') + 1;
+        $receipt = ReservationReceipt::encode($id, $token);
+
+        try {
+            $payload = StoredPayload::decode($storedPayload);
+        } catch (\Throwable $failure) {
+            return Reservation::undecodable(
+                $receipt,
+                $queue,
+                DecodeFailure::fromThrowable($storedPayload, $failure),
+                $attempt,
+                $messageId,
+            );
+        }
+
+        try {
+            $envelope = $this->serializer
+                ->decode($payload)
+                ->with(new AttemptStamp($attempt));
+
+            return Reservation::decoded($receipt, $queue, $envelope, $attempt, $messageId);
+        } catch (\Throwable $failure) {
+            return Reservation::undecodable(
+                $receipt,
+                $queue,
+                DecodeFailure::fromThrowable($payload, $failure),
+                $attempt,
+                $messageId,
+            );
+        }
+    }
+
+    private function rethrowWorkflowSettlementCause(TransactionException $failure): void
+    {
+        $cause = $failure->getPrevious();
+        if (
+            $cause instanceof WorkflowInconsistentDelivery
+            || $cause instanceof WorkflowNotFound
+            || $cause instanceof InvalidReservation
+        ) {
+            throw $cause;
+        }
+    }
+
     /**
      * @template TResult
      * @param callable():TResult $operation
@@ -397,6 +370,34 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         };
 
         return array_values($connection->select($sql, $bindings));
+    }
+
+    /** @param array{kind:'batch'|'chain',workflow_id:string,item_id:string,index:int} $identity */
+    private function settleWorkflow(
+        Reservation $reservation,
+        DBLayerWorkflowStore $store,
+        array $identity,
+        Connection $connection,
+    ): WorkflowTransition {
+        if (
+            $store->itemStatusForUpdate(
+                $identity['workflow_id'],
+                $identity['item_id'],
+                $identity['index'],
+            ) !== WorkflowItemStatus::Handled
+        ) {
+            throw new WorkflowInconsistentDelivery(
+                'Atomic workflow settlement requires a handled item.',
+            );
+        }
+
+        $this->deleteReservation($reservation, $connection);
+
+        return $store->succeed(
+            $identity['workflow_id'],
+            $identity['item_id'],
+            $identity['index'],
+        );
     }
 
     /**

@@ -214,7 +214,7 @@ if ($omnibusServiceDrivers !== []) {
                 0,
             );
 
-            $duplicateWorkflowId = '01DRIVERDUPLICATE0000000000';
+            $duplicateWorkflowId = '01DRIVERDUPLICATE000000000';
             $duplicateEnvelope = new Envelope(
                 new TestCommand('duplicate-workflow-message'),
                 [new MessageIdStamp('matrix-duplicate-message')],
@@ -223,7 +223,7 @@ if ($omnibusServiceDrivers !== []) {
                 $duplicateWorkflowId,
                 [$duplicateEnvelope, $duplicateEnvelope],
                 'work',
-            ))->toThrow(Throwable::class)
+            ))->toThrow(\Infocyph\DBLayer\Exceptions\TransactionException::class)
                 ->and($workflows->find($duplicateWorkflowId))->toBeNull()
                 ->and($workflows->findItemByMessageId('matrix-duplicate-message'))->toBeNull();
 

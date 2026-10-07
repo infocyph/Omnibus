@@ -685,3 +685,20 @@ test('in-memory workflows reject duplicate message identities atomically', funct
         ->and($second)->toBeInstanceOf(MessageIdStamp::class)
         ->and($first?->id)->not->toBe($second?->id);
 });
+
+
+test('workflow item rejects an embedded identity that disagrees with its row identity', function (): void {
+    $workflowId = str_repeat('w', 26);
+    $itemId = str_repeat('i', 26);
+    $envelope = new Envelope(new TestCommand('mismatch'), [
+        new BatchStamp(str_repeat('x', 26), $itemId, 0),
+    ]);
+
+    expect(fn() => new \Infocyph\Omnibus\Workflow\WorkflowItem(
+        $workflowId,
+        $itemId,
+        0,
+        'work',
+        $envelope,
+    ))->toThrow(WorkflowInconsistentDelivery::class);
+});

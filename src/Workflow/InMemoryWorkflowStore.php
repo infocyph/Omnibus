@@ -16,6 +16,9 @@ use Psr\Clock\ClockInterface;
 
 final class InMemoryWorkflowStore implements WorkflowStore
 {
+    /** @var array<string, array{workflow_id:string,index:int}> */
+    private array $messageIndex = [];
+
     /**
      * @var array<string, array{
      *     kind: 'batch'|'chain',
@@ -29,9 +32,6 @@ final class InMemoryWorkflowStore implements WorkflowStore
      * }>
      */
     private array $workflows = [];
-
-    /** @var array<string, array{workflow_id:string,index:int}> */
-    private array $messageIndex = [];
 
     public function __construct(private readonly ClockInterface $clock = new SystemClock()) {}
 
@@ -434,10 +434,7 @@ final class InMemoryWorkflowStore implements WorkflowStore
                 $messageId = new MessageIdStamp(ULID::generateMonotonic());
                 $envelope = $envelope->with($messageId);
             }
-            if (isset($messageIds[$messageId->id]) || isset($this->messageIndex[$messageId->id])) {
-                throw new \InvalidArgumentException('Workflow message IDs must be unique across retained workflows.');
-            }
-            $messageIds[$messageId->id] = $index;
+            $this->recordMessageId($messageIds, $messageId->id, $index);
             $stamp = $kind === 'chain'
                 ? new ChainStamp($id, $itemId, $index)
                 : new BatchStamp($id, $itemId, $index);
@@ -457,6 +454,16 @@ final class InMemoryWorkflowStore implements WorkflowStore
         foreach ($messageIds as $messageId => $index) {
             $this->messageIndex[$messageId] = ['workflow_id' => $id, 'index' => $index];
         }
+    }
+
+    /** @param array<string, int> $messageIds */
+    private function recordMessageId(array &$messageIds, string $messageId, int $index): void
+    {
+        if (isset($messageIds[$messageId]) || isset($this->messageIndex[$messageId])) {
+            throw new \InvalidArgumentException('Workflow message IDs must be unique across retained workflows.');
+        }
+
+        $messageIds[$messageId] = $index;
     }
 
     private function releaseExpiredClaims(string $id, int $now): void

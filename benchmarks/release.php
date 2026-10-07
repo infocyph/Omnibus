@@ -103,8 +103,7 @@ function workload(
     array $latencies,
     array $metadata = [],
     int $warmup = 0,
-): array
-{
+): array {
     $failed = $attempted - $successful;
     $average = $latencies === [] ? null : array_sum($latencies) / count($latencies);
 

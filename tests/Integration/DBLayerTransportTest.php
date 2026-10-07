@@ -44,14 +44,21 @@ use Infocyph\Omnibus\Workflow\WorkflowStatus;
 use Infocyph\Omnibus\Workflow\WorkflowTransport;
 
 /** @return array{Connection, DBLayerTransport, DBLayerFailureStore, FrozenClock, JsonEnvelopeSerializer} */
-function omnibusDatabaseQueue(?int $maxParams = null): array
+function omnibusDatabaseQueue(?int $maxParams = null, ?int $maxParamBytes = null): array
 {
     $configuration = [
         'driver' => 'sqlite',
         'database' => ':memory:',
     ];
+    $security = [];
     if ($maxParams !== null) {
-        $configuration['security'] = ['max_params' => $maxParams];
+        $security['max_params'] = $maxParams;
+    }
+    if ($maxParamBytes !== null) {
+        $security['max_param_bytes'] = $maxParamBytes;
+    }
+    if ($security !== []) {
+        $configuration['security'] = $security;
     }
     $connection = new Connection(ConnectionConfig::fromArray($configuration));
     foreach (QueueSchema::statements('sqlite') as $statement) {
@@ -724,7 +731,7 @@ test('malformed DB storage wrappers become poison without stranding healthy neig
 });
 
 test('corrupt stored failure wrappers remain bounded and inspectable', function (): void {
-    [$connection, , $failures] = omnibusDatabaseQueue();
+    [$connection, , $failures] = omnibusDatabaseQueue(maxParamBytes: 400_000);
     $stored = '~omnibus:b64:v1~' . str_repeat('%', 300_000);
     $connection->insert(
         'INSERT INTO omnibus_failures (id, queue_name, payload, payload_kind, payload_truncated, attempt, failed_at, failure_class, reason, retry_status, retry_token, retry_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)',
@@ -785,7 +792,7 @@ test('durable workflow creation rejects duplicate message identities atomically'
     );
 
     expect(fn() => $store->createBatch($workflowId, [$duplicate, $duplicate], 'work'))
-        ->toThrow(Throwable::class)
+        ->toThrow(TransactionException::class)
         ->and($store->find($workflowId))->toBeNull()
         ->and($store->findItemByMessageId('durable-workflow-message'))->toBeNull();
 });
