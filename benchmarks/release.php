@@ -215,15 +215,17 @@ function httpBaselines(): array
 
     try {
         $deadline = microtime(true) + 5.0;
+        $ready = false;
         do {
             $probe = @stream_socket_client("tcp://127.0.0.1:$port", $code, $error, 0.1);
             if (is_resource($probe)) {
                 fclose($probe);
+                $ready = true;
                 break;
             }
             usleep(20_000);
         } while (microtime(true) < $deadline);
-        if (!is_resource($probe)) {
+        if (!$ready) {
             throw new RuntimeException('Benchmark host did not become ready.');
         }
 
