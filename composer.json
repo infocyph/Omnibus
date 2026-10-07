@@ -32,7 +32,7 @@
         "infocyph/cachelayer": "^3.4",
         "infocyph/dblayer": "^5.1",
         "infocyph/phpforge": "dev-main@dev",
-        "infocyph/runwire": "^1.0"
+        "infocyph/runwire": "^1.0 || ^2.0"
     },
     "suggest": {
         "ext-memcached": "Optional for Memcached-backed uniqueness and overlap leases.",
