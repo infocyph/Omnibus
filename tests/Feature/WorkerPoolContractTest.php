@@ -323,3 +323,32 @@ test('native worker pool reaps concurrent owned crashes without touching foreign
         ->toThrow(RuntimeException::class, 'exhausted its restart budget');
     omnibusAssertNoWorkerChildren();
 });
+
+
+test('native worker pool forgets only the owned pid already consumed from the kernel table', function (): void {
+    $pid = pcntl_fork();
+    if ($pid === -1) {
+        throw new RuntimeException('Unable to fork missing-owned-child fixture.');
+    }
+    if ($pid === 0) {
+        $self = getmypid();
+        if (!is_int($self) || !posix_kill($self, SIGKILL)) {
+            throw new RuntimeException('Unable to terminate missing-owned-child fixture.');
+        }
+        while (true) {
+            usleep(10_000);
+        }
+    }
+
+    $status = 0;
+    expect(pcntl_waitpid($pid, $status))->toBe($pid);
+
+    $backend = new NativeWorkerPoolBackend();
+    $children = new ReflectionProperty($backend, 'children');
+    $reap = new ReflectionMethod($backend, 'reapStoppedChild');
+    $otherPid = $pid + 1_000_000;
+    $children->setValue($backend, [$pid => 0, $otherPid => 1]);
+
+    expect($reap->invoke($backend))->toBeTrue()
+        ->and($children->getValue($backend))->toBe([$otherPid => 1]);
+});
