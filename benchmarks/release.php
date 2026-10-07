@@ -20,7 +20,8 @@ const AUDITED_REVISION = '17a86f28215b36f237a9db3e014c5425c4d6ea0a';
 
 final readonly class ReleaseDurableMessage
 {
-    public function __construct(public int $sequence) {}
+    public function __construct(public int $sequence)
+    {}
 }
 
 /** @return array{status:int,latency:float,body:array<mixed>|null} */
