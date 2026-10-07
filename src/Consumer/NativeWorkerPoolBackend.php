@@ -327,16 +327,53 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         }
     }
 
+    /** @param \Closure(int):Worker $workerFactory */
+    private function spawnInitialWorkers(int $concurrency, \Closure $workerFactory): void
+    {
+        for ($slot = 0; $slot < $concurrency && !$this->stopRequested; $slot++) {
+            $this->spawn($slot, $workerFactory);
+        }
+    }
+
     private function stopFromSignal(): void
     {
         $this->stopRequested = true;
     }
 
     /** @param \Closure(int):Worker $workerFactory */
-    private function spawnInitialWorkers(int $concurrency, \Closure $workerFactory): void
-    {
-        for ($slot = 0; $slot < $concurrency && !$this->stopRequested; $slot++) {
-            $this->spawn($slot, $workerFactory);
+    private function supervise(
+        \Closure $workerFactory,
+        int $concurrency,
+        int $maximumRestarts,
+        float $restartBackoffSeconds,
+        ?WorkerLifecycle $lifecycle,
+        float $lifecycleIntervalSeconds,
+    ): void {
+        /** @var array<int,int> $restarts */
+        $restarts = array_fill(0, $concurrency, 0);
+        $nextLifecycleAt = self::monotonicSeconds();
+        $this->serviceLifecycle($lifecycle, $lifecycleIntervalSeconds, $nextLifecycleAt);
+        if ($this->stopRequested) {
+            return;
+        }
+
+        $this->spawnInitialWorkers($concurrency, $workerFactory);
+        $fatal = null;
+        while ($this->children !== [] || $this->pendingRestarts !== []) {
+            $cycleFailure = $this->supervisionCycle(
+                $restarts,
+                $workerFactory,
+                $maximumRestarts,
+                $restartBackoffSeconds,
+                $lifecycle,
+                $lifecycleIntervalSeconds,
+                $nextLifecycleAt,
+            );
+            $fatal ??= $cycleFailure;
+        }
+
+        if ($fatal !== null) {
+            throw new \RuntimeException($fatal);
         }
     }
 
@@ -381,43 +418,6 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         }
 
         return $fatal;
-    }
-
-    /** @param \Closure(int):Worker $workerFactory */
-    private function supervise(
-        \Closure $workerFactory,
-        int $concurrency,
-        int $maximumRestarts,
-        float $restartBackoffSeconds,
-        ?WorkerLifecycle $lifecycle,
-        float $lifecycleIntervalSeconds,
-    ): void {
-        /** @var array<int,int> $restarts */
-        $restarts = array_fill(0, $concurrency, 0);
-        $nextLifecycleAt = self::monotonicSeconds();
-        $this->serviceLifecycle($lifecycle, $lifecycleIntervalSeconds, $nextLifecycleAt);
-        if ($this->stopRequested) {
-            return;
-        }
-
-        $this->spawnInitialWorkers($concurrency, $workerFactory);
-        $fatal = null;
-        while ($this->children !== [] || $this->pendingRestarts !== []) {
-            $cycleFailure = $this->supervisionCycle(
-                $restarts,
-                $workerFactory,
-                $maximumRestarts,
-                $restartBackoffSeconds,
-                $lifecycle,
-                $lifecycleIntervalSeconds,
-                $nextLifecycleAt,
-            );
-            $fatal ??= $cycleFailure;
-        }
-
-        if ($fatal !== null) {
-            throw new \RuntimeException($fatal);
-        }
     }
 
     private function terminateChild(int $signal): never
