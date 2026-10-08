@@ -1,0 +1,39 @@
+name: Batch 6 profiling
+
+on:
+  push:
+    branches:
+      - feature/runwire-2.1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    name: Codec and lookup profile (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4', '8.5']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+      - name: Resolve production dependencies
+        run: composer update --no-dev --no-interaction --prefer-dist --no-progress --prefer-stable
+      - name: Verify profile syntax
+        run: php -l benchmarks/batch-6-profile.php
+      - name: Run bounded characterization
+        run: |
+          php benchmarks/batch-6-profile.php 50000 256 | tee batch-6-profile.json
+          php -r '$data = json_decode(file_get_contents("batch-6-profile.json"), true, flags: JSON_THROW_ON_ERROR); if (count($data["measurements"]) !== 6 || $data["generated_class_count"] !== 256) { exit(1); }'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batch-6-profile-php-${{ matrix.php }}
+          path: batch-6-profile.json
+          retention-days: 14
