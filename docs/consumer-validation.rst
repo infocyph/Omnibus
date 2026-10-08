@@ -30,8 +30,9 @@ applications; do not create synthetic request contexts inside a handler.
 Packaged consumer
 -----------------
 
-The Batch 7 GitHub Actions workflow builds ``composer archive`` and installs
-it in a separate Composer project without development dependencies, using the
+The ``security-standards.yml`` GitHub Actions workflow builds ``composer archive``
+and installs it in a separate Composer project without development dependencies,
+using the
 project's own optimized (not authoritative) autoloader. The standalone probe
 is then run against **that consumer autoloader**, followed by installation of
 selected optional DBLayer 6, CacheLayer 4 and Runwire 2.1.1 integrations.

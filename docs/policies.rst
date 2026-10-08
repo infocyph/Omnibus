@@ -22,7 +22,7 @@ Unique messages
 
 Queued uniqueness is bounded duplicate suppression while the lease is valid;
 it is not permanent uniqueness or exactly-once delivery. It requires a
-token-based provider implementing ``DetachedLeaseProvider``. CacheLayer 3.4
+token-based provider implementing ``DetachedLeaseProvider``. CacheLayer 4.x
 Redis/Valkey and Memcached providers can be adapted; process/session-bound file
 and advisory locks are rejected. If cleanup fails after durable settlement,
 the queue result remains successful and the lease expires by TTL.
@@ -93,7 +93,7 @@ Combine Memcached-backed policies with ``DBLayerTransport`` when Redis is
 unavailable and queued messages must survive restarts.
 
 Rate limiting and circuit breaking require CacheLayer's
-``AtomicCounterStoreInterface``. CacheLayer 3.1 ships Redis and Valkey counter
+``AtomicCounterStoreInterface``. CacheLayer 4.x ships Redis and Valkey counter
 stores. An application may supply another implementation with equivalent
 atomic increment, read, delete, and TTL semantics; a normal PSR cache adapter is
 not sufficient.

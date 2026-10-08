@@ -23,7 +23,7 @@ composer require infocyph/omnibus
 
 Requirements:
 
-- PHP `^8.4`
+- 64-bit PHP `^8.4` with `ext-ctype` (required by UID 6)
 - `infocyph/uid:^6.0`
 - `psr/clock:^1.0`
 - `psr/event-dispatcher:^1.0`
@@ -35,9 +35,9 @@ Worker signal handling requires `ext-pcntl`; the standalone native and Runwire
 WorkerPool backends require the process capabilities they use.
 
 Database integrations support DBLayer 6.x. CacheLayer coordination integrations
-support CacheLayer 4.x. Runwire integration supports Runwire 2.x from 2.1.1. DBLayer owns database
-execution, driver behavior, effective bind limits, transaction retries, and
-after-commit callback lifecycle. Omnibus owns reservations, workflows,
+support CacheLayer 4.x. Runwire integration supports Runwire 2.x from 2.1.1.
+DBLayer owns database execution, driver behavior, effective bind limits,
+transaction retries, and after-commit callback lifecycle. Omnibus owns reservations, workflows,
 failure-state transitions, and delivery guarantees. Queue receive and workflow
 claim limits remain caller-facing maxima; the adapters may return fewer rows so
 one atomic reservation or claim stays within the active connection's bind
@@ -89,8 +89,8 @@ $result = $bus->dispatch(new CreateInvoice($accountId));
 $invoiceId = $result->last(HandledStamp::class)?->result;
 ```
 
-Route selected messages asynchronously without changing the message or business
-handler:
+At bootstrap, pass a route map like this to `MessageBus` together with a
+registered Redis transport to send selected messages asynchronously:
 
 ```php
 use Infocyph\Omnibus\Routing\Route;
@@ -130,6 +130,29 @@ the preferred production supervisor when available.
 
 The [consumer verification guide](docs/consumer-validation.rst) provides
 runnable source, packed-consumer, FPM, and explicit Runwire forwarding probes.
+
+## Host Runwire context
+
+A framework or intermediary library can pass its existing runtime, active
+request, and optional coroutine scope into Omnibus. Use `null` for
+`$hostScope` when the host has no coroutine scope:
+
+```php
+$envelope = $bus->withRunwire(
+    runtime: $hostRuntime,
+    callback: static fn () => $bus->dispatch(new CreateInvoice($accountId)),
+    request: $hostRequest,
+    scope: $hostScope,
+);
+```
+
+`Consumer` and `Worker` expose the same `withRunwire()` entry point. Forward the
+same instances through intermediary libraries; each binding is restored when
+the callback exits. The host owns request completion, workers, and event loops.
+A live coroutine scope and runtime capability enable cooperative waits;
+otherwise waits use the synchronous blocking fallback. Ordinary dispatch works
+without Runwire. See the [integration guide](docs/integration.rst) for shared
+DBLayer bindings and the runnable forwarding example.
 
 ## Delivery semantics
 

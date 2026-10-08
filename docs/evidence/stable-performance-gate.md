@@ -20,8 +20,12 @@ The owner explicitly selected this revised hosted CI criterion in place of the p
 
 `php benchmarks/release-acceptance-selftest.php` tests both runner modes, rejects wrongly labeled runner evidence and malformed workloads, and verifies budget isolation: 2.5% bound cost passes, 2.5% unbound regression fails, and 3.1% bound overhead fails. Other budgets remain enforced. Synthetic fixtures never count as a benchmark run.
 
+## Verified candidate
+
+Revision `76503abc5fb82957bafd0695bfe8749a5427cd6d` passed [consolidated QA](https://github.com/infocyph/Omnibus/actions/runs/37776798293) and [matched performance acceptance](https://github.com/infocyph/Omnibus/actions/runs/37776789983). All 35 trial files, candidate revision and lock hashes were independently checked. RPM regression was 0.327% unbound versus 2.6 and 1.419% bound versus host-only; every RPM CV was below 0.490%, and all other limits passed. These results certify that revision under the configured hosted comparison. Later revisions require their own workflow results.
+
 ## Measurement-window hardening after run #37739493155
 
 The first hosted attempt completed every workload but failed acceptance: released 2.6 RPM CV 3.41%, dependency-only CV 2.31%, host-only CV 2.36%, bound CV 2.88%, and unbound 3.0 throughput 2.696% below 2.6 (limit 2%). At ~500k RPM, the previous 4,000-request warm-c4 window was only ~0.5 seconds, so startup, command orchestration and VM scheduling could dominate the sample. This is a **failed and inconclusive release attempt**, not a certified success or evidence that the slowdown is imaginary.
 
-The harness now takes 10,000 requests **per client** instead of 1,000, yielding 40,000-request warm-c4 observations lasting several seconds. Hosted acceptance explicitly rejects measurement windows under three seconds and publishes raw per-trial RPM and window durations along with the median and CV. **All numerical release budgets remain unchanged**, and no benchmark results are discarded. If these longer windows still fail, investigate the true 3.0 path overhead rather than suppressing, repeating until lucky or changing limits.
+The harness now takes 10,000 requests **per client** instead of 1,000, yielding 40,000-request warm-c4 observations lasting several seconds. Hosted acceptance explicitly rejects measurement windows under three seconds and publishes raw per-trial RPM and window durations along with the median and CV. **This measurement-window change retained the original numerical budgets** (the later scoped policy above is separate), and no benchmark results are discarded. If these longer windows still fail, investigate the true 3.0 path overhead rather than suppressing, repeating until lucky or changing limits.

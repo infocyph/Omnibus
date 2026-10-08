@@ -127,8 +127,8 @@ count, and backend. Treat statistically noisy changes cautiously. Correctness,
 security, bounded resource use, and delivery guarantees take priority over a
 microbenchmark improvement.
 
-Batch 6 version comparison
---------------------------
+Release performance comparison
+------------------------------
 
 The 3.0 release audit records same-runner 2.6, dependency-only 2.6,
 unbound 3.0, host-context-only 3.0 and Runwire-bound 3.0 trials in

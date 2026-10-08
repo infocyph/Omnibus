@@ -75,9 +75,10 @@ do not use a completed request, and do not reuse request contexts between
 successive jobs. Bind a new request for each host operation and call
 ``RequestContext::complete()`` in ``finally`` when the host owns it.
 A Fiber must receive the runtime/request explicitly: ambient state in the
-parent Fiber is not automatically forwarded. Without a coroutine scope,
-Runwire-aware sleep uses the cooperative fallback; it cannot interrupt
-arbitrary blocking PHP I/O.
+parent Fiber is not automatically forwarded. Cooperative sleep requires a live
+coroutine scope and the runtime's coroutine capability. Otherwise Runwire-aware
+sleep uses a synchronous blocking fallback; it cannot interrupt arbitrary
+blocking PHP I/O.
 
 Cancellation before handler admission is surfaced to the host without an
 automatic retry. After successful handler execution, Omnibus attempts

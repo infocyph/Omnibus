@@ -1,6 +1,6 @@
 # Batch 8 deep storage, backend case coverage and four-worker host diagnostics
 
-Status: **functional, deep storage, and shared-runner diagnostic suites passed; stable release performance certification still open** (2026-10-08).
+Historical status at this diagnostic revision: **functional, deep storage, and shared-runner suites passed; matched release performance acceptance was still open** (2026-10-08). Subsequent QA and matched acceptance passed; see the [release verification record](omnibus-3.0.0-release-notes-draft.md#verification-and-publication-status).
 
 ## Registered integration tests — actual discovery
 

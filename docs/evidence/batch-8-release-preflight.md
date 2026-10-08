@@ -1,5 +1,7 @@
 # Batch 8 nonperformance preflight and held release gate
 
+Historical preflight: the open gates below describe this earlier revision. See the [release verification record](omnibus-3.0.0-release-notes-draft.md#verification-and-publication-status) for the subsequently passed QA and matched performance acceptance.
+
 Date: 2026-10-08 (Asia/Dhaka)
 
 ## Exact-SHA evidence
@@ -24,4 +26,4 @@ All currently accepted production changes keep the native DBLayer/CacheLayer/Run
 
 ## Deep backend and multi-worker evidence added in final audit
 
-See `docs/evidence/batch-8-deep-benchmark.md` for 100k MySQL/PostgreSQL contention, SQLite 1m failure-history pruning, backend case discovery counts, five-process host CPU/RSS, p95/p99 and the measured 2.6 ↔ 3.0 variants. This historical preflight used the original dedicated-runner/2% contract. The owner subsequently selected GitHub-hosted matched acceptance and, after full HTTP profiling on 2026-10-08, approved the scoped bound cost trade-off: 2% unbound regression, 3% bound-vs-host-only overhead, other budgets unchanged. The batch workflows are retired and their distinct consumer/docs/validator checks consolidated into the two maintained workflows. Current evidence and remaining gates are recorded in [binding overhead](runwire-binding-overhead.md) and the [live plan](../plans/omnibus-next-release-audit-plan.md). Historical results above do not certify the updated candidate.
+See `docs/evidence/batch-8-deep-benchmark.md` for 100k MySQL/PostgreSQL contention, SQLite 1m failure-history pruning, backend case discovery counts, five-process host CPU/RSS, p95/p99 and the measured 2.6 ↔ 3.0 variants. This historical preflight used the original dedicated-runner/2% contract. The owner subsequently selected GitHub-hosted matched acceptance and, after full HTTP profiling on 2026-10-08, approved the scoped bound cost trade-off: 2% unbound regression, 3% bound-vs-host-only overhead, other budgets unchanged. The batch workflows are retired and their distinct consumer/docs/validator checks consolidated into the two maintained workflows. Current evidence and remaining gates are recorded in [binding overhead](runwire-binding-overhead.md) and the [release verification record](omnibus-3.0.0-release-notes-draft.md#verification-and-publication-status). Historical results above do not certify the updated candidate.

@@ -56,6 +56,40 @@ fixed-window rate limiting, and circuit breaking
 adapt CacheLayer's existing lock and atomic-counter contracts. Omnibus does not
 introduce a competing cache-provider hierarchy.
 
+Host Runwire context
+--------------------
+
+Pass the host's existing runtime, active request, and optional coroutine scope
+through frameworks or intermediary libraries into Omnibus:
+
+.. code-block:: php
+
+   $envelope = $bus->withRunwire(
+       runtime: $hostRuntime,
+       callback: static fn () => $bus->dispatch($message),
+       request: $hostRequest,
+       scope: $hostScope,
+   );
+
+``Consumer`` and ``Worker`` support the same entry point. Set ``$hostScope`` to
+``null`` when the host has no coroutine scope. Bind explicitly in each Fiber;
+parent-Fiber bindings are not inherited. Nested bindings restore the previous
+context when the callback exits, including exceptions. The host retains request
+completion, worker supervision and event-loop ownership.
+
+For shared DBLayer composition, pass the same ``RunwireBinding`` instance to
+``MessageBus`` and the DBLayer adapters at construction, or register the
+existing connection with ``$bus->runwireBinding()->registerConnection($connection)``.
+The binding forwards the active runtime, request and scope to registered
+connections. CacheLayer policies reuse a matching host-bound CacheLayer context
+when available; Omnibus does not initialize an unused cache integration.
+
+Cancellation checkpoints use the supplied request. Cooperative sleeps require
+both a live coroutine scope and the runtime's coroutine capability; otherwise
+sleep is synchronous and blocking. A host without Runwire uses the ordinary
+Omnibus path. See :doc:`upgrading` for cancellation and settlement semantics,
+and :doc:`consumer-validation` for ``examples/runwire-forwarding.php``.
+
 Container scopes
 ----------------
 
@@ -69,10 +103,11 @@ Web and CLI separation
 Web applications may construct ``AfterResponseDispatcher`` and a runtime
 adapter. Worker/CLI applications construct ``Consumer`` and transports. Neither
 path requires booting the other. Ordinary FPM/request and non-pool CLI paths do
-not require Runwire or construct a pool backend, while Omnibus 2.6 still has
-mandatory PCNTL/POSIX package requirements. The native ``WorkerPool`` uses
-those extensions; Runwire 1.x is an optional explicitly selected alternative
-pool backend.
+not require Runwire or process extensions and do not construct a pool backend.
+Signal handling is opt-in through ``WorkerOptions(handleSignals: true)`` and
+requires PCNTL. The standalone native ``WorkerPool`` requires PCNTL/POSIX;
+Runwire 2.x from 2.1.1 is an explicitly selected alternative pool backend.
+Passing a host context does not select a pool backend or start a supervisor.
 
 Provider integrations
 ---------------------

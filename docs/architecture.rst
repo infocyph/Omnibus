@@ -30,8 +30,9 @@ Omnibus reuses existing library and application boundaries:
    * - CacheLayer
      - Cache backends, distributed leases, locks, and atomic counters.
    * - Runwire
-     - Optional reusable worker-group process supervision when explicitly
-       selected; Omnibus retains its native PCNTL/POSIX backend.
+     - Host runtime, request/cancellation and coroutine capabilities through
+       passed instances; optional worker-group supervision when explicitly
+       selected as a standalone pool backend.
    * - PSR contracts
      - Clock and event-dispatcher interoperability.
    * - Broker adapter

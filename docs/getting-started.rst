@@ -102,8 +102,11 @@ CLI system:
        $result->failed,
    );
 
-Omnibus deliberately does not own daemonization, signals, PID files, process
-scaling, or subprocess supervision.
+Ordinary bus and bounded consumer calls leave process lifecycle to the host.
+Explicit ``Worker`` signal handling and standalone ``WorkerPool`` supervision
+manage their selected worker processes; they do not take over a host's workers
+or event loop. Daemonization, service scaling and deployment remain host
+responsibilities. See :doc:`operations` for the worker ownership boundary.
 
 Continue with :doc:`recipes` for complete SQLite, Redis, Memcached, workflow,
 worker, failure-replay, scheduling, broadcasting, and telemetry compositions.
