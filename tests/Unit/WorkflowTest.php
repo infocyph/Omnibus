@@ -418,7 +418,7 @@ test('workflow operations require the exact item ID and index pair', function ()
 test('cancellation during business execution is terminal-aware and never reports a handler failure', function (): void {
     $sender = new RecordingSender();
     $store = new InMemoryWorkflowStore();
-    $coordinator = new WorkflowCoordinator($store, $sender, dispatchLeaseSeconds: 1);
+    $coordinator = new WorkflowCoordinator($store, $sender);
     $scope = new WorkflowExecutionScope(new DirectExecutionScope(), $store);
     $id = $coordinator->batch([new TestCommand('running')], 'work');
     $envelope = $sender->sent()[0]['envelope'];
@@ -568,7 +568,7 @@ test('a next-chain dispatch failure is reported after the current item remains d
         }
     };
     $store = new InMemoryWorkflowStore($clock);
-    $coordinator = new WorkflowCoordinator($store, $sender);
+    $coordinator = new WorkflowCoordinator($store, $sender, dispatchLeaseSeconds: 1);
     $scope = new WorkflowExecutionScope(new DirectExecutionScope(), $store);
     $transport = new WorkflowTransport($sender, $coordinator);
     $id = $coordinator->chain([new TestCommand('first'), new TestCommand('next')], 'work');
