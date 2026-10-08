@@ -38,6 +38,60 @@ jobs:
           composer ic:release:guard
       - name: Check the tooling did not mutate tracked files
         run: git diff --exit-code -- .
+  case-inventory:
+    name: Strict integration test discovery inventory
+    if: contains(github.event.head_commit.message, '[count-backends]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: memcached, redis, pdo_mysql, pdo_pgsql, pdo_sqlite, pdo_sqlsrv
+          coverage: none
+          tools: composer:v2
+      - name: Resolve exact test dependencies
+        run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+      - name: Enumerate registered test cases without executing external I/O
+        env:
+          INTEGRATION_SERVICES: '["mysql","mariadb","postgres","mssql","sqlite","redis","valkey","memcached"]'
+          IC_SERVICE_DATABASE: phpforge
+          IC_SERVICE_USERNAME: phpforge
+          IC_SERVICE_PASSWORD: phpforge_test
+          IC_MSSQL_USER: sa
+          IC_MSSQL_PASSWORD: inventory_only
+          IC_REDIS_HOST: 127.0.0.1
+          IC_REDIS_PORT: '6379'
+          IC_REDIS_PASSWORD: inventory_only
+          IC_VALKEY_HOST: 127.0.0.1
+          IC_VALKEY_PORT: '6380'
+          IC_VALKEY_PASSWORD: inventory_only
+          IC_MEMCACHED_HOST: 127.0.0.1
+          IC_MEMCACHED_PORT: '11211'
+        run: |
+          mkdir -p build/inventory
+          php vendor/bin/pest --configuration vendor/infocyph/phpforge/resources/pest.xml --bootstrap vendor/autoload.php --list-tests tests/Integration > build/inventory/all-cases.txt
+          sed -n '1,120p' build/inventory/all-cases.txt
+          php -r '
+            $cases = file("build/inventory/all-cases.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            $counts = [];
+            foreach (["mysql","mariadb","pgsql","mssql","redis","valkey","memcached"] as $backend) {
+              $counts[$backend] = count(array_filter($cases, static fn(string $line): bool =>
+                preg_match("/\\b" . preg_quote($backend,"/") . "\\b/i", $line) === 1
+              ));
+            }
+            $counts["sqlite"] = count(array_filter($cases, static fn(string $line): bool =>
+              preg_match("/sqlite/i", $line) === 1
+            ));
+            echo json_encode(["matching_test_lines" => $counts,"discovery_line_total"=>count($cases),"note"=>"Counts represent named matching Pest discovery lines and may include cross-backend labels; not execution outcome."], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL;
+          ' | tee build/inventory/backend-counts.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: batch-8-backend-discovery
+          path: build/inventory/
+          retention-days: 30
+
   persistent-host-soak:
     name: 300-second persistent request/consumer lifecycle soak
     if: contains(github.event.head_commit.message, '[release-soak]')

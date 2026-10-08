@@ -98,6 +98,66 @@ jobs:
           path: build/batch-6-db/*.json
           retention-days: 14
 
+  deep-db:
+    name: MySQL and PostgreSQL 100k queue-depth characterization
+    if: contains(github.event.head_commit.message, '[db-depth]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: phpforge
+          MYSQL_USER: phpforge
+          MYSQL_PASSWORD: phpforge_test
+          MYSQL_ROOT_PASSWORD: phpforge_root_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pphpforge_root_test"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: phpforge
+          POSTGRES_USER: phpforge
+          POSTGRES_PASSWORD: phpforge_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U phpforge -d phpforge"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+    env:
+      IC_SERVICE_DATABASE: phpforge
+      IC_SERVICE_USERNAME: phpforge
+      IC_SERVICE_PASSWORD: phpforge_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, pdo_pgsql, pcntl, posix
+          coverage: none
+          tools: composer:v2
+      - name: Resolve test dependencies
+        run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+      - name: Compare current and candidate indexes at 100k backlog
+        run: |
+          mkdir -p build/deep-db
+          for driver in mysql pgsql; do
+            for choice in current candidate; do
+              php benchmarks/db-contention.php "$driver" 4 100000 "$choice" > "build/deep-db/$driver-$choice.json"
+              php -r '$r=json_decode(file_get_contents($argv[1]),true,flags:JSON_THROW_ON_ERROR); if ($r["acknowledged"]!==100000 || $r["missing_settlements"]!==0 || $r["duplicate_or_stale_settlements"]!==0 || $r["consumers"]!==4) { exit(1); }' "build/deep-db/$driver-$choice.json"
+              jq '{driver,index_set,consumers,depth,messages_per_second,receive_p50_ms,receive_p95_ms,receive_p99_ms,missing_settlements,duplicate_or_stale_settlements,transaction_stats,execution_plan}' "build/deep-db/$driver-$choice.json"
+            done
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: batch-8-100k-queue-plans
+          path: build/deep-db/*.json
+          retention-days: 30
+
   clone-review:
     name: PHPForge duplicate-group inventory
     if: contains(github.event.head_commit.message, '[clone-review]')
