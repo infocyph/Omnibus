@@ -126,7 +126,7 @@ test('native Redis-compatible receive preflight leaves corrupt state unchanged',
     };
 
     try {
-        foreach (['garbage', '-1', '9223372036854775807'] as $invalidAttempt) {
+        foreach (['garbage', '-1', '00', '01', '0001', '00000000000000000001', '9223372036854775807'] as $invalidAttempt) {
             $clear();
             $transport->send(new Envelope(new TestCommand('corrupt')), $queue);
             $transport->send(new Envelope(new TestCommand('neighbor')), $queue);
@@ -158,11 +158,13 @@ test('native Redis-compatible receive preflight leaves corrupt state unchanged',
         $reserved = [...$transport->receive($queue, visibilitySeconds: 1)][0];
         [$reservedId] = \Infocyph\Omnibus\Transport\ReservationReceipt::decode($reserved->receipt);
         $clock->advance('+2 seconds');
-        $redis->hSet($keys['attempts'], $reservedId, 'garbage');
-        $before = $snapshot();
-        expect(fn() => [...$transport->receive($queue)])
-            ->toThrow(RedisBackendStateCorruption::class)
-            ->and($snapshot())->toBe($before);
+        foreach (['garbage', '00', '01', '9223372036854775807'] as $invalidExpiredAttempt) {
+            $redis->hSet($keys['attempts'], $reservedId, $invalidExpiredAttempt);
+            $before = $snapshot();
+            expect(fn() => [...$transport->receive($queue)])
+                ->toThrow(RedisBackendStateCorruption::class)
+                ->and($snapshot())->toBe($before);
+        }
 
         $clear();
         $redis->set($keys['ready'], 'wrong-type');
