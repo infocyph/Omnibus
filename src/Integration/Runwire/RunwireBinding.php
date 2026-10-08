@@ -59,7 +59,7 @@ final class RunwireBinding
             return $callback();
         }
 
-        $this->assertRuntime($current['runtime'], $current['generationKey']);
+        $this->assertContext($current['runtime'], null, null, $current['generationKey']);
         $cleanupRequest = RequestContext::create(
             $current['runtime'],
             new RequestExecutionPolicy(maxExecutionSeconds: $maxSeconds),
@@ -137,9 +137,9 @@ final class RunwireBinding
         $this->assertContext($context['runtime'], $context['request'], $context['scope'], $context['generationKey']);
         // A host binding loads this integration; an unbound optional package
         // should not be autoloaded merely to inspect its empty runtime state.
-        $cacheBound = class_exists(CacheRunwireIntegration::class, false)
+        $cacheBound = \class_exists(CacheRunwireIntegration::class, false)
             && CacheRunwireIntegration::runtime() === $context['runtime'];
-        if (!$cacheBound && count($this->connections ?? []) === 0) {
+        if (!$cacheBound && $this->connections === null) {
             return $callback();
         }
 
@@ -216,22 +216,19 @@ final class RunwireBinding
         ?RequestContext $request = null,
         ?CoroutineScope $scope = null,
     ): mixed {
-        $current = $this->context();
-        if ($current !== null && $current['runtime'] !== $runtime) {
-            throw new LogicException('Omnibus cannot switch Runwire runtime inside a nested binding.');
-        }
-        if ($current !== null && $request !== null && $current['request'] !== null && $current['request'] !== $request) {
-            throw new LogicException('Omnibus cannot switch Runwire request inside a nested binding.');
-        }
-        if ($current !== null && $scope !== null && $current['scope'] !== null && $current['scope'] !== $scope) {
-            throw new LogicException('Omnibus cannot switch Runwire coroutine scope inside a nested binding.');
+        $fiber = Fiber::getCurrent();
+        $current = $fiber === null ? $this->rootContext : ($this->fiberContexts[$fiber] ?? null);
+        if ($current !== null) {
+            $this->assertNestedContext($current, $runtime, $request, $scope);
         }
 
         $effectiveRequest = $request ?? $current['request'] ?? null;
         $effectiveScope = $scope ?? $current['scope'] ?? null;
         // Runtime identity is immutable; reuse its key within this binding,
         // but read the live generation and cancellation state at every boundary.
-        $generationKey = $current['generationKey'] ?? $this->generationKey($runtime);
+        $generationKey = $current['generationKey'] ?? ($runtime->generation === null
+            ? null
+            : $runtime->driver->value . ':' . $runtime->mode . ':' . ($runtime->workerSlot ?? -1));
         $this->assertContext($runtime, $effectiveRequest, $effectiveScope, $generationKey);
         if ($runtime->generation !== null && $generationKey !== null) {
             $this->generations[$generationKey] = $runtime->generation;
@@ -243,23 +240,29 @@ final class RunwireBinding
             'scope' => $effectiveScope,
             'generationKey' => $generationKey,
         ];
-        $fiber = Fiber::getCurrent();
-        $hadPrevious = $current !== null;
-        $this->setContext($fiber, $next);
+        if ($fiber === null) {
+            $this->rootContext = $next;
+        } else {
+            $this->setContext($fiber, $next);
+        }
 
         try {
             // The entry context was already validated. Without borrowed adapters,
             // avoid repeating that validation before invoking the caller.
             // Nested bus/consumer operations still validate via run().
-            if (count($this->connections ?? []) === 0
-                && (!class_exists(CacheRunwireIntegration::class, false)
+            if ($this->connections === null
+                && (!\class_exists(CacheRunwireIntegration::class, false)
                     || CacheRunwireIntegration::runtime() !== $runtime)) {
                 return $callback();
             }
 
             return $this->run($callback);
         } finally {
-            $this->setContext($fiber, $hadPrevious ? $current : null);
+            if ($fiber === null) {
+                $this->rootContext = $current;
+            } else {
+                $this->setContext($fiber, $current);
+            }
         }
     }
 
@@ -269,7 +272,15 @@ final class RunwireBinding
         ?CoroutineScope $scope,
         ?string $generationKey,
     ): void {
-        $this->assertRuntime($runtime, $generationKey);
+        if ($runtime->pid !== \getmypid()) {
+            throw new LogicException('Runwire runtime PID does not match the current Omnibus process.');
+        }
+        if ($generationKey !== null) {
+            $latest = $this->generations[$generationKey] ?? null;
+            if ($latest !== null && $runtime->generation < $latest) {
+                throw new LogicException('Stale Runwire runtime generation cannot enter Omnibus.');
+            }
+        }
         if ($request !== null && $request->runtime() !== $runtime) {
             throw new LogicException('Runwire request context belongs to a different runtime.');
         }
@@ -286,18 +297,21 @@ final class RunwireBinding
         }
     }
 
-    private function assertRuntime(RuntimeContext $runtime, ?string $generationKey): void
-    {
-        $pid = getmypid();
-        $currentPid = is_int($pid) ? $pid : 0;
-        if ($runtime->pid !== $currentPid) {
-            throw new LogicException('Runwire runtime PID does not match the current Omnibus process.');
+    /** @param array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null,generationKey:string|null} $current */
+    private function assertNestedContext(
+        array $current,
+        RuntimeContext $runtime,
+        ?RequestContext $request,
+        ?CoroutineScope $scope,
+    ): void {
+        if ($current['runtime'] !== $runtime) {
+            throw new LogicException('Omnibus cannot switch Runwire runtime inside a nested binding.');
         }
-        if ($generationKey !== null) {
-            $latest = $this->generations[$generationKey] ?? null;
-            if ($latest !== null && $runtime->generation < $latest) {
-                throw new LogicException('Stale Runwire runtime generation cannot enter Omnibus.');
-            }
+        if ($request !== null && $current['request'] !== null && $current['request'] !== $request) {
+            throw new LogicException('Omnibus cannot switch Runwire request inside a nested binding.');
+        }
+        if ($scope !== null && $current['scope'] !== null && $current['scope'] !== $scope) {
+            throw new LogicException('Omnibus cannot switch Runwire coroutine scope inside a nested binding.');
         }
     }
 
@@ -310,19 +324,6 @@ final class RunwireBinding
         }
 
         return $this->fiberContexts[$fiber] ?? null;
-    }
-
-    private function generationKey(RuntimeContext $runtime): ?string
-    {
-        if ($runtime->generation === null) {
-            return null;
-        }
-
-        return implode(':', [
-            $runtime->driver->value,
-            $runtime->mode,
-            (string) ($runtime->workerSlot ?? -1),
-        ]);
     }
 
     /**

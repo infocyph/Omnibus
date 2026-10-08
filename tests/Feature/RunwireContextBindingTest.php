@@ -112,6 +112,33 @@ test('Runwire binding forwards exact host identities and restores every borrowed
     }
 });
 
+test('a binding does not retain collected host connections and remains usable afterwards', function (): void {
+    $binding = new RunwireBinding();
+    $connection = new Connection(ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]));
+    $reference = WeakReference::create($connection);
+    $binding->registerConnection($connection);
+    unset($connection);
+    gc_collect_cycles();
+
+    expect($reference->get())->toBeNull();
+    $runtime = omnibusRunwireRuntime();
+    $request = RequestContext::create($runtime);
+    try {
+        expect($binding->withRunwire(
+            $runtime,
+            static fn(): mixed => $binding->run(static fn(): int => 42),
+            $request,
+        ))->toBe(42)
+            ->and($binding->runtime())->toBeNull()
+            ->and($binding->request())->toBeNull();
+    } finally {
+        $request->complete();
+    }
+});
+
 test('late adapter registration in a bound callback still forwards nested dispatch ownership', function (): void {
     $runtime = omnibusRunwireRuntime();
     $request = RequestContext::create($runtime, requestId: 'late-registration');
