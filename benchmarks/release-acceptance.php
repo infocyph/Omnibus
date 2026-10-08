@@ -32,10 +32,11 @@ $revisions = [];
 $failures = [];
 foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound'] as $variant) {
     $files = glob($directory . '/' . $variant . '-*.json');
-    if (!is_array($files) || count($files) < 7) {
-        throw new RuntimeException('At least seven independent trials required for ' . $variant);
+    if (!is_array($files) || count($files) !== 7) {
+        throw new RuntimeException('Exactly seven independent trials required for ' . $variant);
     }
     $trials = [];
+    $workloadSamples = [];
     foreach ($files as $file) {
         $document = json_decode((string) file_get_contents($file), true, 512, JSON_THROW_ON_ERROR);
         $env = $document['environment'] ?? [];
@@ -50,6 +51,69 @@ foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound']
         }
         $fingerprint = $env['fingerprint'];
         $revisions[$variant][$env['source_revision']] = true;
+        $requiredWorkloads = [
+            'request_host_cold' => [1, 1],
+            'request_host_warm_c1' => [1, 1_000],
+            'request_host_warm_c2' => [2, 2_000],
+            'request_host_warm_c4' => [4, 4_000],
+            'request_host_expected_failure' => [1, 1_000],
+            'durable_delivery' => [2, 2_000],
+        ];
+        $workloads = $document['workloads'] ?? null;
+        if (!is_array($workloads) || count($workloads) !== count($requiredWorkloads)) {
+            throw new RuntimeException('Missing or unexpected benchmark workload: ' . $file);
+        }
+        $seen = [];
+        foreach ($workloads as $entry) {
+            $name = is_array($entry) ? ($entry['name'] ?? null) : null;
+            if (!is_string($name) || !isset($requiredWorkloads[$name]) || isset($seen[$name])) {
+                throw new RuntimeException('Unknown or duplicate benchmark workload: ' . $file);
+            }
+            $seen[$name] = true;
+            $result = $entry['result'] ?? null;
+            [$concurrency, $minimum] = $requiredWorkloads[$name];
+            if (!is_array($result) || ($entry['concurrency'] ?? null) !== $concurrency
+                || !is_int($result['attempted_operations'] ?? null)
+                || $result['attempted_operations'] < $minimum
+                || ($result['successful_operations'] ?? null) !== $result['attempted_operations']
+                || ($result['failed_operations'] ?? null) !== 0
+                || ($result['timeouts'] ?? null) !== 0
+                || !is_numeric($result['successful_rpm'] ?? null)
+                || !is_finite((float) $result['successful_rpm'])
+                || (float) $result['successful_rpm'] <= 0.0) {
+                throw new RuntimeException('Benchmark workload correctness or depth failed: ' . $name);
+            }
+            $latencies = $result['latency_ms'] ?? [];
+            if (!is_array($latencies)) {
+                throw new RuntimeException('Missing benchmark latencies: ' . $name);
+            }
+            foreach (['p50', 'p95', 'p99'] as $percentile) {
+                if (!is_numeric($latencies[$percentile] ?? null)
+                    || !is_finite((float) $latencies[$percentile])
+                    || (float) $latencies[$percentile] < 0.0) {
+                    throw new RuntimeException('Invalid benchmark latency: ' . $name);
+                }
+            }
+            if ($latencies['p50'] > $latencies['p95'] || $latencies['p95'] > $latencies['p99']) {
+                throw new RuntimeException('Out-of-order benchmark latency percentiles: ' . $name);
+            }
+            if ($name === 'request_host_expected_failure'
+                && (($entry['metadata']['expected_http_status'] ?? null) !== 503
+                    || ($entry['metadata']['validated_output'] ?? null) !== true)) {
+                throw new RuntimeException('Expected-failure HTTP response was not validated.');
+            }
+            if ($name === 'durable_delivery'
+                && (($entry['metadata']['queue_depth_after'] ?? null) !== 0
+                    || ($entry['metadata']['connections'] ?? null) !== 2)) {
+                throw new RuntimeException('Durable queue did not drain on the expected connections.');
+            }
+            $workloadSamples[$name][] = [
+                'rpm' => (float) $result['successful_rpm'],
+                'p50' => (float) $latencies['p50'],
+                'p95' => (float) $latencies['p95'],
+                'p99' => (float) $latencies['p99'],
+            ];
+        }
         $matching = array_values(array_filter(
             $document['workloads'] ?? [],
             static fn(array $work): bool => ($work['name'] ?? '') === 'request_host_warm_c4',
@@ -86,6 +150,14 @@ foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound']
     }
     if (count($revisions[$variant]) !== 1) {
         throw new RuntimeException('Multiple source revisions in one trial variant.');
+    }
+    foreach ($workloadSamples as $name => $samples) {
+        if (count($samples) !== 7) {
+            throw new RuntimeException('Missing workload trials: ' . $name);
+        }
+        foreach (array_keys($samples[0]) as $metric) {
+            $workloadSummaries[$variant][$name][$metric] = benchmarkMedian(array_column($samples, $metric));
+        }
     }
     $measurements = [];
     foreach (array_keys($trials[0]) as $metric) {
@@ -124,6 +196,7 @@ fwrite(STDOUT, json_encode([
     'candidate_revision' => array_key_first($revisions['3.0-unbound']),
     'environment_fingerprint' => $fingerprint,
     'variants' => $results,
+    'workloads' => $workloadSummaries,
     'comparisons' => $comparisons,
     'failures' => $failures,
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL);
