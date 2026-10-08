@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Infocyph\Omnibus\Consumer\Consumer;
+use Infocyph\Omnibus\Dispatch\AfterResponseDispatcher;
+use Infocyph\Omnibus\Dispatch\AfterResponseRuntime;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Failure\FailedMessage;
 use Infocyph\Omnibus\Failure\FailureManager;
@@ -13,12 +15,16 @@ use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\Integration\CacheLayer\DuplicateMessage;
 use Infocyph\Omnibus\Integration\CacheLayer\UniqueSender;
 use Infocyph\Omnibus\Integration\Runwire\RunwireBinding;
+use Infocyph\Omnibus\MessageBus;
 use Infocyph\Omnibus\Retry\ExponentialRetryStrategy;
+use Infocyph\Omnibus\Routing\Route;
+use Infocyph\Omnibus\Routing\RouteMap;
 use Infocyph\Omnibus\Tests\Fixtures\FrozenClock;
 use Infocyph\Omnibus\Tests\Fixtures\InMemoryLockProvider;
 use Infocyph\Omnibus\Tests\Fixtures\TestCommand;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
 use Infocyph\Omnibus\Transport\Sender;
+use Infocyph\Omnibus\Transport\TransportRegistry;
 use Infocyph\Omnibus\Workflow\InMemoryWorkflowStore;
 use Infocyph\Omnibus\Workflow\WorkflowCoordinator;
 use Infocyph\Omnibus\Workflow\WorkflowDispatchFailed;
@@ -251,4 +257,67 @@ test('stale failure retry tokens cannot settle a newer claim', function (): void
         ->and($store->releaseRetry($first))->toBeFalse()
         ->and($store->markRetrySent($second))->toBeTrue()
         ->and($store->removeRetried($second))->toBeTrue();
+});
+
+
+test('after-response work does not retain the originating Runwire request', function (): void {
+    $binding = new RunwireBinding();
+    $runtime = omnibusRecoveryRuntime();
+    $request = RequestContext::create($runtime, requestId: 'origin-response');
+    $callbacks = [];
+    $deferred = new class($callbacks) implements AfterResponseRuntime {
+        /** @var list<callable():void> */
+        public array $callbacks;
+
+        /** @param list<callable():void> $callbacks */
+        public function __construct(array &$callbacks)
+        {
+            $this->callbacks = &$callbacks;
+        }
+
+        public function defer(callable $callback): void
+        {
+            $this->callbacks[] = $callback;
+        }
+    };
+    $observedRequest = 'unset';
+    $sender = new class($binding, $observedRequest) implements Sender {
+        public function __construct(
+            private readonly RunwireBinding $binding,
+            private string &$observedRequest,
+        ) {}
+
+        public function send(Envelope $envelope, string $queue): Envelope
+        {
+            unset($queue);
+            $this->observedRequest = $this->binding->request()?->requestId ?? 'none';
+
+            return $envelope;
+        }
+    };
+    $dispatcher = new AfterResponseDispatcher(
+        new MessageBus(
+            new RouteMap(default: new Route('recording')),
+            new TransportRegistry(['recording' => $sender]),
+            $binding,
+        ),
+        $deferred,
+    );
+
+    $binding->withRunwire(
+        $runtime,
+        function () use ($dispatcher): void {
+            $dispatcher->dispatch(new TestCommand('after-response'));
+        },
+        $request,
+    );
+    $request->complete();
+
+    expect($callbacks)->toHaveCount(1)
+        ->and($binding->request())->toBeNull();
+
+    $callbacks[0]();
+
+    expect($observedRequest)->toBe('none')
+        ->and($binding->request())->toBeNull();
 });
