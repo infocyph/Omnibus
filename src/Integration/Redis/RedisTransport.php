@@ -47,11 +47,332 @@ end
 
 local function attemptIssue(value)
     if value == false then return 'attempt' end
-    if string.match(value, '^%d+$') == nil then return 'attempt_integer' end
-    local normalized = string.gsub(value, '^0+', '')
-    if normalized == '' then normalized = '0' end
-    if string.len(normalized) > 19 then return 'attempt_overflow' end
-    if string.len(normalized) == 19 and normalized > '9223372036854775806' then
+    -- HINCRBY rejects leading-zero decimal representations (including "00"
+    -- and "01"). Validate its canonical non-negative integer format BEFORE
+    -- mutating ready/reserved sets; Redis Lua errors do not roll back writes.
+    if value ~= '0' and string.match(value, '^[1-9]%d*
+        return 'attempt_overflow'
+    end
+    return nil
+end
+
+local function corrupt(ids, requireReceipt)
+    for _, id in ipairs(ids) do
+        if redis.call('HGET', KEYS[3], id) == false then return id, 'payload' end
+        local attempt = redis.call('HGET', KEYS[4], id)
+        local issue = attemptIssue(attempt)
+        if issue then return id, issue end
+        if redis.call('HGET', KEYS[6], id) == false then return id, 'message_id' end
+        local receipt = redis.call('HGET', KEYS[5], id)
+        if requireReceipt and receipt == false then return id, 'receipt' end
+        if not requireReceipt and receipt ~= false then return id, 'ready_receipt' end
+    end
+    return nil, nil
+end
+
+local corruptId, corruptField = keyTypeIssue()
+if corruptId then return {'__OMNIBUS_CORRUPT__', corruptId, corruptField} end
+
+local expired = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', ARGV[1], 'LIMIT', 0, ARGV[4])
+corruptId, corruptField = corrupt(expired, true)
+if corruptId then return {'__OMNIBUS_CORRUPT__', corruptId, corruptField} end
+
+local ready = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, ARGV[4])
+corruptId, corruptField = corrupt(ready, false)
+if corruptId then return {'__OMNIBUS_CORRUPT__', corruptId, corruptField} end
+
+for _, id in ipairs(expired) do
+    redis.call('ZREM', KEYS[2], id)
+    redis.call('ZADD', KEYS[1], ARGV[1], id)
+    redis.call('HDEL', KEYS[5], id)
+end
+
+local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, ARGV[4])
+local result = {}
+for _, id in ipairs(ids) do
+    redis.call('ZREM', KEYS[1], id)
+    redis.call('ZADD', KEYS[2], ARGV[2], id)
+    redis.call('HINCRBY', KEYS[4], id, 1)
+    redis.call('HSET', KEYS[5], id, ARGV[3])
+    table.insert(result, id)
+    table.insert(result, redis.call('HGET', KEYS[3], id))
+    table.insert(result, redis.call('HGET', KEYS[4], id))
+    table.insert(result, redis.call('HGET', KEYS[6], id))
+end
+return result
+LUA;
+
+    private const string RELEASE = <<<'LUA'
+if redis.call('HGET', KEYS[3], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call('ZREM', KEYS[2], ARGV[1])
+redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
+redis.call('HDEL', KEYS[3], ARGV[1])
+return 1
+LUA;
+
+    private const string SEND = <<<'LUA'
+redis.call('HSET', KEYS[2], ARGV[1], ARGV[2])
+redis.call('HSET', KEYS[3], ARGV[1], 0)
+redis.call('HSET', KEYS[4], ARGV[1], ARGV[4])
+redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
+return 1
+LUA;
+
+    private const string SIZE = <<<'LUA'
+return redis.call('ZCOUNT', KEYS[1], '-inf', ARGV[1]) + redis.call('ZCOUNT', KEYS[2], '-inf', ARGV[1])
+LUA;
+
+    public function __construct(
+        private RedisClient $client,
+        private EnvelopeSerializer $serializer,
+        private ClockInterface $clock,
+        private string $prefix = 'omnibus',
+    ) {
+        if (
+            $prefix === ''
+            || strlen($prefix) > 191
+            || preg_match('/[\x00-\x1F\x7F]/D', $prefix) === 1
+            || str_contains($prefix, '{')
+            || str_contains($prefix, '}')
+        ) {
+            throw new \InvalidArgumentException(
+                'Redis key prefix must be bounded and cannot contain control characters or hash-tag braces.',
+            );
+        }
+    }
+
+    public function acknowledge(Reservation $reservation): void
+    {
+        [$id, $token] = ReservationReceipt::decode($reservation->receipt);
+        $keys = $this->keys($reservation->queue);
+        $changed = $this->eval(self::ACK, [
+            $keys['reserved'],
+            $keys['payloads'],
+            $keys['attempts'],
+            $keys['receipts'],
+            $keys['message_ids'],
+        ], [$id, $token]);
+        $this->assertChanged($changed, $reservation);
+    }
+
+    public function receive(string $queue, int $limit = 1, float $visibilitySeconds = 60.0): iterable
+    {
+        self::validateReceive($queue, $limit, $visibilitySeconds);
+        $now = $this->microseconds();
+        $token = ULID::generateMonotonic();
+        $keys = $this->keys($queue);
+        $result = $this->eval(self::RECEIVE, array_values($keys), [
+            (string) $now,
+            (string) Time::add($now, $visibilitySeconds),
+            $token,
+            (string) $limit,
+        ]);
+        if (is_array($result) && ($result[0] ?? null) === self::CORRUPTION_SENTINEL) {
+            throw new RedisBackendStateCorruption(
+                self::scalarString($result[1] ?? null, 'corrupt message id'),
+                self::scalarString($result[2] ?? null, 'corrupt field'),
+            );
+        }
+        if (!is_array($result) || count($result) % 4 !== 0) {
+            throw new \UnexpectedValueException('Redis returned a malformed reservation batch.');
+        }
+
+        $reservations = [];
+        for ($offset = 0, $count = count($result); $offset < $count; $offset += 4) {
+            $id = self::scalarString($result[$offset] ?? null, 'message id');
+            $payload = self::scalarString($result[$offset + 1] ?? null, 'payload');
+            $attempt = self::positiveInt($result[$offset + 2] ?? null, 'attempt');
+            $messageId = self::scalarString($result[$offset + 3] ?? null, 'logical message id');
+            $receipt = ReservationReceipt::encode($id, $token);
+
+            try {
+                $envelope = $this->serializer
+                    ->decode($payload)
+                    ->with(new AttemptStamp($attempt));
+                $reservations[] = Reservation::decoded($receipt, $queue, $envelope, $attempt, $messageId);
+            } catch (\Throwable $failure) {
+                $reservations[] = Reservation::undecodable(
+                    $receipt,
+                    $queue,
+                    DecodeFailure::fromThrowable($payload, $failure),
+                    $attempt,
+                    $messageId,
+                );
+            }
+        }
+
+        return $reservations;
+    }
+
+    public function reject(Reservation $reservation): void
+    {
+        $this->acknowledge($reservation);
+    }
+
+    public function release(Reservation $reservation, float $delaySeconds = 0.0): void
+    {
+        if (!is_finite($delaySeconds) || $delaySeconds < 0.0) {
+            throw new \InvalidArgumentException('Release delay must be a finite non-negative number.');
+        }
+        [$id, $token] = ReservationReceipt::decode($reservation->receipt);
+        $keys = $this->keys($reservation->queue);
+        $changed = $this->eval(self::RELEASE, [
+            $keys['ready'],
+            $keys['reserved'],
+            $keys['receipts'],
+        ], [
+            $id,
+            $token,
+            (string) Time::add($this->microseconds(), $delaySeconds),
+        ]);
+        $this->assertChanged($changed, $reservation);
+    }
+
+    public function send(Envelope $envelope, string $queue): Envelope
+    {
+        $this->assertQueue($queue);
+        if (!$envelope->last(MessageIdStamp::class) instanceof MessageIdStamp) {
+            $envelope = $envelope->with(new MessageIdStamp(ULID::generateMonotonic()));
+        }
+        $delay = $envelope->last(DelayStamp::class);
+        $keys = $this->keys($queue);
+        $this->eval(self::SEND, [
+            $keys['ready'],
+            $keys['payloads'],
+            $keys['attempts'],
+            $keys['message_ids'],
+        ], [
+            ULID::generateMonotonic(),
+            $this->serializer->encode($envelope),
+            (string) Time::add(
+                $this->microseconds(),
+                $delay instanceof DelayStamp ? $delay->seconds : 0.0,
+            ),
+            $envelope->last(MessageIdStamp::class)->id
+                ?? throw new \LogicException('Queued envelopes must have a message ID.'),
+        ]);
+
+        return $envelope;
+    }
+
+    public function size(string $queue): int
+    {
+        $this->assertQueue($queue);
+        $keys = $this->keys($queue);
+        $result = $this->eval(
+            self::SIZE,
+            [$keys['ready'], $keys['reserved']],
+            [(string) $this->microseconds()],
+        );
+
+        return self::nonNegativeInt($result, 'queue size');
+    }
+
+    private static function nonNegativeInt(mixed $value, string $field): int
+    {
+        if (
+            (!is_int($value) && !is_string($value))
+            || filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]) === false
+        ) {
+            throw new \UnexpectedValueException(sprintf('Redis %s must be a non-negative integer.', $field));
+        }
+
+        return (int) $value;
+    }
+
+    private static function positiveInt(mixed $value, string $field): int
+    {
+        $resolved = self::nonNegativeInt($value, $field);
+        if ($resolved < 1) {
+            throw new \UnexpectedValueException(sprintf('Redis %s must be positive.', $field));
+        }
+
+        return $resolved;
+    }
+
+    private static function scalarString(mixed $value, string $field): string
+    {
+        if (!is_string($value)) {
+            throw new \UnexpectedValueException(sprintf('Redis %s must be a string.', $field));
+        }
+
+        return $value;
+    }
+
+    private static function validateReceive(string $queue, int $limit, float $visibilitySeconds): void
+    {
+        QueueName::assert($queue);
+        if (str_contains($queue, '{') || str_contains($queue, '}')) {
+            throw new \InvalidArgumentException('Redis queue names cannot contain hash-tag braces.');
+        }
+        if ($limit < 1 || !is_finite($visibilitySeconds) || $visibilitySeconds <= 0.0) {
+            throw new \InvalidArgumentException(
+                'Receive requires a queue, positive limit, and positive visibility timeout.',
+            );
+        }
+        if ($limit > 1_000) {
+            throw new \InvalidArgumentException('Receive limit cannot exceed 1000.');
+        }
+    }
+
+    private function assertChanged(mixed $changed, Reservation $reservation): void
+    {
+        if (self::nonNegativeInt($changed, 'affected reservation count') !== 1) {
+            throw new InvalidReservation(sprintf(
+                'Reservation "%s" is no longer active.',
+                $reservation->receipt,
+            ));
+        }
+    }
+
+    private function assertQueue(string $queue): void
+    {
+        QueueName::assert($queue);
+        if (str_contains($queue, '{') || str_contains($queue, '}')) {
+            throw new \InvalidArgumentException('Redis queue names cannot contain hash-tag braces.');
+        }
+    }
+
+    /**
+     * @param list<string> $keys
+     * @param list<string> $arguments
+     */
+    private function eval(string $script, array $keys, array $arguments): mixed
+    {
+        return $this->client->execute(
+            'EVAL',
+            $script,
+            (string) count($keys),
+            ...$keys,
+            ...$arguments,
+        );
+    }
+
+    /** @return array{ready:string,reserved:string,payloads:string,attempts:string,receipts:string,message_ids:string} */
+    private function keys(string $queue): array
+    {
+        $tag = sprintf('{%s:%s}', $this->prefix, $queue);
+
+        return [
+            'ready' => $tag . ':ready',
+            'reserved' => $tag . ':reserved',
+            'payloads' => $tag . ':payloads',
+            'attempts' => $tag . ':attempts',
+            'receipts' => $tag . ':receipts',
+            'message_ids' => $tag . ':message_ids',
+        ];
+    }
+
+    private function microseconds(): int
+    {
+        return Time::fromDate($this->clock->now());
+    }
+}
+) == nil then
+        return 'attempt_integer'
+    end
+    if string.len(value) > 19 then return 'attempt_overflow' end
+    if string.len(value) == 19 and value > '9223372036854775806' then
         return 'attempt_overflow'
     end
     return nil
