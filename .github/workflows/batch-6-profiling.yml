@@ -97,3 +97,26 @@ jobs:
           name: batch-6-db-plans
           path: build/batch-6-db/*.json
           retention-days: 14
+
+  clone-review:
+    name: PHPForge duplicate-group inventory
+    if: contains(github.event.head_commit.message, '[clone-review]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Resolve development analyzers
+        run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+      - name: Capture PHPForge duplicate-group report
+        run: |
+          composer ic:test:duplicate > batch-6-duplicates.txt 2>&1
+          cat batch-6-duplicates.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batch-6-duplicate-groups
+          path: batch-6-duplicates.txt
+          retention-days: 14
