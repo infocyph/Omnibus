@@ -17,4 +17,4 @@ Dedicated GitHub Actions run: `37729844673` (passed all five jobs, including one
 
 ## Checkpoint
 
-The final follow-up changes remove PHPForge-forbidden output in the FPM example and apply the exact Pint whitespace fix; the formatter configuration is unchanged. The full repo PHPForge matrix must be checked on the final implementation SHA before Batch 8 can claim a QA-certified candidate. Batch 6 performance/regression acceptance remains explicitly deferred and unwaived.
+The final follow-up changes remove PHPForge-forbidden output in the FPM example and apply the exact Pint whitespace fix; the formatter configuration is unchanged. Full repo PHPForge validation passed in Security & Standards run `37730128164` on the following release-preflight branch head `7c953fa3b32a8fdb5feb84ab244214144ebb50e9`, which contains this unchanged Batch 7 example and documentation content. Batch 6 performance/regression acceptance remains explicitly deferred and unwaived.

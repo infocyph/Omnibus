@@ -4,7 +4,7 @@ Date: 2026-10-07 (Asia/Dhaka). Audited production revision: `17a86f28215b36f237a
 
 Target: **3.0.0 directly from 2.6**. The user has selected the next major and the full improvement scope; there is no intermediate patch/minor release in this plan.
 
-Status: **Batches 0–5 complete; Batch 6 implementation/ordinary QA complete with regression deferred by owner; Batch 7 implementation and consumer QA complete; Batch 8 next.** The branch is not ready to certify 3.0.0: Batches 7–8 and final matched-environment performance acceptance remain open. O07's two inherited complexity violations were resolved in Batches 1–2 without relaxing PHPForge limits. No release has been tagged or published.
+Status: **Batches 0–7 implementation and QA complete; Batch 8 non-performance preflight and single-process 300-second lifecycle soak pass, release certification withheld.** Performance/regression acceptance and final review remain open by owner request. The branch is not ready to certify 3.0.0: Batches 7–8 and final matched-environment performance acceptance remain open. O07's two inherited complexity violations were resolved in Batches 1–2 without relaxing PHPForge limits. No release has been tagged or published.
 
 Engineering authority: [PHPForge engineering principles](../../vendor/infocyph/phpforge/resources/engineering-principles.md) and [agent workflow](../../vendor/infocyph/phpforge/resources/AGENTS.md), as installed during this audit.
 
@@ -225,7 +225,7 @@ No new NATS/Kafka/AMQP/SQS SDK adapter, default parallel handler execution, time
 | 5 | Lease, cancellation, ambiguous-delivery recovery | 4 | U02, U06 | **Complete** |
 | 6 | Measured performance, structure, and storage improvements | 5 | U03, U04, U05, U07 | **Implementation / QA complete; performance acceptance deferred** |
 | 7 | 3.0 migration, executable examples, consumer packaging | 6 | U08, all public changes | **Implementation complete; executable/package/doc QA passed** |
-| 8 | Exact-candidate release certification | 7 | All release gates | **In progress — nonperformance release preparation** |
+| 8 | Exact-candidate release certification | 7 | All release gates | **Nonperformance preflight complete; performance/final certification held** |
 
 Implement in this order; keep source-mutating processors sequential and reuse successful analyzer results. Each batch should be reviewable with its production changes, focused regressions, updated relevant docs, and recorded validation. Any production change after certification requires checks appropriate to that change and renewed final-SHA evidence.
 
@@ -335,16 +335,18 @@ Exit gate: a consumer can follow the upgrade and forwarding examples successfull
 
 Owners: repository CI/PHPForge integration, matched performance environment, final evidence and release notes.
 
-- [ ] Run the installed PHPForge flow: `ic:process`, `ic:tests:details`, then `ic:release:guard`; inspect generated changes and resolve every detector finding without weakening gates. Run `composer validate --strict` and a fresh live dependency advisory audit.
-- [ ] Pass required PHP/dependency/service lanes and the dedicated deliberately lagging-replica job. Record actual backend case counts; separate local host, prepared-container, and hosted evidence.
-- [ ] Exercise actual host-managed lifecycle replacement, cancellation, completion, FPM requests, and standalone pool shutdown. Repeat clean-production and packed-consumer checks on the final candidate.
+- [x] Run the installed PHPForge flow: `ic:process`, `ic:tests:details`, then `ic:release:guard`; inspect generated changes and resolve every detector finding without weakening gates. Run `composer validate --strict` and a fresh live dependency advisory audit.
+- [x] Pass PHP 8.4/8.5 analysis, four service QA lanes, benchmark smoke, clean install and deliberately lagging-replica job. Eight services selected in CI: MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, Redis, Valkey and Memcached (run `37730128164`).
+- [ ] Export exact per-backend registered test case counts from the integration suite; service selection is verified, but output does not identify every backend's case count.
+- [x] Exercise actual host-managed lifecycle replacement, cancellation, completion, FPM requests, and standalone pool shutdown. Repeat clean-production and packed-consumer checks on the final candidate.
 - [ ] Benchmark repeated stable matched trials with readiness/warm-up and steady-state windows. Count only correct successful host requests in RPM; report jobs/s separately. Capture p50/p95/p99, errors/timeouts, queue growth, connections, CPU, and continuous live process-tree RSS during load.
 - [ ] Enforce the **maximum 2% median successful-RPM regression** and Batch 0's workload-specific resource/tail budgets in a stable matched environment. A disabled/noisy-runner comparison leaves the performance gate open.
-- [ ] Run at least **300 seconds** of representative persistent request/job execution, with no progressive queue/resource growth, unintended duplicate side effects, unreaped owned children, or active lease/context retention. Check allowed at-least-once redelivery through verified idempotency.
+- [x] Run **300 seconds** of repeated bound host request/consumer operations in one persistent CLI runtime with process-local queue, bounded retained state, explicit context completion, idempotent business keys and measured PHP allocated-memory stability (run `37730037465`).
+- [ ] Complete final multi-process live-host RSS/process-tree and durable-backend retention/lease acceptance; a single-process soak does not certify this.
 - [ ] Record final immutable candidate SHA, exact dependency locks, commands, PHP/extensions/services, harness versions, and CI artifacts. Required lanes must certify that SHA; historical or pre-final green runs cannot close the release gate.
-- [ ] Prepare 3.0.0 release notes and a finding/update checklist. Tag/publish 3.0.0 only after all mandatory gates close and publication is authorized; do not alter prior tags.
+- [x] Prepare 3.0.0 release notes and a finding/update checklist. Tag/publish 3.0.0 only after all mandatory gates close and publication is authorized; do not alter prior tags.
 
-Exit gate: all O01–O08 fixes, mandatory feature/portability work, and U01–U08 dispositions are complete; exact-candidate quality, composition, service, performance, documentation, and artifact evidence pass. Implementation completion, local validation, hosted certification, and publication remain separately recorded states.
+Exit gate: **NOT MET** until the owner reviews stable matched throughput regression, multi-backend backlog/retention, final live-host resource evidence, backend case-count inventory and final exact-candidate publication gates. Nonperformance implementation, PHPForge QA, production packaging, strict docs and single-process 300-second soak are complete; no performance acceptance or release approval is implied. Implementation completion, local validation, hosted certification, and publication remain separately recorded states.
 
 ## Audit artifacts and reproducibility
 
