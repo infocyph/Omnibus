@@ -273,7 +273,12 @@ final class RunwireBinding
         }
 
         $request?->cancellation->throwIfCancelled();
-        $scope?->cancellation()->throwIfCancelled();
+        if ($scope !== null) {
+            // Runwire 2.1 exposes its scope lifecycle through guarded operations,
+            // not a public isClosed() query. Reject stale scopes before business work.
+            $scope->barrier(1);
+            $scope->cancellation()->throwIfCancelled();
+        }
     }
 
     private function assertRuntime(RuntimeContext $runtime): void
@@ -282,6 +287,12 @@ final class RunwireBinding
         $currentPid = is_int($pid) ? $pid : 0;
         if ($runtime->pid !== $currentPid) {
             throw new LogicException('Runwire runtime PID does not match the current Omnibus process.');
+        }
+        if ($runtime->generation !== null) {
+            $latest = $this->generations[$this->generationKey($runtime)] ?? null;
+            if ($latest !== null && $runtime->generation < $latest) {
+                throw new LogicException('Stale Runwire runtime generation cannot enter Omnibus.');
+            }
         }
     }
 
@@ -302,17 +313,22 @@ final class RunwireBinding
             return;
         }
 
-        $key = implode(':', [
-            $runtime->driver->value,
-            $runtime->mode,
-            (string) ($runtime->workerSlot ?? -1),
-        ]);
+        $key = $this->generationKey($runtime);
         $latest = $this->generations[$key] ?? null;
         if ($latest !== null && $runtime->generation < $latest) {
             throw new LogicException('Stale Runwire runtime generation cannot enter Omnibus.');
         }
 
         $this->generations[$key] = max($latest ?? $runtime->generation, $runtime->generation);
+    }
+
+    private function generationKey(RuntimeContext $runtime): string
+    {
+        return implode(':', [
+            $runtime->driver->value,
+            $runtime->mode,
+            (string) ($runtime->workerSlot ?? -1),
+        ]);
     }
 
     /**
