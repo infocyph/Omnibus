@@ -133,7 +133,7 @@ fwrite(STDOUT, json_encode([
     'resolved_class_count' => $count,
     'measurements' => $measurements,
     'dynamic_lookup' => [
-         'map_resolution_growth_bytes' => $afterResolution - $beforeResolution,
+        'map_resolution_growth_bytes' => $afterResolution - $beforeResolution,
         'remaining_after_map_disposal_bytes' => $afterDisposal - $beforeResolution,
         'note' => 'Uses distinct existing classes; maps can be released but PHP class definitions remain resident.',
     ],
