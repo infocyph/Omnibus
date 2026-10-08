@@ -44,17 +44,9 @@ final class InMemoryWorkflowStore implements WorkflowStore
 
         $cancelled = 0;
         foreach ($workflow['items'] as &$entry) {
-            if (!in_array($entry['status'], [
-                WorkflowItemStatus::Pending,
-                WorkflowItemStatus::Dispatching,
-                WorkflowItemStatus::Dispatched,
-            ], true)) {
-                continue;
+            if (self::cancelActiveEntry($entry)) {
+                $cancelled++;
             }
-            $entry['status'] = WorkflowItemStatus::Cancelled;
-            $entry['claim_token'] = null;
-            $entry['claim_until'] = null;
-            $cancelled++;
         }
         unset($entry);
 
@@ -145,17 +137,7 @@ final class InMemoryWorkflowStore implements WorkflowStore
         $cancelled = 0;
         if ($workflow['kind'] === 'chain') {
             foreach ($workflow['items'] as &$candidate) {
-                if (
-                    $candidate['item']->index > $index
-                    && in_array($candidate['status'], [
-                        WorkflowItemStatus::Pending,
-                        WorkflowItemStatus::Dispatching,
-                        WorkflowItemStatus::Dispatched,
-                    ], true)
-                ) {
-                    $candidate['status'] = WorkflowItemStatus::Cancelled;
-                    $candidate['claim_token'] = null;
-                    $candidate['claim_until'] = null;
+                if ($candidate['item']->index > $index && self::cancelActiveEntry($candidate)) {
                     $cancelled++;
                 }
             }
@@ -272,6 +254,24 @@ final class InMemoryWorkflowStore implements WorkflowStore
             completedNow: $completedNow,
             finalizedNow: self::isFinalized($state),
         );
+    }
+
+    /** @param array{item: WorkflowItem,status: WorkflowItemStatus,claim_token: string|null,claim_until: int|null} $entry */
+    private static function cancelActiveEntry(array &$entry): bool
+    {
+        if (!in_array($entry['status'], [
+            WorkflowItemStatus::Pending,
+            WorkflowItemStatus::Dispatching,
+            WorkflowItemStatus::Dispatched,
+        ], true)) {
+            return false;
+        }
+
+        $entry['status'] = WorkflowItemStatus::Cancelled;
+        $entry['claim_token'] = null;
+        $entry['claim_until'] = null;
+
+        return true;
     }
 
     /** @param array{item: WorkflowItem,status: WorkflowItemStatus,claim_token: string|null,claim_until: int|null} $entry */

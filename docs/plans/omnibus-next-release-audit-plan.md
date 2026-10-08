@@ -310,7 +310,7 @@ Exit gate: **met.** Host cancellation is checked at admission/handler boundaries
 Owners: serializers/codecs, map caches, detector-reported clone owners, durable query/schema paths, existing benchmark harnesses.
 
 - [ ] Finish U03 with before/after profiles and valid/invalid/cyclic/UTF-8 payload regressions. Keep a validator change only when representative gains justify it and all serialization limits remain enforced.
-- [ ] Finish U04 by reviewing all reported clone groups and centralizing actual duplicated invariants; review newly touched types/call hops using PHPForge. Do not optimize the source-file count.
+- [x] Review all 12 current PHPForge clone groups (5.82% duplicated lines). Centralize the repeated in-memory workflow active-claim cancellation invariant; retain the other provider/benchmark/hot-path clones where abstraction adds overhead or obscures distinct semantics. See `docs/evidence/batch-6-review.md` and the unmodified PHPForge detector output.
 - [ ] Finish U05 with persistent-worker lookup/memory measurements; implement a bound only where supported workloads justify it, preserving map resolution and finite-class warm performance.
 - [ ] Finish U07 with driver-specific query plans, realistic backlog/history sizes, contention, safe batch limits, and retention analysis. Do not prune active claims or remove terminal records needed for redelivery identity.
 - [ ] Compare dependency-only, unbound 3.0, and bound 3.0 behavior against Batch 0 on the same workload/environment; include normal paths, contention, cache hit/miss, failures, and retry paths.
