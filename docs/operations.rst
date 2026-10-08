@@ -266,3 +266,53 @@ handler: its reservation and item are already settled. Recover
 Poison workflow payloads are correlated through durable message-ID metadata;
 inspect the raw failure and recover the terminal workflow as domain policy
 requires without attempting to decode stale workflow stamps.
+
+Lease, cancellation, and ambiguous delivery
+-------------------------------------------
+
+Omnibus is at-least-once. Size leases from measured work rather than an
+average handler time:
+
+* queue visibility should exceed the slowest supported handler plus
+  settlement/cleanup time and scheduling jitter;
+* overlap leases should exceed the longest supported handler plus cleanup
+  margin. The built-in overlap scope verifies ownership after execution but
+  does not run a library-owned renewal loop;
+* detached uniqueness leases should cover the period in which a broker send
+  can be ambiguous; and
+* workflow/failure retry claim leases should cover one send attempt plus its
+  durable settlement.
+
+A practical initial budget is ``p99 handler + p99 settlement + 2 * jitter``.
+For serial consumers, the last prefetched reservation can wait roughly
+``prefetch * p99 handler`` before it starts, so keep that comfortably below
+visibility or reduce prefetch. Validate these numbers with the real workload.
+
+Cancellation is phase-specific. Before business execution, Runwire
+cancellation stops admission and leaves the reservation recoverable through
+its visibility timeout. Once the handler returns successfully, Omnibus uses a
+worker-owned Runwire cleanup request with a five-second deadline to finish
+acknowledgement/lease settlement. The original host request remains cancelled;
+it is checked again immediately after settlement so no next prefetched message
+starts under that cancelled request.
+
+A send exception is an ambiguous result: the broker may already have accepted
+the message. Omnibus therefore retains the attempted detached-uniqueness,
+workflow-dispatch, or failed-message retry claim until its TTL expires.
+Unattempted workflow claims are released immediately. This prevents immediate
+duplicate publication while preserving eventual retry.
+
+Use stable message/workflow IDs and idempotent handlers. Reconcile from the
+durable failure/workflow state before manually retrying uncertain sends.
+Stale claim tokens cannot settle newer ownership. Workflow lifecycle events
+and telemetry exporters are best-effort diagnostics, not authoritative state,
+and should never include payloads, secrets, or unbounded tenant identifiers.
+
+Deferred callback lifetime
+--------------------------
+
+After-commit callbacks execute in the request that performs the commit when
+that request is still active. After-response callbacks do not capture a
+Runwire context themselves; they use whichever host context is active when
+the host invokes the deferred callback. Queue consumers must be entered with a
+fresh host job/request context rather than reusing the originating request.

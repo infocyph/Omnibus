@@ -44,6 +44,12 @@ The Omnibus suite covers:
   and idempotent lifecycle events;
 * telemetry success and exporter-failure isolation;
 * after-commit, after-response, scheduling, and broadcasting boundaries;
+
+* phase-specific Runwire cancellation before handling, during handling, and
+  after successful business execution;
+* ambiguous unique/failure/workflow sends retaining attempted claims until
+  expiry while unattempted workflow claims remain immediately recoverable;
+* stale retry/dispatch tokens failing against newer ownership.
 * deliberately low DBLayer ``max_params`` coverage for atomic queue
   reservations, workflow claims, and workflow inserts;
 * SQLite lock contention proving DBLayer transaction attempts are not
