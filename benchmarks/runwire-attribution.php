@@ -68,6 +68,7 @@ $run = static function (string $scenario) use ($bus, $runtime, $message): int {
     }
 
     $request = RequestContext::create($runtime);
+
     try {
         if ($scenario === 'request-only') {
             return 42;

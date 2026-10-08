@@ -4,7 +4,7 @@ Date: 2026-10-07 (Asia/Dhaka). Audited production revision: `17a86f28215b36f237a
 
 Target: **3.0.0 directly from 2.6**. The user has selected the next major and the full improvement scope; there is no intermediate patch/minor release in this plan.
 
-Status: **Batches 0–7 implementation and QA complete; Batch 8 non-performance preflight and single-process 300-second lifecycle soak pass, release certification withheld.** Performance/regression acceptance and final review remain open by owner request. The branch is not ready to certify 3.0.0: Batches 7–8 and final matched-environment performance acceptance remain open. O07's two inherited complexity violations were resolved in Batches 1–2 without relaxing PHPForge limits. No release has been tagged or published.
+Status: **Batches 0–7 implementation and QA complete; Batch 8 non-performance preflight and single-process 300-second lifecycle soak pass, release certification withheld.** Host-overhead attribution and a narrow no-adapter Runwire optimization are under QA; the stable matched throughput/regression gate, deeper backend/load evidence and owner approval remain open. No 3.0.0 release has been tagged or published. O07's two inherited complexity violations were resolved in Batches 1–2 without relaxing PHPForge limits. No release has been tagged or published.
 
 Engineering authority: [PHPForge engineering principles](../../vendor/infocyph/phpforge/resources/engineering-principles.md) and [agent workflow](../../vendor/infocyph/phpforge/resources/AGENTS.md), as installed during this audit.
 
