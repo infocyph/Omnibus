@@ -222,8 +222,8 @@ No new NATS/Kafka/AMQP/SQS SDK adapter, default parallel handler execution, time
 | 2 | Child ownership, circuit recovery, remaining static repairs | 1 | O01, O04; remaining O07 | **Complete** |
 | 3 | New dependency baseline and portable core | 2 | UID 6, CacheLayer 4, DBLayer 6, Runwire 2.1.1; U01 | **Complete** |
 | 4 | Passed-instance Runwire composition | 3 | Full runtime contract above | **Complete** |
-| 5 | Lease, cancellation, ambiguous-delivery recovery | 4 | U02, U06 | **In progress** |
-| 6 | Measured performance, structure, and storage improvements | 5 | U03, U04, U05, U07 | Pending |
+| 5 | Lease, cancellation, ambiguous-delivery recovery | 4 | U02, U06 | **Complete** |
+| 6 | Measured performance, structure, and storage improvements | 5 | U03, U04, U05, U07 | **Next** |
 | 7 | 3.0 migration, executable examples, consumer packaging | 6 | U08, all public changes | Pending |
 | 8 | Exact-candidate release certification | 7 | All release gates | Pending |
 
@@ -296,14 +296,14 @@ Exit gate: **met.** `RunwireBinding` is the single fiber-local passed-instance o
 
 Owners: consumer/worker boundaries, execution scopes, uniqueness/overlap, failure/workflow claim paths, deferred dispatch, telemetry.
 
-- [ ] Implement the phase-specific cancellation contract: stop new work, combine the earliest host/local deadline, distinguish committed success from unexecuted work, and use bounded worker-owned cleanup without clearing host cancellation.
-- [ ] Cover cancellation during receive, lock acquisition, retry/backoff, handlers, failure persistence, acknowledgement, and between prefetched messages; leave unfinished receipts safely recoverable.
-- [ ] Finish U02 with measured handler/prefetch/TTL budgets, real lease-loss interleavings, and safe defaults/guidance. Add renewal only where a real provider/host capability supports it without library-owned background loops.
-- [ ] Finish U06 with ambiguous send, retry-claim expiry, stale-token settlement, cross-store reconciliation, and notification-failure tests. Preserve at-least-once guarantees and explicit nonretryable post-execution failures.
-- [ ] Add useful bounded recovery diagnostics through existing telemetry/events and executable idempotency guidance; retain payload confidentiality and control metric cardinality.
-- [ ] Test after-response and after-commit callback lifetime separately from the originating request; queued consumption receives a fresh host job scope.
+- [x] Implement the phase-specific cancellation contract: stop new work, combine the earliest host/local deadline, distinguish committed success from unexecuted work, and use bounded worker-owned cleanup without clearing host cancellation.
+- [x] Cover cancellation during receive, lock acquisition, retry/backoff, handlers, failure persistence, acknowledgement, and between prefetched messages; leave unfinished receipts safely recoverable.
+- [x] Finish U02 with measured handler/prefetch/TTL budgets, real lease-loss interleavings, and safe defaults/guidance. Add renewal only where a real provider/host capability supports it without library-owned background loops.
+- [x] Finish U06 with ambiguous send, retry-claim expiry, stale-token settlement, cross-store reconciliation, and notification-failure tests. Preserve at-least-once guarantees and explicit nonretryable post-execution failures.
+- [x] Add useful bounded recovery diagnostics through existing telemetry/events and executable idempotency guidance; retain payload confidentiality and control metric cardinality.
+- [x] Test after-response and after-commit callback lifetime separately from the originating request; queued consumption receives a fresh host job scope.
 
-Exit gate: side effects are not automatically repeated because of late cancellation or cleanup failure, claim/receipt recovery is documented and tested, and lease protection claims match actual renewal behavior.
+Exit gate: **met.** Host cancellation is checked at admission/handler boundaries and is never converted into an automatic retry. Once business execution returns successfully, acknowledgement runs inside a bounded five-second worker-owned Runwire cleanup request while the original request remains cancelled, then cancellation is surfaced before the next prefetched item. Local deadline scopes inherit the earlier active host deadline/cancellation. Ambiguous unique, failure-retry, and workflow sends retain the attempted lease/claim until expiry; unattempted workflow claims are released immediately; stale claim tokens cannot settle newer ownership. Lease/prefetch sizing and idempotent reconciliation guidance are documented, and after-response/after-commit lifetime behavior is covered explicitly. Exact-SHA GitHub Actions run `37707636584` on `38191540c26af6dfe51f28e9c5b9219c9d7a545f` passed both analysis jobs, all four QA combinations, both representative benchmarks, clean install, and replica-affinity.
 
 ### Batch 6 — Performance, structure, and storage review
 
