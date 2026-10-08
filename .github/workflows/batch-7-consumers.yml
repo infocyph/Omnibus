@@ -84,16 +84,23 @@ jobs:
           sudo apt-get install -y -qq libfcgi-bin
           docker run --rm -d --name omnibus-b7-fpm -p 127.0.0.1:9090:9000 \
             -v "$RUNNER_TEMP/consumer:/app:ro" -w /app php:8.4-fpm-alpine
+          success=0
           for attempt in $(seq 1 30); do
-            if (echo > /dev/tcp/127.0.0.1/9090) 2>/dev/null; then break; fi
+            response="$(SCRIPT_FILENAME=/app/fpm-request.php SCRIPT_NAME=/fpm-request.php \
+              REQUEST_METHOD=GET REQUEST_URI=/fpm-request.php SERVER_PROTOCOL=HTTP/1.1 \
+              DOCUMENT_ROOT=/app cgi-fcgi -bind -connect 127.0.0.1:9090 2>&1)" || {
+                sleep 1
+                continue
+              }
+            if grep -Fq '"ok":true' <<< "$response" && grep -Fq '"value":42' <<< "$response"; then
+              success=1
+              break
+            fi
             sleep 1
           done
-          response="$(SCRIPT_FILENAME=/app/fpm-request.php SCRIPT_NAME=/fpm-request.php \
-            REQUEST_METHOD=GET REQUEST_URI=/fpm-request.php SERVER_PROTOCOL=HTTP/1.1 \
-            DOCUMENT_ROOT=/app cgi-fcgi -bind -connect 127.0.0.1:9090)"
           printf '%s\n' "$response"
-          grep -F '"ok":true' <<< "$response"
-          grep -F '"value":42' <<< "$response"
+          docker logs omnibus-b7-fpm
+          test "$success" -eq 1
       - name: Install selected optional adapters without dev packages
         run: |
           cd "$RUNNER_TEMP/consumer"
