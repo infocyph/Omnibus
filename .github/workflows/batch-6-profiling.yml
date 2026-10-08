@@ -120,3 +120,20 @@ jobs:
           name: batch-6-duplicate-groups
           path: batch-6-duplicates.txt
           retention-days: 14
+
+  format-diagnostics:
+    name: PHPForge Pint formatting diagnostics
+    if: contains(github.event.head_commit.message, '[format-check]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+      - name: Autoformat two changed PHP files and print exact result
+        run: |
+          vendor/bin/pint --config=vendor/infocyph/phpforge/resources/pint.json benchmarks/batch-6-profile.php src/Workflow/InMemoryWorkflowStore.php
+          git diff -- benchmarks/batch-6-profile.php src/Workflow/InMemoryWorkflowStore.php
