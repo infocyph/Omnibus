@@ -1,0 +1,7 @@
+# Stable release performance acceptance gate
+
+The release gate is `.github/workflows/stable-performance.yml`, backed by `benchmarks/release-acceptance.php`. It intentionally requires a **dedicated, isolated, Linux x64 self-hosted runner labeled `omnibus-stable`** with pinned CPU allocation, PHP and operating system. Do not set `OMNIBUS_BENCHMARK_STABLE=1` on a shared GitHub-hosted runner to bypass this requirement.
+
+The workflow runs seven balanced matched trials each of released 2.6, 2.6 with 3.0 dependencies, unbound 3.0, 3.0 host-context-only and Runwire-bound 3.0 with four real PHP accepting workers. It records the exact candidate SHA, each lockfile hash and JSON process-tree CPU/RSS, tail latency and correct-response throughput. The validator **fails** unless trials use the same stable fingerprint, labeled source revisions, zero failures/timeouts, minimum 4,000 correct requests per trial, five visible host processes and measured CPU/RSS.
+
+Unwaived budgets: maximum 2% median successful RPM regression and trial CV; p95 +15%; p99 +20%; CPU seconds per correct operation +5%; RSS growth 4 MiB per 10k requests. The bound path is compared with current 3.0 host-only, because 2.6 has no Runwire binding. A successful shared GitHub-hosted [four-worker diagnostic](https://github.com/infocyph/Omnibus/actions/runs/37734388224) is **not** stable runner release certification. If no dedicated runner is connected, this mandatory final gate remains open; do not merge, tag or publish.
