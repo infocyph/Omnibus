@@ -59,11 +59,12 @@ jobs:
             sha256sum "$target/composer.lock" > "results/$target-lock.sha256"
           done
           git -C candidate rev-parse HEAD > results/candidate-revision.txt
-      - name: Seven alternating matched trials on one hosted runner
+      - name: Seven long-window alternating matched trials on one hosted runner
         env:
           OMNIBUS_BENCHMARK_STABLE: '0'
           OMNIBUS_BENCHMARK_HTTP_WORKERS: '4'
-          OMNIBUS_BENCHMARK_REQUESTS_PER_CLIENT: '1000'
+          # 10k requests/client: warm c4 lasts several seconds instead of ~0.5s.
+          OMNIBUS_BENCHMARK_REQUESTS_PER_CLIENT: '10000'
         run: |
           for trial in 1 2 3 4 5 6 7; do
             if [ "$((trial % 2))" -eq 0 ]; then

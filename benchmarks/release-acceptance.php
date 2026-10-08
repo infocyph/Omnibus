@@ -139,6 +139,10 @@ foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound']
             || ($work['metadata']['host_processes_peak'] ?? 0) < 5) {
             throw new RuntimeException('Correct responses, throughput depth or live workers missing.');
         }
+        if ($mode === 'hosted' && (!is_numeric($work['duration_seconds'] ?? null)
+            || (float) $work['duration_seconds'] < 3.0)) {
+            throw new RuntimeException('Hosted warm c4 measurement window must be at least three seconds: ' . $file);
+        }
         $cpu = $r['cpu']['seconds_per_successful_operation'] ?? null;
         $rss = $r['memory']['growth_mb'] ?? null;
         if (!is_numeric($cpu) || $cpu <= 0 || !is_numeric($rss)
@@ -151,6 +155,7 @@ foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound']
         }
         $trials[] = [
             'rpm' => (float) $r['successful_rpm'],
+            'window_seconds' => (float) ($work['duration_seconds'] ?? 0.0),
             'p95' => (float) $r['latency_ms']['p95'],
             'p99' => (float) $r['latency_ms']['p99'],
             'cpu' => (float) $cpu,
@@ -177,7 +182,11 @@ foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound']
     if ($cv > 0.02) {
         $failures[] = sprintf('%s RPM CV %.2f%% exceeds matched-trial 2%%', $variant, $cv * 100);
     }
-    $results[$variant] = $measurements + ['rpm_cv_percent' => $cv * 100];
+    $results[$variant] = $measurements + [
+        'rpm_cv_percent' => $cv * 100,
+        'trial_rpm' => array_column($trials, 'rpm'),
+        'trial_windows_seconds' => array_column($trials, 'window_seconds'),
+    ];
 }
 if (array_keys($revisions['2.6']) !== array_keys($revisions['dependency-only'])
     || array_keys($revisions['3.0-unbound']) !== array_keys($revisions['3.0-host-only'])

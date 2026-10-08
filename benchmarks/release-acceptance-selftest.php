@@ -22,6 +22,7 @@ function acceptanceFixtures(string $directory, bool $hosted = false): void
                 $workloads[] = [
                     'name' => $name,
                     'concurrency' => $concurrency,
+                    'duration_seconds' => 5.0,
                     'metadata' => [
                         'host_processes_peak' => 5,
                         'expected_http_status' => $name === 'request_host_expected_failure' ? 503 : 200,
@@ -127,6 +128,14 @@ try {
     }
     if (validateAcceptance($directory)['exit'] === 0) {
         throw new RuntimeException('Dedicated mode accepted hosted evidence.');
+    }
+    $short = "$directory/3.0-unbound-1.json";
+    $shortDocument = json_decode((string) file_get_contents($short), true, 512, JSON_THROW_ON_ERROR);
+    $shortDocument['workloads'][3]['duration_seconds'] = 0.45;
+    file_put_contents($short, json_encode($shortDocument, JSON_THROW_ON_ERROR));
+    $shortResult = validateAcceptance($directory, 'hosted');
+    if ($shortResult['exit'] === 0 || !str_contains($shortResult['output'], 'measurement window')) {
+        throw new RuntimeException('Hosted mode accepted a sub-second throughput window.');
     }
     acceptanceFixtures($directory);
     if (validateAcceptance($directory, 'hosted')['exit'] === 0) {
