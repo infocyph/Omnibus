@@ -36,6 +36,7 @@ jobs:
           for target in baseline dependency-only; do
             cp candidate/benchmarks/release.php "$target/benchmarks/release.php"
             cp candidate/benchmarks/release-host.php "$target/benchmarks/release-host.php"
+            cp candidate/benchmarks/host-process-monitor.php "$target/benchmarks/host-process-monitor.php"
           done
       - name: Adopt only the 3.0 dependency floor in the second 2.6 checkout
         run: |
@@ -110,6 +111,7 @@ jobs:
           for target in baseline dependency-only; do
             cp candidate/benchmarks/release.php "$target/benchmarks/release.php"
             cp candidate/benchmarks/release-host.php "$target/benchmarks/release-host.php"
+            cp candidate/benchmarks/host-process-monitor.php "$target/benchmarks/host-process-monitor.php"
           done
           php -r '
             $p="dependency-only/composer.json";
@@ -128,6 +130,7 @@ jobs:
       - name: Execute real 4-worker host comparisons with balanced trial order
         env:
           OMNIBUS_BENCHMARK_HTTP_WORKERS: '4'
+          OMNIBUS_BENCHMARK_REQUESTS_PER_CLIENT: '1000'
         run: |
           mkdir -p results
           for trial in 1 2 3; do
@@ -146,7 +149,7 @@ jobs:
               esac
               (cd "$dir" && env "$flags" OMNIBUS_BENCHMARK_RELEASE="$variant" OMNIBUS_BENCHMARK_REVISION="$(git rev-parse HEAD)" \
                 php benchmarks/release.php "../results/$variant-$trial.json" >/dev/null)
-              jq -e '.environment.http_server_workers==4 and .environment.stable==false and all(.workloads[]; .result.failed_operations==0 and .result.timeouts==0)' \
+              jq -e '.environment.http_server_workers==4 and .environment.stable==false and all(.workloads[]; .result.failed_operations==0 and .result.timeouts==0) and all(.workloads[] | select(.name=="request_host_warm_c4"); .result.memory.peak_mb > 0 and .result.cpu.seconds_per_successful_operation > 0 and .metadata.host_processes_peak >= 4)' \
                 "results/$variant-$trial.json" > /dev/null
             done
           done

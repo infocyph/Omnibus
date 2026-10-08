@@ -161,7 +161,7 @@ function concurrentHttp(string $name, string $url, int $concurrency, int $status
     $started = hrtime(true);
     for ($i = 0; $i < $concurrency; $i++) {
         $process = proc_open([
-            PHP_BINARY, __FILE__, 'http-client', $url, '100', (string) $status,
+            PHP_BINARY, __FILE__, 'http-client', $url, (string) (getenv('OMNIBUS_BENCHMARK_REQUESTS_PER_CLIENT') ?: '100'), (string) $status,
             json_encode($body, JSON_THROW_ON_ERROR),
         ], [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
         if (!is_resource($process)) {
@@ -196,6 +196,69 @@ function concurrentHttp(string $name, string $url, int $concurrency, int $status
         'client_processes' => $concurrency,
         'router_reconstructs_bus_per_request' => true,
     ], 25);
+}
+
+/** @param array<mixed> $expected @return array<string,mixed> */
+function observedHttp(
+    string $name,
+    string $url,
+    int $concurrency,
+    int $status,
+    array $expected,
+    int $hostPid,
+    int $workerCount,
+): array {
+    $stop = tempnam(sys_get_temp_dir(), 'omnibus-monitor-stop-');
+    $report = tempnam(sys_get_temp_dir(), 'omnibus-monitor-data-');
+    if (!is_string($stop) || !is_string($report)) {
+        throw new RuntimeException('Unable to allocate host metric paths.');
+    }
+    unlink($stop);
+    $monitor = proc_open([
+        PHP_BINARY, 'benchmarks/host-process-monitor.php', (string) $hostPid, $stop, $report,
+    ], [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes, dirname(__DIR__));
+    if (!is_resource($monitor)) {
+        throw new RuntimeException('Unable to launch host RSS/CPU sampling process.');
+    }
+
+    try {
+        $workload = concurrentHttp($name, $url, $concurrency, $status, $expected);
+    } finally {
+        touch($stop);
+        $monitorExit = proc_close($monitor);
+    }
+    try {
+        if ($monitorExit !== 0) {
+            throw new RuntimeException('Host RSS/CPU sampling failed.');
+        }
+        $data = json_decode((string) file_get_contents($report), true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($data) || ($data['peak_process_count'] ?? 0) < $workerCount) {
+            throw new RuntimeException('Host workers were not all observed in the process tree.');
+        }
+        $success = $workload['result']['successful_operations'];
+        $workload['metadata']['host_processes_peak'] = $data['peak_process_count'];
+        $workload['metadata']['host_cpu_seconds_per_success'] = $success > 0 ? $data['cpu_seconds'] / $success : null;
+        $workload['metadata']['host_sampling_interval_ms'] = $data['sampling_interval_ms'];
+        $workload['result']['cpu'] = [
+            'average_percent' => $data['cpu_seconds'] / $data['elapsed_seconds'] * 100,
+            'peak_percent' => null,
+            'seconds_per_successful_operation' => $success > 0 ? $data['cpu_seconds'] / $success : null,
+        ];
+        $workload['result']['memory'] = [
+            'average_mb' => $data['average_rss_bytes'] / 1_048_576,
+            'peak_mb' => $data['peak_rss_bytes'] / 1_048_576,
+            'growth_mb' => $data['rss_growth_bytes'] / 1_048_576,
+        ];
+
+        return $workload;
+    } finally {
+        if (is_file($stop)) {
+            unlink($stop);
+        }
+        if (is_file($report)) {
+            unlink($report);
+        }
+    }
 }
 
 /** @return list<array<string,mixed>> */
@@ -253,11 +316,16 @@ function httpBaselines(): array
             throw new RuntimeException('Benchmark warmup response was invalid.');
         }
 
+        $hostStatus = proc_get_status($process);
+        $hostPid = $hostStatus['pid'] ?? null;
+        if (!is_int($hostPid)) {
+            throw new RuntimeException('Unable to resolve benchmark server PID for monitoring.');
+        }
         $workloads = [workload('request_host_cold', 'http', 1, 1, 1, 0, $coldSeconds, $cold['latencies'])];
         foreach ([1, 2, 4] as $concurrency) {
-            $workloads[] = concurrentHttp("request_host_warm_c$concurrency", $base . '/', $concurrency, 200, ['ok' => true, 'value' => 42]);
+            $workloads[] = observedHttp("request_host_warm_c$concurrency", $base . '/', $concurrency, 200, ['ok' => true, 'value' => 42], $hostPid, $workerCount);
         }
-        $workloads[] = concurrentHttp('request_host_expected_failure', $base . '/failure', 1, 503, ['ok' => false, 'error' => 'expected']);
+        $workloads[] = observedHttp('request_host_expected_failure', $base . '/failure', 1, 503, ['ok' => false, 'error' => 'expected'], $hostPid, $workerCount);
 
         return $workloads;
     } finally {
