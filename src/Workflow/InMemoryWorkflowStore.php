@@ -257,6 +257,14 @@ final class InMemoryWorkflowStore implements WorkflowStore
     }
 
     /** @param array{item: WorkflowItem,status: WorkflowItemStatus,claim_token: string|null,claim_until: int|null} $entry */
+    private static function assertIdentity(array $entry, string $itemId): void
+    {
+        if ($entry['item']->itemId !== $itemId) {
+            throw new WorkflowInconsistentDelivery('Workflow item identity does not match its index.');
+        }
+    }
+
+    /** @param array{item: WorkflowItem,status: WorkflowItemStatus,claim_token: string|null,claim_until: int|null} $entry */
     private static function cancelActiveEntry(array &$entry): bool
     {
         if (!in_array($entry['status'], [
@@ -272,14 +280,6 @@ final class InMemoryWorkflowStore implements WorkflowStore
         $entry['claim_until'] = null;
 
         return true;
-    }
-
-    /** @param array{item: WorkflowItem,status: WorkflowItemStatus,claim_token: string|null,claim_until: int|null} $entry */
-    private static function assertIdentity(array $entry, string $itemId): void
-    {
-        if ($entry['item']->itemId !== $itemId) {
-            throw new WorkflowInconsistentDelivery('Workflow item identity does not match its index.');
-        }
     }
 
     private static function isFinalized(WorkflowState $state): bool

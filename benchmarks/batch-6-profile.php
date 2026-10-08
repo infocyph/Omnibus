@@ -91,6 +91,7 @@ foreach (get_declared_classes() as $type) {
     if (!$reflection->isInstantiable() || $reflection->isAnonymous()) {
         continue;
     }
+
     try {
         $objects[] = $reflection->newInstanceWithoutConstructor();
     } catch (Throwable) {
