@@ -16,8 +16,6 @@ use Infocyph\Omnibus\Serialization\StampCodecRegistry;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
-const AUDITED_REVISION = '17a86f28215b36f237a9db3e014c5425c4d6ea0a';
-
 final readonly class ReleaseDurableMessage
 {
     public function __construct(public int $sequence) {}
@@ -110,7 +108,7 @@ function workload(
     return [
         'name' => $name,
         'type' => $type,
-        'metadata' => ['audited_revision' => AUDITED_REVISION] + $metadata,
+        'metadata' => ['source_revision' => getenv('OMNIBUS_BENCHMARK_REVISION') ?: 'unlabeled'] + $metadata,
         'repetitions' => max(1, $attempted),
         'warmup_operations' => $warmup,
         'duration_seconds' => $seconds,
@@ -193,6 +191,10 @@ function concurrentHttp(string $name, string $url, int $concurrency, int $status
     return workload($name, 'http', $concurrency, $attempted, $successful, $timeouts, $seconds, $latencies, [
         'expected_http_status' => $status,
         'validated_output' => true,
+        'server_implementation' => 'php-cli-built-in-single-worker',
+        'server_workers' => 1,
+        'client_processes' => $concurrency,
+        'router_reconstructs_bus_per_request' => true,
     ], 25);
 }
 
@@ -357,8 +359,9 @@ $document = [
         'xdebug' => extension_loaded('xdebug'),
         'extensions' => get_loaded_extensions(),
         'runner' => getenv('GITHUB_ACTIONS') === 'true' ? 'github-actions' : 'local',
-        'release' => '2.6-baseline',
-        'audited_revision' => AUDITED_REVISION,
+        'release' => getenv('OMNIBUS_BENCHMARK_RELEASE') ?: 'unlabeled',
+        'source_revision' => getenv('OMNIBUS_BENCHMARK_REVISION') ?: 'unlabeled',
+        'http_server_implementation' => 'single-worker-php-cli',
     ],
     'workloads' => [...httpBaselines(), ...durableBaselines()],
 ];
