@@ -8,7 +8,9 @@ use Fiber;
 use Infocyph\CacheLayer\Integration\Runwire\RunwireIntegration as CacheRunwireIntegration;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\Exception\CancelledException;
 use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\Runtime\RequestExecutionPolicy;
 use Infocyph\Runwire\Runtime\Enum\RuntimeCapability;
 use Infocyph\Runwire\RuntimeContext;
 use LogicException;
@@ -47,6 +49,82 @@ final class RunwireBinding
     public function request(): ?RequestContext
     {
         return $this->context()['request'] ?? null;
+    }
+
+    public function checkpoint(): void
+    {
+        $context = $this->context();
+        if ($context !== null) {
+            $this->assertContext($context['runtime'], $context['request'], $context['scope']);
+        }
+    }
+
+    public function isCancellationRequested(): bool
+    {
+        $context = $this->context();
+
+        return $context !== null
+            && (
+                $context['request']?->cancellation->isCancelled() === true
+                || $context['scope']?->cancellation()->isCancelled() === true
+            );
+    }
+
+    public function remainingSeconds(): ?float
+    {
+        $context = $this->context();
+        if ($context === null) {
+            return null;
+        }
+
+        $remaining = array_values(array_filter([
+            $context['request']?->cancellation->deadline()->remainingSeconds(),
+            $context['scope']?->cancellation()->deadline()->remainingSeconds(),
+        ], static fn(?float $seconds): bool => $seconds !== null));
+
+        return $remaining === [] ? null : min($remaining);
+    }
+
+    public function isHostCancellation(\Throwable $failure): bool
+    {
+        return $failure instanceof CancelledException;
+    }
+
+    /**
+     * @template TResult
+     * @param callable():TResult $callback
+     * @return TResult
+     */
+    public function cleanup(callable $callback, float $maxSeconds = 5.0): mixed
+    {
+        if (!is_finite($maxSeconds) || $maxSeconds <= 0.0) {
+            throw new \InvalidArgumentException('Runwire cleanup budget must be positive and finite.');
+        }
+
+        $current = $this->context();
+        if ($current === null) {
+            return $callback();
+        }
+
+        $this->assertRuntime($current['runtime']);
+        $cleanupRequest = RequestContext::create(
+            $current['runtime'],
+            new RequestExecutionPolicy(maxExecutionSeconds: $maxSeconds),
+            requestId: ($current['request']?->requestId ?? 'omnibus') . ':cleanup',
+        );
+        $fiber = Fiber::getCurrent();
+        $this->setContext($fiber, [
+            'runtime' => $current['runtime'],
+            'request' => $cleanupRequest,
+            'scope' => null,
+        ]);
+
+        try {
+            return $this->run($callback);
+        } finally {
+            $cleanupRequest->complete();
+            $this->setContext($fiber, $current);
+        }
     }
 
     /**
@@ -176,11 +254,7 @@ final class RunwireBinding
         ?RequestContext $request,
         ?CoroutineScope $scope,
     ): void {
-        $pid = getmypid();
-        $currentPid = is_int($pid) ? $pid : 0;
-        if ($runtime->pid !== $currentPid) {
-            throw new LogicException('Runwire runtime PID does not match the current Omnibus process.');
-        }
+        $this->assertRuntime($runtime);
         if ($request !== null && $request->runtime() !== $runtime) {
             throw new LogicException('Runwire request context belongs to a different runtime.');
         }
@@ -201,6 +275,15 @@ final class RunwireBinding
         }
 
         return $this->fiberContexts[$fiber] ?? null;
+    }
+
+    private function assertRuntime(RuntimeContext $runtime): void
+    {
+        $pid = getmypid();
+        $currentPid = is_int($pid) ? $pid : 0;
+        if ($runtime->pid !== $currentPid) {
+            throw new LogicException('Runwire runtime PID does not match the current Omnibus process.');
+        }
     }
 
     private function rememberGeneration(RuntimeContext $runtime): void

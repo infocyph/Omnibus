@@ -61,7 +61,17 @@ final readonly class Consumer
     private function consume(string $queue, int $limit, float $visibilitySeconds): ConsumerResult
     {
         $received = $succeeded = $released = $failed = 0;
+        $this->runwire->checkpoint();
         foreach ($this->receiver->receive($queue, $limit, $visibilitySeconds) as $reservation) {
+            try {
+                $this->runwire->checkpoint();
+            } catch (\Throwable $failure) {
+                if ($this->runwire->isHostCancellation($failure)) {
+                    break;
+                }
+
+                throw $failure;
+            }
             $received++;
             $decodeFailure = $reservation->decodingFailure();
             if ($decodeFailure !== null) {
@@ -90,10 +100,25 @@ final readonly class Consumer
             try {
                 $this->scope->run(
                     $envelope,
-                    fn(object $message, \Infocyph\Omnibus\Envelope\Envelope $delivery): mixed
-                        => $this->invoker->invoke($message, $delivery, $context),
+                    function (object $message, \Infocyph\Omnibus\Envelope\Envelope $delivery) use ($context): mixed {
+                        $this->runwire->checkpoint();
+
+                        return $this->invoker->invoke($message, $delivery, $context);
+                    },
                 );
             } catch (\Throwable $exception) {
+                if ($this->runwire->isHostCancellation($exception)) {
+                    break;
+                }
+                try {
+                    $this->runwire->checkpoint();
+                } catch (\Throwable $failure) {
+                    if ($this->runwire->isHostCancellation($failure)) {
+                        break;
+                    }
+
+                    throw $failure;
+                }
                 if ($this->retry->shouldRetry($exception, $reservation->attempt)) {
                     $this->receiver->release(
                         $reservation,
@@ -123,8 +148,11 @@ final readonly class Consumer
                 continue;
             }
 
-            $this->receiver->acknowledge($reservation);
+            $this->runwire->cleanup(function () use ($reservation): void {
+                $this->receiver->acknowledge($reservation);
+            });
             $succeeded++;
+            $this->runwire->checkpoint();
         }
 
         return new ConsumerResult($received, $succeeded, $released, $failed);

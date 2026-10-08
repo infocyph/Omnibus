@@ -76,7 +76,7 @@ final readonly class WorkflowCoordinator
             try {
                 $this->sender->send($claim->item->envelope, $claim->item->queue);
             } catch (\Throwable $failure) {
-                for ($index = $position, $count = count($claims); $index < $count; $index++) {
+                for ($index = $position + 1, $count = count($claims); $index < $count; $index++) {
                     try {
                         $unattempted = $claims[$index];
                         $this->store->releaseDispatchClaim(
