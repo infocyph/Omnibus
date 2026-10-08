@@ -47,10 +47,13 @@ end
 
 local function attemptIssue(value)
     if value == false then return 'attempt' end
-    -- HINCRBY rejects leading-zero decimal representations (including "00"
-    -- and "01"). Validate its canonical non-negative integer format BEFORE
-    -- mutating ready/reserved sets; Redis Lua errors do not roll back writes.
-    if value ~= '0' and string.match(value, '^[1-9]%d*
+    -- HINCRBY only accepts canonical integers; leading-zero values like
+    -- "00" or "01" raise errors after other Lua writes have already occurred.
+    if value ~= '0' and string.match(value, '^[1-9]%d*$') == nil then
+        return 'attempt_integer'
+    end
+    if string.len(value) > 19 then return 'attempt_overflow' end
+    if string.len(value) == 19 and value > '9223372036854775806' then
         return 'attempt_overflow'
     end
     return nil
