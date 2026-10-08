@@ -244,6 +244,15 @@ final class RunwireBinding
         $this->setContext($fiber, $next);
 
         try {
+            // The entry context was already validated. Without borrowed adapters,
+            // avoid repeating that validation before invoking the caller.
+            // Nested bus/consumer operations still validate via run().
+            if (count($this->connections) === 0
+                && (!class_exists(CacheRunwireIntegration::class)
+                    || CacheRunwireIntegration::runtime() !== $runtime)) {
+                return $callback();
+            }
+
             return $this->run($callback);
         } finally {
             $this->setContext($fiber, $hadPrevious ? $current : null);
