@@ -229,6 +229,59 @@ test('Runwire binding rejects invalid ownership, cancellation, and stale runtime
         ->toThrow(LogicException::class, 'PID');
 });
 
+test('an already bound Fiber cannot resume with an obsolete Runwire generation', function (): void {
+    $binding = new RunwireBinding();
+    $first = omnibusRunwireRuntime(generation: 1);
+    $newer = omnibusRunwireRuntime(generation: 2);
+    $performedBusinessWork = false;
+    $fiber = new Fiber(function () use ($binding, $first, &$performedBusinessWork): void {
+        $binding->withRunwire($first, function () use ($binding, &$performedBusinessWork): void {
+            Fiber::suspend();
+            $binding->run(static function () use (&$performedBusinessWork): void {
+                $performedBusinessWork = true;
+            });
+        });
+    });
+
+    $fiber->start();
+    expect($fiber->isSuspended())->toBeTrue();
+    $binding->withRunwire($newer, static fn(): null => null);
+
+    expect(fn() => $fiber->resume())->toThrow(LogicException::class, 'Stale')
+        ->and($performedBusinessWork)->toBeFalse()
+        ->and($fiber->isTerminated())->toBeTrue()
+        ->and($binding->runtime())->toBeNull();
+});
+
+test('closed coroutine scopes reject Runwire binding before executing callbacks', function (): void {
+    $binding = new RunwireBinding();
+    $runtime = omnibusRunwireRuntime(coroutines: true);
+    $scope = null;
+    $ran = false;
+    (new CoroutineRuntime())->run(static function (CoroutineScope $activeScope) use (&$scope): void {
+        $scope = $activeScope;
+    });
+
+    expect($scope)->toBeInstanceOf(CoroutineScope::class)
+        ->and(fn() => $binding->withRunwire(
+            $runtime,
+            static function () use (&$ran): void {
+                $ran = true;
+            },
+            scope: $scope,
+        ))->toThrow(LogicException::class, 'already closed')
+        ->and($ran)->toBeFalse()
+        ->and($binding->scope())->toBeNull();
+
+    (new CoroutineRuntime())->run(static function (CoroutineScope $activeScope) use ($binding, $runtime): void {
+        expect($binding->withRunwire(
+            $runtime,
+            static fn(): string => 'open scope',
+            scope: $activeScope,
+        ))->toBe('open scope');
+    });
+});
+
 test('Worker idle waiting borrows a Runwire coroutine scope and retains synchronous fallback', function (): void {
     $runtime = omnibusRunwireRuntime(coroutines: true);
     $request = RequestContext::create($runtime, requestId: 'coroutine-worker');
