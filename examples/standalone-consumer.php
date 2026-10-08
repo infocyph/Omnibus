@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Infocyph\Omnibus\Clock\SystemClock;
 use Infocyph\Omnibus\Consumer\Consumer;
 use Infocyph\Omnibus\Consumer\Worker;
 use Infocyph\Omnibus\Consumer\WorkerLifecycle;
@@ -21,6 +20,8 @@ use Infocyph\Omnibus\Routing\Route;
 use Infocyph\Omnibus\Routing\RouteMap;
 use Infocyph\Omnibus\Transport\InMemoryTransport;
 use Infocyph\Omnibus\Transport\TransportRegistry;
+use Psr\Clock\ClockInterface;
+use Psr\EventDispatcher\EventDispatcherInterface;
 
 require $argv[1] ?? dirname(__DIR__) . '/vendor/autoload.php';
 
@@ -34,7 +35,12 @@ final readonly class ExampleWorkCompleted
     public function __construct(public string $key) {}
 }
 
-$clock = new SystemClock();
+$clock = new class implements ClockInterface {
+    public function now(): DateTimeImmutable
+    {
+        return new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    }
+};
 $transport = new InMemoryTransport($clock);
 $effects = [];
 $events = [];
@@ -44,6 +50,9 @@ $listenerProvider = new ListenerMap([
     }],
 ]);
 $eventDispatcher = new EventDispatcher($listenerProvider);
+if (!$eventDispatcher instanceof EventDispatcherInterface) {
+    throw new RuntimeException('Event dispatch must respect the PSR-14 contract.');
+}
 $invoker = new HandlerInvoker(new HandlerMap([
     ExampleWork::class => static function (ExampleWork $message) use (&$effects, $eventDispatcher): void {
         if (isset($effects[$message->key])) {
