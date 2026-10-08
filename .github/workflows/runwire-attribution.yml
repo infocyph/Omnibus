@@ -93,3 +93,20 @@ jobs:
           name: binding-fastpath-ab-php${{ matrix.php }}
           path: binding-a-b/*.json
           retention-days: 30
+
+  format-audit:
+    if: contains(github.event.head_commit.message, '[format-attribution]')
+    name: Capture PHPForge Pint correction
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+      - run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+      - name: Print exact formatting changes
+        run: |
+          vendor/bin/pint --config=vendor/infocyph/phpforge/resources/pint.json benchmarks/runwire-attribution.php
+          git diff -- benchmarks/runwire-attribution.php
