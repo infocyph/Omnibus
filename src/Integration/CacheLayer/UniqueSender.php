@@ -41,19 +41,9 @@ final readonly class UniqueSender implements Sender
             throw new DuplicateMessage(sprintf('Unique message "%s" is already active.', $key));
         }
 
-        try {
-            return $this->sender->send(
-                $envelope->with(new UniqueStamp($handle->key, $handle->token, $this->leaseSeconds)),
-                $queue,
-            );
-        } catch (\Throwable $failure) {
-            try {
-                $this->locks->release($handle);
-            } catch (\Throwable) {
-                // The send failure remains primary; the lease TTL owns uncertain cleanup.
-            }
-
-            throw $failure;
-        }
+        return $this->sender->send(
+            $envelope->with(new UniqueStamp($handle->key, $handle->token, $this->leaseSeconds)),
+            $queue,
+        );
     }
 }

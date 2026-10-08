@@ -228,3 +228,44 @@ test('message codec recursively accepts only bounded JSON values', function (): 
         fclose($resource);
     }
 });
+
+
+test('JSON codec rejects cyclic payloads, malformed UTF-8 and nonfinite values before serialization', function (): void {
+    $cycle = [];
+    $cycle['again'] = &$cycle;
+    $invalidUtf8 = "\xB1";
+    $codec = static fn(array $data): CallbackMessageCodec => new CallbackMessageCodec(
+        'adversarial',
+        TestCommand::class,
+        static fn(TestCommand $message): array => $data + ['message' => $message->value],
+        static fn(array $data): TestCommand => new TestCommand((string) ($data['message'] ?? 'decoded')),
+    );
+
+    expect(fn() => $codec(['cycle' => $cycle])->encode(new TestCommand('cycle')))
+        ->toThrow(UnexpectedValueException::class)
+        ->and(fn() => $codec(['value' => $invalidUtf8])->encode(new TestCommand('utf8')))
+        ->toThrow(UnexpectedValueException::class)
+        ->and(fn() => $codec(['value' => INF])->encode(new TestCommand('infinite')))
+        ->toThrow(UnexpectedValueException::class);
+});
+
+test('JSON serializer rejects payloads over configured depth and invalid UTF-8', function (): void {
+    $serializer = omnibusSerializer();
+    $nested = ['value' => 'ok'];
+    for ($i = 0; $i < 40; $i++) {
+        $nested = ['nested' => $nested];
+    }
+
+    $deepWire = json_encode([
+        'version' => 1,
+        'message' => ['type' => 'test.command.v1', 'data' => $nested],
+        'stamps' => [],
+    ], JSON_THROW_ON_ERROR, 100);
+    $invalidWire = '{"version":1,"message":{"type":"test.command.v1","data":{"value":"'
+        . "\xB1" . '"}},"stamps":[]}';
+
+    expect(fn() => $serializer->decode($deepWire))
+        ->toThrow(JsonException::class)
+        ->and(fn() => $serializer->decode($invalidWire))
+        ->toThrow(JsonException::class);
+});

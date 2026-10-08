@@ -44,6 +44,12 @@ The Omnibus suite covers:
   and idempotent lifecycle events;
 * telemetry success and exporter-failure isolation;
 * after-commit, after-response, scheduling, and broadcasting boundaries;
+
+* phase-specific Runwire cancellation before handling, during handling, and
+  after successful business execution;
+* ambiguous unique/failure/workflow sends retaining attempted claims until
+  expiry while unattempted workflow claims remain immediately recoverable;
+* stale retry/dispatch tokens failing against newer ownership.
 * deliberately low DBLayer ``max_params`` coverage for atomic queue
   reservations, workflow claims, and workflow inserts;
 * SQLite lock contention proving DBLayer transaction attempts are not
@@ -54,7 +60,8 @@ The Omnibus suite covers:
   and explicit no-zombie checks;
 * DBLayer construction after fork inside the worker factory;
 * core/FPM-compatible Worker execution without constructing Runwire or a pool
-  backend, while mandatory PCNTL/POSIX Composer requirements remain present.
+  backend, with PCNTL/POSIX absent from Omnibus's production requirements and
+  explicit process features guarded at startup.
 
 Commands
 --------
@@ -64,6 +71,7 @@ Commands
    composer ic:tests
    composer ic:ci
    composer benchmark
+   composer benchmark:release
    composer benchmark:worker-pool
    composer soak:consumer
    composer soak:durable
@@ -78,14 +86,25 @@ configuration is present. In an ordinary local shell, MySQL, MariaDB,
 PostgreSQL, SQL Server, Redis, Valkey and Memcached cases are registered only
 when their required extension and ``IC_*`` service variables are available;
 the rest of the suite remains runnable without provisioning every optional
-service. GitHub Actions is strict: the release workflow provisions all expected
-services/extensions, and test discovery fails if any expected integration
-configuration is missing. Run the full local parity matrix with PHP 8.4 or 8.5
-and the ``pdo_sqlite``, ``pdo_mysql``, ``pdo_pgsql``, ``pdo_sqlsrv``,
-``redis`` and ``memcached`` extensions installed in the PHP runtime executing
-Composer. PCNTL/POSIX are mandatory Omnibus runtime requirements. Starting
-Docker services alone does not install extensions into host PHP. Check that
-runtime with ``composer ic:doctor``.
+service.
+
+Required CI or release lanes declare an explicit JSON string list in
+``INTEGRATION_SERVICES``. A non-empty manifest is strict: every selected SQL
+service must have its PDO driver, credentials and a matching test dataset;
+selected Redis, Valkey and Memcached services must have their extension and
+service configuration. Discovery fails before the suite can silently register
+zero cases. An absent, empty or ``[]`` manifest keeps ordinary local discovery
+optional. The dedicated replica lane uses the narrower
+``["mysql","mariadb","postgres"]`` manifest rather than inheriting the full
+release matrix.
+
+Run the full local parity matrix with PHP 8.4 or 8.5 and the ``pdo_sqlite``,
+``pdo_mysql``, ``pdo_pgsql``, ``pdo_sqlsrv``, ``redis`` and
+``memcached`` extensions installed in the PHP runtime executing Composer.
+PCNTL/POSIX are needed only for standalone process/signal tests that select
+those capabilities; they are not Omnibus core runtime requirements. Starting
+Docker services alone does not install extensions into host PHP. Check that runtime
+with ``composer ic:doctor``.
 
 For disposable local integration services, start the repository's service
 definitions under a separate Compose project:
@@ -102,6 +121,7 @@ the PHP runtime containing those extensions:
 
 .. code-block:: console
 
+   INTEGRATION_SERVICES='["mysql","mariadb","postgres","mssql","sqlite","redis","valkey","memcached"]' \
    IC_SERVICE_DATABASE=phpforge IC_SERVICE_USERNAME=phpforge \
    IC_SERVICE_PASSWORD='Phpforge_123!' \
    IC_MSSQL_USER=sa IC_MSSQL_PASSWORD='Phpforge_123!' \
@@ -118,6 +138,15 @@ The remaining local scripts are intentionally package-specific:
 
 * ``composer benchmark`` runs Omnibus's component lifecycle benchmark;
   PHPForge's ``ic:benchmark`` command runs PHPBench subjects instead;
+* ``composer benchmark:release`` writes ``build/benchmark-result.json`` using
+  PHPForge's representative benchmark schema. It validates a real HTTP host
+  response on cold and warmed paths at several concurrency levels, validates an
+  expected failure response, and drains a two-connection SQLite durable queue.
+  Benchmark smoke results do not establish final release acceptance. The separate
+  matched-performance workflow requires seven trials and enforces 2% unbound
+  RPM regression, the owner-approved 3% Runwire-bound overhead cap, and unchanged
+  correctness, variance, latency, CPU and RSS limits. Hosted results retain their
+  explicit shared-infrastructure classification;
 * ``composer soak:consumer`` proves that the process-local queue drains without
   progressive memory growth;
 * ``composer soak:durable`` proves that alternating SQLite consumers drain the
@@ -132,5 +161,29 @@ The remaining local scripts are intentionally package-specific:
   lifetime of an arbitrary long-running worker command.
 
 CI runs supported PHP versions with lowest and stable dependency resolution,
-clean production installation, static analysis, architecture checks, live
-database/Redis services, and strict Sphinx documentation.
+including UID 6, CacheLayer 4, DBLayer 6, and Runwire 2.1.1; clean production
+installation; static analysis; architecture checks; live database/Redis
+services; strict integration discovery; representative benchmark artifact
+validation; and strict Sphinx documentation. The package-level portable-core
+probe is kept separate so it can be executed in a runtime where PCNTL/POSIX are
+actually unavailable rather than simulated as missing.
+
+Independent consumer and documentation verification
+---------------------------------------------------
+
+The repository's ``examples/standalone-consumer.php`` exercises an in-memory
+PSR-14 event, a host-managed worker, and idempotent duplicate business keys.
+``examples/runwire-forwarding.php`` checks direct/intermediary/Fiber forwarding
+and fresh request lifetimes through a persistent Runwire runtime. CI additionally
+installs the production Composer archive in an isolated ``--no-dev`` consumer,
+repeats the standalone probe against that consumer's autoloader, and issues an
+actual FastCGI request to PHP-FPM using ``examples/fpm-request.php``.
+Run a strict Sphinx build with:
+
+.. code-block:: console
+
+   python -m pip install -r docs/requirements.txt
+   python -m sphinx -n -W -b html docs build/sphinx
+
+This is distinct from the library's development autoloader and verifies that
+unselected integration libraries do not become core Composer requirements.

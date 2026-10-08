@@ -7,6 +7,7 @@ use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\Exceptions\TransactionException;
 use Infocyph\Omnibus\Consumer\Consumer;
 use Infocyph\Omnibus\Consumer\DirectExecutionScope;
+use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
@@ -43,14 +44,21 @@ use Infocyph\Omnibus\Workflow\WorkflowStatus;
 use Infocyph\Omnibus\Workflow\WorkflowTransport;
 
 /** @return array{Connection, DBLayerTransport, DBLayerFailureStore, FrozenClock, JsonEnvelopeSerializer} */
-function omnibusDatabaseQueue(?int $maxParams = null): array
+function omnibusDatabaseQueue(?int $maxParams = null, ?int $maxParamBytes = null): array
 {
     $configuration = [
         'driver' => 'sqlite',
         'database' => ':memory:',
     ];
+    $security = [];
     if ($maxParams !== null) {
-        $configuration['security'] = ['max_params' => $maxParams];
+        $security['max_params'] = $maxParams;
+    }
+    if ($maxParamBytes !== null) {
+        $security['max_param_bytes'] = $maxParamBytes;
+    }
+    if ($security !== []) {
+        $configuration['security'] = $security;
     }
     $connection = new Connection(ConnectionConfig::fromArray($configuration));
     foreach (QueueSchema::statements('sqlite') as $statement) {
@@ -687,3 +695,129 @@ test('poison workflow payloads terminalize by durable message metadata without d
         ->and($store->itemStatus($id, $item->itemId, $item->index))->toBe(WorkflowItemStatus::Failed)
         ->and($store->find($id)?->status)->toBe(WorkflowStatus::Failed);
 })->with(['chain', 'batch']);
+
+
+test('malformed DB storage wrappers become poison without stranding healthy neighbors', function (): void {
+    [$connection, $transport, $failures, $clock] = omnibusDatabaseQueue();
+    $stored = '~omnibus:b64:v1~%%%';
+    $connection->insert(
+        'INSERT INTO omnibus_messages (id, message_id, queue_name, payload, available_at, attempts, reserved_until, receipt, created_at) VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, ?)',
+        ['00000000000000000000000001', 'corrupt-wrapper', 'work', $stored, 0, 0],
+    );
+    $transport->send(new Envelope(new TestCommand('healthy-neighbor')), 'work');
+    $handled = 0;
+    $consumer = new Consumer(
+        $transport,
+        new HandlerInvoker(new HandlerMap([
+            TestCommand::class => static function () use (&$handled): void {
+                $handled++;
+            },
+        ])),
+        new ExponentialRetryStrategy(maximumAttempts: 1),
+        $failures,
+        $clock,
+    );
+
+    $result = $consumer->run('work', 2);
+    $storedFailures = $failures->all();
+
+    expect($result->received)->toBe(2)
+        ->and($result->succeeded)->toBe(1)
+        ->and($result->failed)->toBe(1)
+        ->and($handled)->toBe(1)
+        ->and($transport->size('work'))->toBe(0)
+        ->and($storedFailures)->toHaveCount(1)
+        ->and($storedFailures[0]->payload)->toBe($stored);
+});
+
+test('corrupt stored failure wrappers remain bounded and inspectable', function (): void {
+    [$connection, , $failures] = omnibusDatabaseQueue(maxParamBytes: 400_000);
+    $stored = '~omnibus:b64:v1~' . str_repeat('%', 300_000);
+    $connection->insert(
+        'INSERT INTO omnibus_failures (id, queue_name, payload, payload_kind, payload_truncated, attempt, failed_at, failure_class, reason, retry_status, retry_token, retry_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)',
+        [
+            'corrupt-stored-failure',
+            'work',
+            $stored,
+            'envelope',
+            0,
+            1,
+            0,
+            RuntimeException::class,
+            'original failure',
+            'failed',
+        ],
+    );
+
+    $failure = $failures->all()[0];
+
+    expect($failure->envelope)->toBeNull()
+        ->and($failure->payload)->toBe(substr($stored, 0, 262_144))
+        ->and($failure->payloadTruncated)->toBeTrue()
+        ->and($failure->failureClass)->toBe(RuntimeException::class)
+        ->and($failure->reason)->toBe('original failure');
+});
+
+test('atomic DB workflow settlement rejects ambiguous workflow identity without mutation', function (): void {
+    [$connection, $transport, , , $serializer] = omnibusDatabaseQueue();
+    $store = new DBLayerWorkflowStore($connection, $serializer);
+    $workflowId = str_repeat('w', 26);
+    $store->createBatch($workflowId, [new Envelope(new TestCommand('atomic'))], 'work');
+    $claim = $store->claimPending($workflowId)[0];
+    $store->confirmDispatched($workflowId, $claim->item->itemId, $claim->token);
+    $store->markHandled($workflowId, $claim->item->itemId, 0);
+    $ambiguous = $claim->item->envelope->with(new ChainStamp(
+        str_repeat('c', 26),
+        str_repeat('i', 26),
+        0,
+    ));
+    $transport->send($ambiguous, 'work');
+    $reservation = [...$transport->receive('work')][0];
+
+    expect(fn() => $transport->acknowledgeWorkflow($reservation, $store))
+        ->toThrow(WorkflowInconsistentDelivery::class)
+        ->and($store->itemStatus($workflowId, $claim->item->itemId, 0))
+        ->toBe(WorkflowItemStatus::Handled);
+
+    $transport->release($reservation);
+});
+
+test('durable workflow creation rejects duplicate message identities atomically', function (): void {
+    [$connection, , , , $serializer] = omnibusDatabaseQueue();
+    $store = new DBLayerWorkflowStore($connection, $serializer);
+    $workflowId = str_repeat('q', 26);
+    $duplicate = new Envelope(
+        new TestCommand('duplicate'),
+        [new MessageIdStamp('durable-workflow-message')],
+    );
+
+    expect(fn() => $store->createBatch($workflowId, [$duplicate, $duplicate], 'work'))
+        ->toThrow(TransactionException::class)
+        ->and($store->find($workflowId))->toBeNull()
+        ->and($store->findItemByMessageId('durable-workflow-message'))->toBeNull();
+});
+
+test('DBLayer pruning preserves in-flight and sent retry reconciliation state', function (): void {
+    [, , $failures, $clock] = omnibusDatabaseQueue();
+    foreach (['prune-free', 'prune-active', 'prune-sent'] as $id) {
+        $failures->add(FailedMessage::decoded(
+            $id,
+            'work',
+            new Envelope(new TestCommand($id)),
+            1,
+            $clock->now()->modify('-2 days'),
+            RuntimeException::class,
+            'failed',
+        ));
+    }
+    $active = $failures->claimRetry('prune-active');
+    $sent = $failures->claimRetry('prune-sent');
+    expect($failures->markRetrySent($sent))->toBeTrue()
+        ->and($failures->prune($clock->now()))->toBe(1)
+        ->and($failures->find('prune-free'))->toBeNull()
+        ->and($failures->find('prune-active'))->not->toBeNull()
+        ->and($failures->find('prune-sent'))->not->toBeNull()
+        ->and($failures->releaseRetry($active))->toBeTrue()
+        ->and($failures->prune($clock->now()))->toBe(1)
+        ->and($failures->removeRetried($sent))->toBeTrue();
+});

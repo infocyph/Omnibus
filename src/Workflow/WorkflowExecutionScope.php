@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace Infocyph\Omnibus\Workflow;
 
 use Infocyph\Omnibus\Consumer\ExecutionScope;
-use Infocyph\Omnibus\Envelope\BatchStamp;
-use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 
 final readonly class WorkflowExecutionScope implements ExecutionScope
@@ -18,17 +16,23 @@ final readonly class WorkflowExecutionScope implements ExecutionScope
 
     public function run(Envelope $envelope, callable $handler): mixed
     {
-        $identity = self::identity($envelope);
+        $identity = WorkflowItem::identity($envelope);
         if ($identity === null) {
             return $this->inner->run($envelope, $handler);
         }
 
-        [$workflowId, $itemId, $index] = $identity;
-        $status = $this->workflows->itemStatus($workflowId, $itemId, $index);
-
+        $status = $this->workflows->itemStatus(
+            $identity['workflow_id'],
+            $identity['item_id'],
+            $identity['index'],
+        );
         if ($status === WorkflowItemStatus::Dispatched) {
             $result = $this->inner->run($envelope, $handler);
-            $this->workflows->markHandled($workflowId, $itemId, $index);
+            $this->workflows->markHandled(
+                $identity['workflow_id'],
+                $identity['item_id'],
+                $identity['index'],
+            );
 
             return $result;
         }
@@ -44,24 +48,9 @@ final readonly class WorkflowExecutionScope implements ExecutionScope
 
         throw new WorkflowInconsistentDelivery(sprintf(
             'Workflow item "%s:%d" cannot execute while it is %s.',
-            $workflowId,
-            $index,
+            $identity['workflow_id'],
+            $identity['index'],
             $status->value,
         ));
-    }
-
-    /** @return array{string, string, int}|null */
-    private static function identity(Envelope $envelope): ?array
-    {
-        $batch = $envelope->last(BatchStamp::class);
-        if ($batch instanceof BatchStamp) {
-            return [$batch->workflowId, $batch->itemId, $batch->index];
-        }
-
-        $chain = $envelope->last(ChainStamp::class);
-
-        return $chain instanceof ChainStamp
-            ? [$chain->workflowId, $chain->itemId, $chain->index]
-            : null;
     }
 }

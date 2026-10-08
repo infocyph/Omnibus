@@ -11,7 +11,9 @@ use Infocyph\Omnibus\Failure\FailureNotFound;
 use Infocyph\Omnibus\Failure\FailureRetryClaim;
 use Infocyph\Omnibus\Failure\FailureRetryClaimUnavailable;
 use Infocyph\Omnibus\Failure\FailureStore;
+use Infocyph\Omnibus\Integration\Runwire\RunwireBinding;
 use Infocyph\Omnibus\Internal\Time;
+use Infocyph\Omnibus\Serialization\DecodeFailure;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
 use Infocyph\UID\ULID;
 use Psr\Clock\ClockInterface;
@@ -25,8 +27,10 @@ final readonly class DBLayerFailureStore implements FailureStore
         private EnvelopeSerializer $serializer,
         private string $rawTable = 'omnibus_failures',
         private ClockInterface $clock = new SystemClock(),
+        ?RunwireBinding $runwire = null,
     ) {
         $this->table = SqlIdentifier::quote($this->rawTable, $connection->getDriverName());
+        $runwire?->registerConnection($connection);
     }
 
     public function add(FailedMessage $failure): void
@@ -170,7 +174,7 @@ final readonly class DBLayerFailureStore implements FailureStore
     public function prune(\DateTimeImmutable $before): int
     {
         return $this->connection->delete(
-            "DELETE FROM {$this->table} WHERE failed_at < ?",
+            "DELETE FROM {$this->table} WHERE failed_at < ? AND retry_status = 'failed'",
             [Time::fromDate($before)],
         );
     }
@@ -298,11 +302,29 @@ final readonly class DBLayerFailureStore implements FailureStore
     {
         $id = self::string($row, 'id');
         $queue = self::string($row, 'queue_name');
-        $payload = StoredPayload::decode(self::string($row, 'payload'));
+        $storedPayload = self::string($row, 'payload');
         $attempt = self::int($row, 'attempt');
         $failedAt = Time::toDate(self::int($row, 'failed_at'));
         $failureClass = self::string($row, 'failure_class');
         $reason = self::string($row, 'reason');
+        $payloadTruncated = self::bool($row, 'payload_truncated');
+
+        try {
+            $payload = StoredPayload::decode($storedPayload);
+        } catch (\Throwable $failure) {
+            $decodeFailure = DecodeFailure::fromThrowable($storedPayload, $failure);
+
+            return FailedMessage::undecodable(
+                $id,
+                $queue,
+                $decodeFailure->payload,
+                $attempt,
+                $failedAt,
+                $failureClass,
+                $reason,
+                $payloadTruncated || $decodeFailure->truncated,
+            );
+        }
 
         $kind = self::string($row, 'payload_kind');
         if ($kind !== 'raw' && $kind !== 'envelope') {
@@ -332,7 +354,7 @@ final readonly class DBLayerFailureStore implements FailureStore
             $failedAt,
             $failureClass,
             $reason,
-            self::bool($row, 'payload_truncated'),
+            $payloadTruncated,
         );
     }
 }

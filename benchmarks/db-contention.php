@@ -94,10 +94,10 @@ try {
     if ($indexSet !== 'current') {
         if ($driver === 'mysql') {
             $connection->statement(
-                'DROP INDEX omnibus_contention_messages_queue_idx ON omnibus_contention_messages',
+                'DROP INDEX omnibus_contention_messages_ready_idx ON omnibus_contention_messages',
             );
         } else {
-            $connection->statement('DROP INDEX omnibus_contention_messages_queue_idx');
+            $connection->statement('DROP INDEX omnibus_contention_messages_ready_idx');
         }
         $connection->statement(
             'CREATE INDEX omnibus_contention_messages_ready_idx ON omnibus_contention_messages (queue_name, available_at, id)',
@@ -149,7 +149,12 @@ try {
         ? 'EXPLAIN ANALYZE SELECT id FROM omnibus_contention_messages WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT 100'
         : 'EXPLAIN (ANALYZE, BUFFERS) SELECT id FROM omnibus_contention_messages WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT 100';
     $now = (int) floor(microtime(true) * 1_000_000);
-    $executionPlan = $connection->select($explainSql, ['contention', $now, $now]);
+    $explainStatement = $connection->getPdo()->prepare($explainSql);
+    $explainStatement->execute(['contention', $now, $now]);
+    $executionPlan = $explainStatement->fetchAll(PDO::FETCH_ASSOC);
+    $explainStatement->closeCursor();
+    // Forked workers must not inherit a live parent PDO socket.
+    $connection->disconnect();
 
     $run = bin2hex(random_bytes(8));
     $started = hrtime(true);

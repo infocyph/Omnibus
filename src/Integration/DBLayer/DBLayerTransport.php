@@ -8,11 +8,10 @@ use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Driver\Support\DriverProfile;
 use Infocyph\DBLayer\Exceptions\TransactionException;
 use Infocyph\Omnibus\Envelope\AttemptStamp;
-use Infocyph\Omnibus\Envelope\BatchStamp;
-use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\DelayStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
+use Infocyph\Omnibus\Integration\Runwire\RunwireBinding;
 use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Serialization\DecodeFailure;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
@@ -23,6 +22,7 @@ use Infocyph\Omnibus\Transport\ReservationReceipt;
 use Infocyph\Omnibus\Transport\Transport;
 use Infocyph\Omnibus\Workflow\AtomicWorkflowTransport;
 use Infocyph\Omnibus\Workflow\WorkflowInconsistentDelivery;
+use Infocyph\Omnibus\Workflow\WorkflowItem;
 use Infocyph\Omnibus\Workflow\WorkflowItemStatus;
 use Infocyph\Omnibus\Workflow\WorkflowNotFound;
 use Infocyph\Omnibus\Workflow\WorkflowStore;
@@ -45,8 +45,10 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         private EnvelopeSerializer $serializer,
         private ClockInterface $clock,
         string $table = 'omnibus_messages',
+        ?RunwireBinding $runwire = null,
     ) {
         $this->table = SqlIdentifier::quote($table, $connection->getDriverName());
+        $runwire?->registerConnection($connection);
     }
 
     public function acknowledge(Reservation $reservation): void
@@ -62,45 +64,25 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
             throw new \LogicException('Atomic workflow settlement requires the same DBLayer connection.');
         }
 
-        try {
-            $transition = $this->transaction(function (Connection $connection) use (
-                $reservation,
-                $store,
-            ): WorkflowTransition {
-                $envelope = $reservation->envelope();
-                $chain = $envelope->last(ChainStamp::class);
-                if ($chain instanceof ChainStamp) {
-                    $identity = [$chain->workflowId, $chain->itemId, $chain->index];
-                } else {
-                    $batch = $envelope->last(BatchStamp::class);
-                    if (!$batch instanceof BatchStamp) {
-                        throw new \LogicException('Atomic workflow settlement requires a workflow stamp.');
-                    }
-                    $identity = [$batch->workflowId, $batch->itemId, $batch->index];
-                }
-                if ($store->itemStatusForUpdate(...$identity) !== WorkflowItemStatus::Handled) {
-                    throw new WorkflowInconsistentDelivery(
-                        'Atomic workflow settlement requires a handled item.',
-                    );
-                }
-                $this->deleteReservation($reservation, $connection);
+        $identity = WorkflowItem::identity($reservation->envelope());
+        if ($identity === null) {
+            throw new \LogicException('Atomic workflow settlement requires a workflow stamp.');
+        }
 
-                return $store->succeed(...$identity);
-            });
+        try {
+            return $this->transaction(
+                fn(Connection $connection): WorkflowTransition => $this->settleWorkflow(
+                    $reservation,
+                    $store,
+                    $identity,
+                    $connection,
+                ),
+            );
         } catch (TransactionException $failure) {
-            $cause = $failure->getPrevious();
-            if (
-                $cause instanceof WorkflowInconsistentDelivery
-                || $cause instanceof WorkflowNotFound
-                || $cause instanceof InvalidReservation
-            ) {
-                throw $cause;
-            }
+            $this->rethrowWorkflowSettlementCause($failure);
 
             throw $failure;
         }
-
-        return $transition;
     }
 
     public function receive(string $queue, int $limit = 1, float $visibilitySeconds = 60.0): iterable
@@ -146,26 +128,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
 
         $reservations = [];
         foreach ($rows as $row) {
-            $id = self::rowString($row, 'id');
-            $payload = StoredPayload::decode(self::rowString($row, 'payload'));
-            $messageId = self::rowString($row, 'message_id');
-            $attempt = self::rowInt($row, 'attempts') + 1;
-            $receipt = ReservationReceipt::encode($id, $token);
-
-            try {
-                $envelope = $this->serializer
-                    ->decode($payload)
-                    ->with(new AttemptStamp($attempt));
-                $reservations[] = Reservation::decoded($receipt, $queue, $envelope, $attempt, $messageId);
-            } catch (\Throwable $failure) {
-                $reservations[] = Reservation::undecodable(
-                    $receipt,
-                    $queue,
-                    DecodeFailure::fromThrowable($payload, $failure),
-                    $attempt,
-                    $messageId,
-                );
-            }
+            $reservations[] = $this->reservationFromRow($row, $queue, $token);
         }
 
         return $reservations;
@@ -315,6 +278,56 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         return ReservationReceipt::decode($reservation->receipt);
     }
 
+    /** @param array<string, mixed> $row */
+    private function reservationFromRow(array $row, string $queue, string $token): Reservation
+    {
+        $id = self::rowString($row, 'id');
+        $storedPayload = self::rowString($row, 'payload');
+        $messageId = self::rowString($row, 'message_id');
+        $attempt = self::rowInt($row, 'attempts') + 1;
+        $receipt = ReservationReceipt::encode($id, $token);
+
+        try {
+            $payload = StoredPayload::decode($storedPayload);
+        } catch (\Throwable $failure) {
+            return Reservation::undecodable(
+                $receipt,
+                $queue,
+                DecodeFailure::fromThrowable($storedPayload, $failure),
+                $attempt,
+                $messageId,
+            );
+        }
+
+        try {
+            $envelope = $this->serializer
+                ->decode($payload)
+                ->with(new AttemptStamp($attempt));
+
+            return Reservation::decoded($receipt, $queue, $envelope, $attempt, $messageId);
+        } catch (\Throwable $failure) {
+            return Reservation::undecodable(
+                $receipt,
+                $queue,
+                DecodeFailure::fromThrowable($payload, $failure),
+                $attempt,
+                $messageId,
+            );
+        }
+    }
+
+    private function rethrowWorkflowSettlementCause(TransactionException $failure): void
+    {
+        $cause = $failure->getPrevious();
+        if (
+            $cause instanceof WorkflowInconsistentDelivery
+            || $cause instanceof WorkflowNotFound
+            || $cause instanceof InvalidReservation
+        ) {
+            throw $cause;
+        }
+    }
+
     /**
      * @template TResult
      * @param callable():TResult $operation
@@ -327,7 +340,7 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         // Receipt-guarded settlement changes are safe to replay: only the
         // currently active reservation can be deleted or released once.
         return $this->connection->withQueryRetryPolicy(
-            static function (\Throwable $failure, int $attempt, string $sql, array $bindings) use ($driver): bool {
+            function (\Throwable $failure, int $attempt, string $sql, array $bindings) use ($driver): bool {
                 unset($sql, $bindings);
                 if (
                     $attempt >= self::SETTLEMENT_ATTEMPTS
@@ -336,7 +349,9 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
                     return false;
                 }
 
-                usleep(self::SETTLEMENT_BACKOFF_US * $attempt + random_int(0, self::SETTLEMENT_JITTER_US));
+                $microseconds = self::SETTLEMENT_BACKOFF_US * $attempt
+                    + random_int(0, self::SETTLEMENT_JITTER_US);
+                $this->connection->cooperativeSleep($microseconds / 1_000_000);
 
                 return true;
             },
@@ -360,6 +375,34 @@ final readonly class DBLayerTransport implements AtomicWorkflowTransport, Transp
         };
 
         return array_values($connection->select($sql, $bindings));
+    }
+
+    /** @param array{kind:'batch'|'chain',workflow_id:string,item_id:string,index:int} $identity */
+    private function settleWorkflow(
+        Reservation $reservation,
+        DBLayerWorkflowStore $store,
+        array $identity,
+        Connection $connection,
+    ): WorkflowTransition {
+        if (
+            $store->itemStatusForUpdate(
+                $identity['workflow_id'],
+                $identity['item_id'],
+                $identity['index'],
+            ) !== WorkflowItemStatus::Handled
+        ) {
+            throw new WorkflowInconsistentDelivery(
+                'Atomic workflow settlement requires a handled item.',
+            );
+        }
+
+        $this->deleteReservation($reservation, $connection);
+
+        return $store->succeed(
+            $identity['workflow_id'],
+            $identity['item_id'],
+            $identity['index'],
+        );
     }
 
     /**

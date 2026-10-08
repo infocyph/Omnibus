@@ -42,7 +42,8 @@ final readonly class CircuitBreakerScope implements ExecutionScope
     public function run(Envelope $envelope, callable $handler): mixed
     {
         $key = PolicyKey::storage('circuit', ($this->key)($envelope));
-        $probe = $this->assertExecutionAllowed($key);
+        $admission = $this->assertExecutionAllowed($key);
+        $probe = $admission['probe'];
 
         try {
             $result = $this->inner->run($envelope, $handler);
@@ -57,10 +58,7 @@ final readonly class CircuitBreakerScope implements ExecutionScope
         }
 
         try {
-            $this->withLock($key, function () use ($key): void {
-                $this->counters->delete($this->failureKey($key));
-                $this->counters->delete($this->openKey($key));
-            });
+            $this->recordSuccess($key, $admission);
             $this->releaseProbe($probe);
         } catch (\Throwable $failure) {
             $this->releaseProbeQuietly($probe);
@@ -74,10 +72,12 @@ final readonly class CircuitBreakerScope implements ExecutionScope
         return $result;
     }
 
-    private function assertExecutionAllowed(string $key): ?LockHandle
+    /** @return array{generation:int,probe:LockHandle|null} */
+    private function assertExecutionAllowed(string $key): array
     {
-        $probe = null;
-        $this->withLock($key, function () use ($key, &$probe): void {
+        $admission = ['generation' => 0, 'probe' => null];
+        $this->withLock($key, function () use ($key, &$admission): void {
+            $admission['generation'] = $this->generation($key);
             $openedAt = $this->counters->get($this->openKey($key));
             if ($openedAt === null) {
                 return;
@@ -96,14 +96,26 @@ final readonly class CircuitBreakerScope implements ExecutionScope
             if (!$probe instanceof LockHandle) {
                 throw new CircuitOpen(sprintf('Circuit "%s" recovery probe is active.', $key));
             }
+
+            $admission['probe'] = $probe;
         });
 
-        return $probe;
+        return $admission;
     }
 
     private function failureKey(string $key): string
     {
         return $key . '.failures';
+    }
+
+    private function generation(string $key): int
+    {
+        return $this->counters->get($this->generationKey($key)) ?? 0;
+    }
+
+    private function generationKey(string $key): string
+    {
+        return $key . '.generation';
     }
 
     private function openKey(string $key): string
@@ -127,12 +139,39 @@ final readonly class CircuitBreakerScope implements ExecutionScope
                 return;
             }
 
+            $this->counters->increment($this->generationKey($key));
             $this->counters->delete($this->openKey($key));
             $this->counters->increment(
                 $this->openKey($key),
                 (int) $this->clock->now()->format('U'),
                 $this->recoverySeconds + (2 * $this->probeLeaseSeconds),
             );
+        });
+    }
+
+    /** @param array{generation:int,probe:LockHandle|null} $admission */
+    private function recordSuccess(string $key, array $admission): void
+    {
+        $this->withLock($key, function () use ($key, $admission): void {
+            if ($this->generation($key) !== $admission['generation']) {
+                return;
+            }
+
+            $probe = $admission['probe'];
+            if ($probe instanceof LockHandle) {
+                if (!$this->locks->refresh($probe, (float) $this->probeLeaseSeconds)) {
+                    throw new \RuntimeException('Circuit recovery probe ownership expired before cleanup.');
+                }
+
+                $this->counters->delete($this->failureKey($key));
+                $this->counters->delete($this->openKey($key));
+
+                return;
+            }
+
+            if ($this->counters->get($this->openKey($key)) === null) {
+                $this->counters->delete($this->failureKey($key));
+            }
         });
     }
 

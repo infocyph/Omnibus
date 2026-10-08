@@ -50,13 +50,7 @@ final readonly class FailureManager
             throw $failure;
         }
 
-        try {
-            $sent = $sender->send($replay, $queue ?? $claim->failure->queue);
-        } catch (\Throwable $failure) {
-            $this->releaseQuietly($claim);
-
-            throw $failure;
-        }
+        $sent = $sender->send($replay, $queue ?? $claim->failure->queue);
 
         try {
             $removed = $this->failures->markRetrySent($claim)

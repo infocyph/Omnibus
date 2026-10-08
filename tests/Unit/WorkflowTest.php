@@ -10,6 +10,7 @@ use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Event\EventDispatcher;
 use Infocyph\Omnibus\Event\ListenerMap;
+use Infocyph\Omnibus\Failure\FailedMessage;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
 use Infocyph\Omnibus\Handler\HandlerMap;
 use Infocyph\Omnibus\Handler\HandlerInvoker;
@@ -483,14 +484,16 @@ test('partial dispatch failures expose the durable workflow and release every un
             ->and($store->find($failure->workflowId))->not->toBeNull();
 
         $available = $store->claimPending($failure->workflowId, 10);
-        expect($available)->toHaveCount(4 - $failureAt)
+        $expectedIndexes = $failureAt < 3 ? range($failureAt, 2) : [];
+        expect($available)->toHaveCount(3 - $failureAt)
             ->and(array_map(static fn($claim): int => $claim->item->index, $available))
-            ->toBe(range($failureAt - 1, 2));
+            ->toBe($expectedIndexes);
     }
 })->with([1, 2, 3]);
 
 test('a failed initial chain dispatch retains its recoverable workflow ID', function (): void {
-    $store = new InMemoryWorkflowStore();
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $store = new InMemoryWorkflowStore($clock);
     $sender = new class() implements Sender {
         public function send(Envelope $envelope, string $queue): Envelope
         {
@@ -503,11 +506,13 @@ test('a failed initial chain dispatch retains its recoverable workflow ID', func
     };
 
     try {
-        (new WorkflowCoordinator($store, $sender))->chain([new TestCommand('first')], 'work');
+        (new WorkflowCoordinator($store, $sender, dispatchLeaseSeconds: 1))->chain([new TestCommand('first')], 'work');
         test()->fail('Expected chain dispatch failure.');
     } catch (WorkflowDispatchFailed $failure) {
         expect($store->find($failure->workflowId))->not->toBeNull()
-            ->and($store->claimPending($failure->workflowId))->toHaveCount(1);
+            ->and($store->claimPending($failure->workflowId))->toBe([]);
+        $clock->advance('+2 seconds');
+        expect($store->claimPending($failure->workflowId))->toHaveCount(1);
     }
 });
 
@@ -563,7 +568,7 @@ test('a next-chain dispatch failure is reported after the current item remains d
         }
     };
     $store = new InMemoryWorkflowStore($clock);
-    $coordinator = new WorkflowCoordinator($store, $sender);
+    $coordinator = new WorkflowCoordinator($store, $sender, dispatchLeaseSeconds: 1);
     $scope = new WorkflowExecutionScope(new DirectExecutionScope(), $store);
     $transport = new WorkflowTransport($sender, $coordinator);
     $id = $coordinator->chain([new TestCommand('first'), new TestCommand('next')], 'work');
@@ -578,7 +583,9 @@ test('a next-chain dispatch failure is reported after the current item remains d
             ->and($failure->operation)->toBe('dispatch-next')
             ->and($transport->size('work'))->toBe(0)
             ->and($failure->state->succeeded)->toBe(1)
-            ->and($store->claimPending($id))->toHaveCount(1);
+            ->and($store->claimPending($id))->toBe([]);
+        $clock->advance('+2 seconds');
+        expect($store->claimPending($id))->toHaveCount(1);
     }
 });
 
@@ -599,4 +606,105 @@ test('workflow lifecycle listener failures are best effort after durable transit
     $coordinator->succeed($envelope);
 
     expect($store->find($id)?->status)->toBe(WorkflowStatus::Completed);
+});
+
+
+test('conflicting and repeated workflow stamps are rejected before business execution', function (): void {
+    $store = new InMemoryWorkflowStore();
+    $workflowId = str_repeat('w', 26);
+    $store->createBatch($workflowId, [new Envelope(new TestCommand('guarded'))], 'work');
+    $claim = $store->claimPending($workflowId)[0];
+    $store->confirmDispatched($workflowId, $claim->item->itemId, $claim->token);
+    $batch = $claim->item->envelope->last(BatchStamp::class);
+    if (!$batch instanceof BatchStamp) {
+        throw new RuntimeException('Expected batch identity stamp.');
+    }
+
+    $conflicting = $claim->item->envelope->with(new ChainStamp(
+        str_repeat('c', 26),
+        str_repeat('i', 26),
+        0,
+    ));
+    $repeated = $claim->item->envelope->with($batch);
+    $scope = new WorkflowExecutionScope(new DirectExecutionScope(), $store);
+    $coordinator = new WorkflowCoordinator($store, new RecordingSender());
+    $executions = 0;
+    $handler = static function () use (&$executions): void {
+        $executions++;
+    };
+
+    $innerFailures = new InMemoryFailureStore();
+    $guardedFailures = new WorkflowFailureStore($innerFailures, $coordinator);
+
+    expect(fn() => $scope->run($conflicting, $handler))
+        ->toThrow(WorkflowInconsistentDelivery::class)
+        ->and(fn() => $scope->run($repeated, $handler))
+        ->toThrow(WorkflowInconsistentDelivery::class)
+        ->and(fn() => $coordinator->fail($conflicting))
+        ->toThrow(WorkflowInconsistentDelivery::class)
+        ->and(fn() => $coordinator->succeed($repeated))
+        ->toThrow(WorkflowInconsistentDelivery::class)
+        ->and(fn() => $guardedFailures->add(FailedMessage::decoded(
+            'ambiguous-workflow-failure',
+            'work',
+            $conflicting,
+            1,
+            new DateTimeImmutable('2026-01-01T00:00:00+00:00'),
+            RuntimeException::class,
+            'ambiguous workflow',
+        )))
+        ->toThrow(WorkflowInconsistentDelivery::class)
+        ->and($innerFailures->all())->toBe([])
+        ->and($executions)->toBe(0)
+        ->and($store->itemStatus($workflowId, $claim->item->itemId, 0))
+        ->toBe(WorkflowItemStatus::Dispatched);
+});
+
+test('in-memory workflows reject duplicate message identities atomically', function (): void {
+    $store = new InMemoryWorkflowStore();
+    $messageId = 'workflow-message-id';
+    $duplicate = new Envelope(new TestCommand('duplicate'), [new MessageIdStamp($messageId)]);
+    $sameWorkflow = str_repeat('a', 26);
+
+    expect(fn() => $store->createBatch($sameWorkflow, [$duplicate, $duplicate], 'work'))
+        ->toThrow(InvalidArgumentException::class)
+        ->and($store->find($sameWorkflow))->toBeNull();
+
+    $owner = str_repeat('b', 26);
+    $store->createBatch($owner, [$duplicate], 'work');
+    $other = str_repeat('c', 26);
+    expect(fn() => $store->createChain($other, [$duplicate], 'work'))
+        ->toThrow(InvalidArgumentException::class)
+        ->and($store->find($other))->toBeNull()
+        ->and($store->findItemByMessageId($messageId)?->workflowId)->toBe($owner);
+
+    $unstamped = str_repeat('d', 26);
+    $store->createBatch($unstamped, [
+        new Envelope(new TestCommand('one')),
+        new Envelope(new TestCommand('two')),
+    ], 'work');
+    $claims = $store->claimPending($unstamped, 2);
+    $first = $claims[0]->item->envelope->last(MessageIdStamp::class);
+    $second = $claims[1]->item->envelope->last(MessageIdStamp::class);
+
+    expect($first)->toBeInstanceOf(MessageIdStamp::class)
+        ->and($second)->toBeInstanceOf(MessageIdStamp::class)
+        ->and($first?->id)->not->toBe($second?->id);
+});
+
+
+test('workflow item rejects an embedded identity that disagrees with its row identity', function (): void {
+    $workflowId = str_repeat('w', 26);
+    $itemId = str_repeat('i', 26);
+    $envelope = new Envelope(new TestCommand('mismatch'), [
+        new BatchStamp(str_repeat('x', 26), $itemId, 0),
+    ]);
+
+    expect(fn() => new \Infocyph\Omnibus\Workflow\WorkflowItem(
+        $workflowId,
+        $itemId,
+        0,
+        'work',
+        $envelope,
+    ))->toThrow(WorkflowInconsistentDelivery::class);
 });

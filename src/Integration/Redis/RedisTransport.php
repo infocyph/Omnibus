@@ -34,10 +34,37 @@ LUA;
     private const string CORRUPTION_SENTINEL = '__OMNIBUS_CORRUPT__';
 
     private const string RECEIVE = <<<'LUA'
+local function keyTypeIssue()
+    local expected = {'zset', 'zset', 'hash', 'hash', 'hash', 'hash'}
+    for index, kind in ipairs(expected) do
+        local actual = redis.call('TYPE', KEYS[index]).ok
+        if actual ~= 'none' and actual ~= kind then
+            return KEYS[index], 'key_type:' .. kind .. ':' .. actual
+        end
+    end
+    return nil, nil
+end
+
+local function attemptIssue(value)
+    if value == false then return 'attempt' end
+    -- HINCRBY rejects noncanonical integers (including leading-zero values);
+    -- check before queue mutation because Lua errors do not roll back writes.
+    if value ~= '0' and string.match(value, '^[1-9]%d*$') == nil then
+        return 'attempt_integer'
+    end
+    if string.len(value) > 19 then return 'attempt_overflow' end
+    if string.len(value) == 19 and value > '9223372036854775806' then
+        return 'attempt_overflow'
+    end
+    return nil
+end
+
 local function corrupt(ids, requireReceipt)
     for _, id in ipairs(ids) do
         if redis.call('HGET', KEYS[3], id) == false then return id, 'payload' end
-        if redis.call('HGET', KEYS[4], id) == false then return id, 'attempt' end
+        local attempt = redis.call('HGET', KEYS[4], id)
+        local issue = attemptIssue(attempt)
+        if issue then return id, issue end
         if redis.call('HGET', KEYS[6], id) == false then return id, 'message_id' end
         local receipt = redis.call('HGET', KEYS[5], id)
         if requireReceipt and receipt == false then return id, 'receipt' end
@@ -46,9 +73,17 @@ local function corrupt(ids, requireReceipt)
     return nil, nil
 end
 
-local expired = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', ARGV[1], 'LIMIT', 0, ARGV[4])
-local corruptId, corruptField = corrupt(expired, true)
+local corruptId, corruptField = keyTypeIssue()
 if corruptId then return {'__OMNIBUS_CORRUPT__', corruptId, corruptField} end
+
+local expired = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', ARGV[1], 'LIMIT', 0, ARGV[4])
+corruptId, corruptField = corrupt(expired, true)
+if corruptId then return {'__OMNIBUS_CORRUPT__', corruptId, corruptField} end
+
+local ready = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, ARGV[4])
+corruptId, corruptField = corrupt(ready, false)
+if corruptId then return {'__OMNIBUS_CORRUPT__', corruptId, corruptField} end
+
 for _, id in ipairs(expired) do
     redis.call('ZREM', KEYS[2], id)
     redis.call('ZADD', KEYS[1], ARGV[1], id)
@@ -56,18 +91,15 @@ for _, id in ipairs(expired) do
 end
 
 local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, ARGV[4])
-corruptId, corruptField = corrupt(ids, false)
-if corruptId then return {'__OMNIBUS_CORRUPT__', corruptId, corruptField} end
-
 local result = {}
 for _, id in ipairs(ids) do
     redis.call('ZREM', KEYS[1], id)
     redis.call('ZADD', KEYS[2], ARGV[2], id)
-    local attempt = redis.call('HINCRBY', KEYS[4], id, 1)
+    redis.call('HINCRBY', KEYS[4], id, 1)
     redis.call('HSET', KEYS[5], id, ARGV[3])
     table.insert(result, id)
     table.insert(result, redis.call('HGET', KEYS[3], id))
-    table.insert(result, tostring(attempt))
+    table.insert(result, redis.call('HGET', KEYS[4], id))
     table.insert(result, redis.call('HGET', KEYS[6], id))
 end
 return result

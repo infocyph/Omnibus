@@ -6,59 +6,74 @@ namespace Infocyph\Omnibus\Tests\Fixtures;
 
 final class IntegrationEnvironment
 {
+    /** @var array<string,string> */
+    private const array DATABASE_SERVICES = [
+        'mysql' => 'mysql',
+        'mariadb' => 'mariadb',
+        'postgres' => 'pgsql',
+        'mssql' => 'mssql',
+    ];
+
     /**
      * @param list<string> $drivers
+     * @param list<string>|null $availablePdoDrivers
      * @return list<string>
      */
-    public static function configuredDatabaseDrivers(array $drivers): array
-    {
-        $expected = array_values(array_filter(
-            $drivers,
-            self::databaseDriverExpected(...),
-        ));
-        $configured = array_values(array_filter(
-            $expected,
-            self::databaseConfigured(...),
-        ));
+    public static function configuredDatabaseDrivers(
+        array $drivers,
+        ?array $availablePdoDrivers = null,
+    ): array {
+        $services = self::requiredServices();
+        $required = self::requiredDatabaseDrivers($drivers, $services);
+        $candidates = $services === [] ? $drivers : $required;
+        $configured = [];
 
-        if (self::githubActions() && count($configured) !== count($expected)) {
-            $missing = array_values(array_diff($expected, $configured));
+        foreach ($candidates as $driver) {
+            $issues = self::databaseConfigurationIssues(
+                $driver,
+                $availablePdoDrivers,
+                $services !== [],
+            );
+            if ($issues === []) {
+                $configured[] = $driver;
 
-            throw new \RuntimeException(sprintf(
-                'GitHub Actions is missing required database integration configuration: %s.',
-                implode(', ', $missing),
-            ));
+                continue;
+            }
+            if (in_array($driver, $required, true)) {
+                throw new \RuntimeException(sprintf(
+                    'Required %s database integration is unavailable: %s.',
+                    $driver,
+                    implode(', ', $issues),
+                ));
+            }
         }
 
         return $configured;
     }
 
-    public static function databaseConfigured(string $driver): bool
-    {
-        if (!self::databaseDriverAvailable($driver)) {
-            return false;
-        }
-
-        $database = getenv('IC_SERVICE_DATABASE');
-        $username = $driver === 'mssql'
-            ? getenv('IC_MSSQL_USER')
-            : getenv('IC_SERVICE_USERNAME');
-
-        return is_string($database)
-            && $database !== ''
-            && is_string($username)
-            && $username !== '';
+    /** @param list<string>|null $availablePdoDrivers */
+    public static function databaseConfigured(
+        string $driver,
+        ?array $availablePdoDrivers = null,
+    ): bool {
+        return self::databaseConfigurationIssues($driver, $availablePdoDrivers, false) === [];
     }
 
     public static function memcachedConfigured(): bool
     {
+        $services = self::requiredServices();
+        $required = in_array('memcached', $services, true);
+        if ($services !== [] && !$required) {
+            return false;
+        }
+
         $configured = extension_loaded('memcached')
             && class_exists(\Memcached::class)
             && self::environmentPairConfigured('IC_MEMCACHED_HOST', 'IC_MEMCACHED_PORT');
 
-        if (!$configured && self::githubActions()) {
+        if ($required && !$configured) {
             throw new \RuntimeException(
-                'GitHub Actions is missing the required Memcached integration configuration.',
+                'Required Memcached integration is unavailable: extension or service configuration is missing.',
             );
         }
 
@@ -68,76 +83,169 @@ final class IntegrationEnvironment
     /** @return array<string,array{string,string,string,string}> */
     public static function redisBackendCases(): array
     {
+        $definitions = [
+            'redis' => ['redis', 'IC_REDIS_HOST', 'IC_REDIS_PORT', 'IC_REDIS_PASSWORD'],
+            'valkey' => ['valkey', 'IC_VALKEY_HOST', 'IC_VALKEY_PORT', 'IC_VALKEY_PASSWORD'],
+        ];
+        $services = self::requiredServices();
+        $required = $services === []
+            ? []
+            : array_values(array_intersect(array_keys($definitions), $services));
+        if ($services !== [] && $required === []) {
+            return [];
+        }
         if (!extension_loaded('redis') || !class_exists(\Redis::class)) {
-            if (self::githubActions()) {
+            if ($required !== []) {
                 throw new \RuntimeException(
-                    'GitHub Actions requires the redis extension for integration tests.',
+                    'Required Redis-compatible integration is unavailable: redis extension is missing.',
                 );
             }
 
             return [];
         }
 
-        $definitions = [
-            'redis' => ['redis', 'IC_REDIS_HOST', 'IC_REDIS_PORT', 'IC_REDIS_PASSWORD'],
-            'valkey' => ['valkey', 'IC_VALKEY_HOST', 'IC_VALKEY_PORT', 'IC_VALKEY_PASSWORD'],
-        ];
-        $configured = array_filter(
-            $definitions,
-            static fn(array $case): bool => self::environmentPairConfigured($case[1], $case[2]),
-        );
+        $candidates = $required === [] ? array_keys($definitions) : $required;
+        $configured = [];
+        foreach ($candidates as $service) {
+            $case = $definitions[$service];
+            $ready = self::environmentPairConfigured($case[1], $case[2]);
+            if ($required !== []) {
+                $ready = $ready && self::environmentValueConfigured($case[3]);
+            }
+            if ($ready) {
+                $configured[$service] = $case;
 
-        if (self::githubActions() && count($configured) !== count($definitions)) {
-            $missing = array_values(array_diff(array_keys($definitions), array_keys($configured)));
-
-            throw new \RuntimeException(sprintf(
-                'GitHub Actions is missing required Redis-compatible integration configuration: %s.',
-                implode(', ', $missing),
-            ));
+                continue;
+            }
+            if (in_array($service, $required, true)) {
+                throw new \RuntimeException(sprintf(
+                    'Required %s integration is unavailable: service configuration is missing.',
+                    $service,
+                ));
+            }
         }
 
         return $configured;
     }
 
-    private static function databaseDriverExpected(string $driver): bool
+    /** @return list<string> */
+    public static function requiredServices(): array
     {
-        if (!self::databaseDriverAvailable($driver)) {
-            return false;
-        }
-        if ($driver !== 'mssql') {
-            return true;
+        $manifest = getenv('INTEGRATION_SERVICES');
+        if (!is_string($manifest) || trim($manifest) === '' || trim($manifest) === '[]') {
+            return [];
         }
 
-        $username = getenv('IC_MSSQL_USER');
+        try {
+            $services = json_decode($manifest, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $failure) {
+            throw new \RuntimeException('INTEGRATION_SERVICES must be a JSON string list.', previous: $failure);
+        }
+        if (!is_array($services) || !array_is_list($services)) {
+            throw new \RuntimeException('INTEGRATION_SERVICES must be a JSON string list.');
+        }
 
-        return is_string($username) && $username !== '';
+        $normalized = [];
+        foreach ($services as $service) {
+            if (!is_string($service) || $service === '') {
+                throw new \RuntimeException('INTEGRATION_SERVICES must contain non-empty service names.');
+            }
+            $normalized[$service] = true;
+        }
+
+        return array_keys($normalized);
     }
 
-    private static function databaseDriverAvailable(string $driver): bool
+    /**
+     * @param list<string>|null $availablePdoDrivers
+     * @return list<string>
+     */
+    private static function databaseConfigurationIssues(
+        string $driver,
+        ?array $availablePdoDrivers,
+        bool $strictCredentials,
+    ): array {
+        $issues = [];
+        if (!self::databaseDriverAvailable($driver, $availablePdoDrivers)) {
+            $issues[] = sprintf('PDO driver %s is missing', self::pdoDriver($driver));
+        }
+
+        $database = getenv('IC_SERVICE_DATABASE');
+        $usernameName = $driver === 'mssql' ? 'IC_MSSQL_USER' : 'IC_SERVICE_USERNAME';
+        if (!is_string($database) || $database === '') {
+            $issues[] = 'IC_SERVICE_DATABASE is missing';
+        }
+        if (!self::environmentValueConfigured($usernameName)) {
+            $issues[] = $usernameName . ' is missing';
+        }
+        if ($strictCredentials) {
+            $passwordName = $driver === 'mssql' ? 'IC_MSSQL_PASSWORD' : 'IC_SERVICE_PASSWORD';
+            if (!self::environmentValueConfigured($passwordName)) {
+                $issues[] = $passwordName . ' is missing';
+            }
+        }
+
+        return $issues;
+    }
+
+    /** @param list<string>|null $availablePdoDrivers */
+    private static function databaseDriverAvailable(
+        string $driver,
+        ?array $availablePdoDrivers,
+    ): bool {
+        $availablePdoDrivers ??= \PDO::getAvailableDrivers();
+
+        return in_array(self::pdoDriver($driver), $availablePdoDrivers, true);
+    }
+
+    private static function environmentPairConfigured(string $first, string $second): bool
     {
-        $pdoDriver = match ($driver) {
+        return self::environmentValueConfigured($first)
+            && self::environmentValueConfigured($second);
+    }
+
+    private static function environmentValueConfigured(string $name): bool
+    {
+        $value = getenv($name);
+
+        return is_string($value) && $value !== '';
+    }
+
+    private static function pdoDriver(string $driver): string
+    {
+        return match ($driver) {
             'mysql', 'mariadb' => 'mysql',
             'pgsql' => 'pgsql',
             'mssql' => 'sqlsrv',
             default => $driver,
         };
-
-        return in_array($pdoDriver, \PDO::getAvailableDrivers(), true);
     }
 
-    private static function environmentPairConfigured(string $first, string $second): bool
+    /**
+     * @param list<string> $drivers
+     * @param list<string> $services
+     * @return list<string>
+     */
+    private static function requiredDatabaseDrivers(array $drivers, array $services): array
     {
-        $firstValue = getenv($first);
-        $secondValue = getenv($second);
+        if ($services === []) {
+            return [];
+        }
 
-        return is_string($firstValue)
-            && $firstValue !== ''
-            && is_string($secondValue)
-            && $secondValue !== '';
-    }
+        $required = [];
+        foreach (self::DATABASE_SERVICES as $service => $driver) {
+            if (!in_array($service, $services, true)) {
+                continue;
+            }
+            if (!in_array($driver, $drivers, true)) {
+                throw new \RuntimeException(sprintf(
+                    'Required %s integration has no database test dataset.',
+                    $service,
+                ));
+            }
+            $required[] = $driver;
+        }
 
-    private static function githubActions(): bool
-    {
-        return getenv('GITHUB_ACTIONS') === 'true';
+        return $required;
     }
 }

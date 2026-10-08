@@ -235,3 +235,120 @@ test('worker pool backends restart pending slots and exhaust the crash budget', 
         unlink($report);
     }
 })->with(['native', 'runwire']);
+
+
+test('native worker pool leaves unrelated child status owned by the host', function (): void {
+    $externalPid = pcntl_fork();
+    if ($externalPid === -1) {
+        throw new RuntimeException('Unable to fork unrelated host child.');
+    }
+    if ($externalPid === 0) {
+        usleep(20_000);
+        $pid = getmypid();
+        if (!is_int($pid) || !posix_kill($pid, SIGKILL)) {
+            throw new RuntimeException('Unable to terminate unrelated host child.');
+        }
+        while (true) {
+            usleep(10_000);
+        }
+    }
+
+    $checks = 0;
+    try {
+        $lifecycle = new RecordingWorkerLifecycle(
+            onStopRequested: static function () use (&$checks): bool {
+                $checks++;
+
+                return $checks >= 8;
+            },
+        );
+        $pool = new WorkerPool(
+            static function (): Worker {
+                $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+
+                return new Worker(
+                    new Consumer(
+                        new InMemoryTransport($clock),
+                        new HandlerInvoker(new HandlerMap([])),
+                        new ExponentialRetryStrategy(),
+                        new InMemoryFailureStore(),
+                        $clock,
+                    ),
+                    new WorkerOptions(
+                        queue: 'work',
+                        idleSleepSeconds: 0.001,
+                        maxIdleSleepSeconds: 0.001,
+                        handleSignals: false,
+                    ),
+                );
+            },
+            backend: new NativeWorkerPoolBackend(),
+            lifecycle: $lifecycle,
+            lifecycleIntervalSeconds: 0.01,
+            shutdownGraceSeconds: 0.2,
+        );
+
+        $pool->run();
+
+        $status = 0;
+        $waited = pcntl_waitpid($externalPid, $status);
+        expect($waited)->toBe($externalPid)
+            ->and(pcntl_wifsignaled($status))->toBeTrue()
+            ->and(pcntl_wtermsig($status))->toBe(SIGKILL);
+
+        omnibusAssertNoWorkerChildren();
+    } finally {
+        $status = 0;
+        $waited = pcntl_waitpid($externalPid, $status, WNOHANG);
+        if ($waited === 0) {
+            posix_kill($externalPid, SIGKILL);
+            pcntl_waitpid($externalPid, $status);
+        }
+    }
+});
+
+test('native worker pool reaps concurrent owned crashes without touching foreign children', function (): void {
+    $pool = new WorkerPool(
+        static function (): Worker {
+            throw new RuntimeException('concurrent owned crash');
+        },
+        concurrency: 2,
+        maximumRestarts: 0,
+        restartBackoffSeconds: 0,
+        shutdownGraceSeconds: 0.1,
+        backend: new NativeWorkerPoolBackend(),
+    );
+
+    expect(fn() => $pool->run())
+        ->toThrow(RuntimeException::class, 'exhausted its restart budget');
+    omnibusAssertNoWorkerChildren();
+});
+
+
+test('native worker pool forgets only the owned pid already consumed from the kernel table', function (): void {
+    $pid = pcntl_fork();
+    if ($pid === -1) {
+        throw new RuntimeException('Unable to fork missing-owned-child fixture.');
+    }
+    if ($pid === 0) {
+        $self = getmypid();
+        if (!is_int($self) || !posix_kill($self, SIGKILL)) {
+            throw new RuntimeException('Unable to terminate missing-owned-child fixture.');
+        }
+        while (true) {
+            usleep(10_000);
+        }
+    }
+
+    $status = 0;
+    expect(pcntl_waitpid($pid, $status))->toBe($pid);
+
+    $backend = new NativeWorkerPoolBackend();
+    $children = new ReflectionProperty($backend, 'children');
+    $reap = new ReflectionMethod($backend, 'reapStoppedChild');
+    $otherPid = $pid + 1_000_000;
+    $children->setValue($backend, [$pid => 0, $otherPid => 1]);
+
+    expect($reap->invoke($backend))->toBeTrue()
+        ->and($children->getValue($backend))->toBe([$otherPid => 1]);
+});

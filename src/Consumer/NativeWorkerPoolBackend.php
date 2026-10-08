@@ -47,6 +47,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
             return;
         }
 
+        $this->assertProcessSupport();
         $this->shutdownGraceSeconds = $shutdownGraceSeconds;
         $this->registerSignals();
 
@@ -87,6 +88,46 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         return $status;
     }
 
+    private function assertProcessSupport(): void
+    {
+        foreach ([
+            'pcntl_async_signals',
+            'pcntl_fork',
+            'pcntl_get_last_error',
+            'pcntl_signal',
+            'pcntl_signal_get_handler',
+            'pcntl_sigprocmask',
+            'pcntl_waitpid',
+            'pcntl_wifexited',
+            'pcntl_wifsignaled',
+            'pcntl_wexitstatus',
+            'pcntl_wtermsig',
+            'posix_kill',
+        ] as $function) {
+            if (!function_exists($function)) {
+                throw new \RuntimeException(
+                    'The native WorkerPool backend requires ext-pcntl and ext-posix. Install them or choose a host-managed execution path.',
+                );
+            }
+        }
+        foreach ([
+            'PCNTL_ECHILD',
+            'PCNTL_EINTR',
+            'SIG_DFL',
+            'SIG_UNBLOCK',
+            'SIGINT',
+            'SIGKILL',
+            'SIGTERM',
+            'WNOHANG',
+        ] as $constant) {
+            if (!defined($constant)) {
+                throw new \RuntimeException(
+                    'The native WorkerPool backend requires ext-pcntl and ext-posix process constants.',
+                );
+            }
+        }
+    }
+
     private function beginShutdown(): void
     {
         $this->pendingRestarts = [];
@@ -101,7 +142,7 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
     /** @param array<int,int> $restarts */
     private function consumeChildExit(
         int $pid,
-        int $status,
+        ?int $status,
         array &$restarts,
         \Closure $workerFactory,
         int $maximumRestarts,
@@ -113,8 +154,11 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
             return null;
         }
 
-        $cleanExit = pcntl_wifexited($status) && pcntl_wexitstatus($status) === 0;
-        $cleanSignal = pcntl_wifsignaled($status)
+        $cleanExit = $status !== null
+            && pcntl_wifexited($status)
+            && pcntl_wexitstatus($status) === 0;
+        $cleanSignal = $status !== null
+            && pcntl_wifsignaled($status)
             && pcntl_wtermsig($status) === SIGTERM;
         if ($cleanExit || $cleanSignal) {
             $restarts[$slot] = 0;
@@ -161,29 +205,35 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         $this->signalChildren(SIGKILL);
     }
 
-    /** @return array{int,int}|null */
+    /** @return array{int,int|null}|null */
     private function pollChild(): ?array
     {
-        $status = 0;
-        $pid = pcntl_waitpid(-1, $status, WNOHANG);
-        if ($pid > 0) {
-            return [$pid, self::waitStatus($status)];
-        }
-        if ($pid === 0) {
-            return null;
+        foreach (array_keys($this->children) as $pid) {
+            $status = 0;
+            $waited = pcntl_waitpid($pid, $status, WNOHANG);
+            if ($waited === $pid) {
+                return [$pid, self::waitStatus($status)];
+            }
+            if ($waited === 0) {
+                continue;
+            }
+
+            $error = pcntl_get_last_error();
+            if ($error === PCNTL_EINTR) {
+                continue;
+            }
+            if ($error === PCNTL_ECHILD) {
+                return [$pid, null];
+            }
+
+            throw new \RuntimeException(sprintf(
+                'Unable to wait for Omnibus worker process %d (pcntl error %d).',
+                $pid,
+                $error,
+            ));
         }
 
-        $error = pcntl_get_last_error();
-        if ($error === PCNTL_EINTR) {
-            return null;
-        }
-        if ($error === PCNTL_ECHILD) {
-            $this->children = [];
-
-            return null;
-        }
-
-        throw new \RuntimeException(sprintf('Unable to wait for Omnibus worker process (pcntl error %d).', $error));
+        return null;
     }
 
     private function reapStoppedChild(): bool
@@ -318,6 +368,14 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         }
     }
 
+    /** @param \Closure(int):Worker $workerFactory */
+    private function spawnInitialWorkers(int $concurrency, \Closure $workerFactory): void
+    {
+        for ($slot = 0; $slot < $concurrency && !$this->stopRequested; $slot++) {
+            $this->spawn($slot, $workerFactory);
+        }
+    }
+
     private function stopFromSignal(): void
     {
         $this->stopRequested = true;
@@ -332,7 +390,6 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
         ?WorkerLifecycle $lifecycle,
         float $lifecycleIntervalSeconds,
     ): void {
-        $fatal = null;
         /** @var array<int,int> $restarts */
         $restarts = array_fill(0, $concurrency, 0);
         $nextLifecycleAt = self::monotonicSeconds();
@@ -341,42 +398,67 @@ final class NativeWorkerPoolBackend implements WorkerPoolBackend
             return;
         }
 
-        for ($slot = 0; $slot < $concurrency && !$this->stopRequested; $slot++) {
-            $this->spawn($slot, $workerFactory);
-        }
-
+        $this->spawnInitialWorkers($concurrency, $workerFactory);
+        $fatal = null;
         while ($this->children !== [] || $this->pendingRestarts !== []) {
-            $this->serviceLifecycle($lifecycle, $lifecycleIntervalSeconds, $nextLifecycleAt);
-            if ($this->stopRequested) {
-                $this->drainChildren();
-
-                break;
-            }
-
-            $this->restartDueWorkers($workerFactory);
-            $child = $this->children === [] ? null : $this->pollChild();
-            if ($child === null) {
-                usleep(self::SUPERVISION_SLEEP_MICROSECONDS);
-
-                continue;
-            }
-
-            $fatal = $this->consumeChildExit(
-                $child[0],
-                $child[1],
+            $cycleFailure = $this->supervisionCycle(
                 $restarts,
                 $workerFactory,
                 $maximumRestarts,
                 $restartBackoffSeconds,
+                $lifecycle,
+                $lifecycleIntervalSeconds,
+                $nextLifecycleAt,
             );
-            if ($fatal !== null) {
-                $this->requestStop();
-            }
+            $fatal ??= $cycleFailure;
         }
 
         if ($fatal !== null) {
             throw new \RuntimeException($fatal);
         }
+    }
+
+    /**
+     * @param array<int,int> $restarts
+     * @param \Closure(int):Worker $workerFactory
+     */
+    private function supervisionCycle(
+        array &$restarts,
+        \Closure $workerFactory,
+        int $maximumRestarts,
+        float $restartBackoffSeconds,
+        ?WorkerLifecycle $lifecycle,
+        float $lifecycleIntervalSeconds,
+        float &$nextLifecycleAt,
+    ): ?string {
+        $this->serviceLifecycle($lifecycle, $lifecycleIntervalSeconds, $nextLifecycleAt);
+        if ($this->stopRequested) {
+            $this->drainChildren();
+
+            return null;
+        }
+
+        $this->restartDueWorkers($workerFactory);
+        $child = $this->children === [] ? null : $this->pollChild();
+        if ($child === null) {
+            usleep(self::SUPERVISION_SLEEP_MICROSECONDS);
+
+            return null;
+        }
+
+        $fatal = $this->consumeChildExit(
+            $child[0],
+            $child[1],
+            $restarts,
+            $workerFactory,
+            $maximumRestarts,
+            $restartBackoffSeconds,
+        );
+        if ($fatal !== null) {
+            $this->requestStop();
+        }
+
+        return $fatal;
     }
 
     private function terminateChild(int $signal): never

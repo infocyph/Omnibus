@@ -11,6 +11,7 @@ use Infocyph\Omnibus\Envelope\BatchStamp;
 use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
+use Infocyph\Omnibus\Integration\Runwire\RunwireBinding;
 use Infocyph\Omnibus\Internal\Time;
 use Infocyph\Omnibus\Serialization\EnvelopeSerializer;
 use Infocyph\Omnibus\Transport\QueueName;
@@ -41,8 +42,10 @@ final readonly class DBLayerWorkflowStore implements WorkflowStore
         string $workflowTable = 'omnibus_workflows',
         private string $itemTable = 'omnibus_workflow_items',
         private ClockInterface $clock = new SystemClock(),
+        ?RunwireBinding $runwire = null,
     ) {
         $driver = $connection->getDriverName();
+        $runwire?->registerConnection($connection);
         $this->workflows = SqlIdentifier::quote($workflowTable, $driver);
         $this->items = SqlIdentifier::quote($this->itemTable, $driver);
     }

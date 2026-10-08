@@ -35,7 +35,7 @@ No durable backend initializes unless it is explicitly constructed.
 DBLayer
 -------
 
-Install DBLayer 5.1+ (``infocyph/dblayer:^5.1``) and execute every statement
+Install DBLayer 6.x (``infocyph/dblayer:^6.0``) and execute every statement
 returned by ``QueueSchema::statements($driver)`` in an application migration.
 Supported canonical drivers are ``mysql``, ``mariadb``, ``pgsql``, ``mssql``,
 and ``sqlite``. MySQL and MariaDB are independent DBLayer drivers even though
@@ -74,7 +74,7 @@ release are conditional on the current token. An expired stale worker cannot
 settle a newer reservation.
 
 Receive and batch-workflow claim limits are maxima. Before selecting rows,
-Omnibus asks DBLayer 5 for a safe batch size that includes the fixed reservation
+Omnibus asks DBLayer 6 for a safe batch size that includes the fixed reservation
 or claim bindings. The selected rows and their conditional update remain one
 transaction; Omnibus does not select an oversized set and split its ownership
 update afterward. Workflow multi-row inserts use the same effective bind

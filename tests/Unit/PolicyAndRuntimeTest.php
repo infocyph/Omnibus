@@ -68,6 +68,7 @@ test('policy counter keys remain inside CacheLayer bounds after suffixes', funct
     $base = PolicyKey::storage('circuit', str_repeat('logical-key', 40));
 
     expect(strlen($base.'.failures'))->toBeLessThanOrEqual(64)
+        ->and(strlen($base.'.generation'))->toBeLessThanOrEqual(64)
         ->and(strlen($base.'.'.PHP_INT_MAX))->toBeLessThanOrEqual(64)
         ->and($base)->toMatch('/^omnibus\.[a-f0-9]{32}$/D');
 });
@@ -367,4 +368,63 @@ test('after-response dispatch delegates timing to the host runtime', function ()
     expect($sender->count())->toBe(0);
     $runtime->callbacks[0]();
     expect($sender->count())->toBe(1);
+});
+
+
+test('older circuit success cannot erase a newer open generation in the same second', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $scope = new CircuitBreakerScope(
+        new DirectExecutionScope(),
+        new InMemoryCounterStore($clock),
+        new InMemoryLockProvider($clock),
+        $clock,
+        static fn(): string => 'provider:generation-fence',
+        failureThreshold: 1,
+        recoverySeconds: 30,
+    );
+    $envelope = new Envelope(new TestCommand('generation-fence'));
+
+    expect($scope->run($envelope, function () use ($scope, $envelope): string {
+        expect(fn() => $scope->run(
+            $envelope,
+            static fn() => throw new RuntimeException('newer failure'),
+        ))->toThrow(RuntimeException::class, 'newer failure')
+            ->and(fn() => $scope->run($envelope, static fn(): string => 'blocked'))
+            ->toThrow(CircuitOpen::class);
+
+        return 'older success';
+    }))->toBe('older success')
+        ->and(fn() => $scope->run($envelope, static fn(): string => 'must remain open'))
+        ->toThrow(CircuitOpen::class);
+});
+
+test('expired circuit recovery probe cannot close its open generation', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $scope = new CircuitBreakerScope(
+        new DirectExecutionScope(),
+        new InMemoryCounterStore($clock),
+        new InMemoryLockProvider($clock),
+        $clock,
+        static fn(): string => 'provider:expired-probe',
+        failureThreshold: 1,
+        recoverySeconds: 2,
+        probeLeaseSeconds: 3,
+    );
+    $envelope = new Envelope(new TestCommand('expired-probe'));
+
+    expect(fn() => $scope->run(
+        $envelope,
+        static fn() => throw new RuntimeException('open circuit'),
+    ))->toThrow(RuntimeException::class, 'open circuit');
+
+    $clock->advance('+3 seconds');
+
+    expect(fn() => $scope->run($envelope, static function () use ($clock): string {
+        $clock->advance('+4 seconds');
+
+        return 'business succeeded';
+    }))->toThrow(CoordinationCleanupFailedAfterExecution::class);
+
+    expect($scope->run($envelope, static fn(): string => 'fresh recovery'))
+        ->toBe('fresh recovery');
 });

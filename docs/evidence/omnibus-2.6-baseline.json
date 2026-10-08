@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "purpose": "Immutable Omnibus 2.6 pre-production-change release baseline for the 3.0 plan",
+  "production_revision": "17a86f28215b36f237a9db3e014c5425c4d6ea0a",
+  "production_tag": "2.6",
+  "harness_run": {
+    "workflow_run_id": 37633792393,
+    "harness_revision": "5dafeb56d82bc81af5c4f23b9bdc42b1faead56a",
+    "note": "Only CI/tests/docs/benchmark harness differed from the audited production revision; src/ production code was unchanged.",
+    "phpforge_workflow_revision": "f274e78173c7f8c7ed2e316e7fde2a41f4cee827"
+  },
+  "historical_local_suite": {
+    "tests": 192,
+    "assertions": 1057,
+    "limitation": "Optional external service cases were not all registered in this historical host result."
+  },
+  "strict_matrix": {
+    "services": [
+      "mysql",
+      "mariadb",
+      "postgres",
+      "mssql",
+      "sqlite",
+      "redis",
+      "valkey",
+      "memcached"
+    ],
+    "service_readiness": "all selected services reported ready; Pest passed under strict manifest",
+    "replica_services": [
+      "mysql",
+      "mariadb",
+      "postgres"
+    ],
+    "discovery_policy": "A non-empty INTEGRATION_SERVICES manifest is mandatory coverage; missing required extension, credentials, configuration, or SQL dataset fails discovery."
+  },
+  "resolved_direct_dependencies": {
+    "infocyph/uid": "5.0",
+    "infocyph/cachelayer": "3.4",
+    "infocyph/dblayer": "5.1",
+    "infocyph/runwire": "1.0",
+    "infocyph/phpforge": "dev-main f274e78"
+  },
+  "service_images": {
+    "mysql": "mysql:9.7",
+    "mariadb": "mariadb:12.3",
+    "postgres": "postgres:18-alpine",
+    "mssql": "mcr.microsoft.com/mssql/server:2022-CU26-ubuntu-22.04",
+    "redis": "redis:8.10-alpine",
+    "valkey": "valkey/valkey:9.1-alpine",
+    "memcached": "memcached:1.6.45-alpine"
+  },
+  "inherited_release_blockers": {
+    "O07": [
+      {
+        "owner": "NativeWorkerPoolBackend::supervise()",
+        "cognitive_complexity": 14,
+        "budget": 12
+      },
+      {
+        "owner": "DBLayerTransport::acknowledgeWorkflow()",
+        "cognitive_complexity": 14,
+        "budget": 12
+      }
+    ]
+  },
+  "benchmark_environment": {
+    "stable": false,
+    "note": "GitHub-hosted numbers are immutable reference evidence, not the final 2% performance certification. Batch 8 must compare on a stable matched environment."
+  },
+  "benchmarks": {
+    "php_8_4": [
+      {
+        "name": "request_host_cold",
+        "concurrency": 1,
+        "repetitions": 1,
+        "successful_rpm": 761.9094542994962,
+        "p95_ms": 78.735374,
+        "p99_ms": 78.735374,
+        "error_rate": 0
+      },
+      {
+        "name": "request_host_warm_c1",
+        "concurrency": 1,
+        "repetitions": 100,
+        "successful_rpm": 67046.79967187296,
+        "p95_ms": 0.374037,
+        "p99_ms": 0.550297,
+        "error_rate": 0
+      },
+      {
+        "name": "request_host_warm_c2",
+        "concurrency": 2,
+        "repetitions": 200,
+        "successful_rpm": 122524.51470490216,
+        "p95_ms": 0.489422,
+        "p99_ms": 0.552161,
+        "error_rate": 0
+      },
+      {
+        "name": "request_host_warm_c4",
+        "concurrency": 4,
+        "repetitions": 400,
+        "successful_rpm": 134485.91573552962,
+        "p95_ms": 1.043312,
+        "p99_ms": 1.137005,
+        "error_rate": 0
+      },
+      {
+        "name": "request_host_expected_failure",
+        "concurrency": 1,
+        "repetitions": 100,
+        "successful_rpm": 76670.00496387169,
+        "p95_ms": 0.259922,
+        "p99_ms": 0.368703,
+        "error_rate": 0
+      },
+      {
+        "name": "durable_delivery",
+        "concurrency": 2,
+        "repetitions": 2000,
+        "successful_rpm": 43325.55743077393,
+        "p95_ms": 0.03863279,
+        "p99_ms": 0.04754883000000001,
+        "error_rate": 0,
+        "queue_depth_after": 0,
+        "connections": 2
+      }
+    ],
+    "php_8_5": [
+      {
+        "name": "request_host_cold",
+        "concurrency": 1,
+        "repetitions": 1,
+        "successful_rpm": 1692.4070018826615,
+        "p95_ms": 35.439471,
+        "p99_ms": 35.439471,
+        "error_rate": 0
+      },
+      {
+        "name": "request_host_warm_c1",
+        "concurrency": 1,
+        "repetitions": 100,
+        "successful_rpm": 59080.66759145635,
+        "p95_ms": 0.403977,
+        "p99_ms": 0.597457,
+        "error_rate": 0
+      },
+      {
+        "name": "request_host_warm_c2",
+        "concurrency": 2,
+        "repetitions": 200,
+        "successful_rpm": 91557.81059730233,
+        "p95_ms": 0.690724,
+        "p99_ms": 0.717445,
+        "error_rate": 0
+      },
+      {
+        "name": "request_host_warm_c4",
+        "concurrency": 4,
+        "repetitions": 400,
+        "successful_rpm": 103086.43890680131,
+        "p95_ms": 1.412737,
+        "p99_ms": 1.475686,
+        "error_rate": 0
+      },
+      {
+        "name": "request_host_expected_failure",
+        "concurrency": 1,
+        "repetitions": 100,
+        "successful_rpm": 58620.07006798355,
+        "p95_ms": 0.397846,
+        "p99_ms": 0.413214,
+        "error_rate": 0
+      },
+      {
+        "name": "durable_delivery",
+        "concurrency": 2,
+        "repetitions": 2000,
+        "successful_rpm": 73699.75669480897,
+        "p95_ms": 0.025205739999999997,
+        "p99_ms": 0.03469072,
+        "error_rate": 0,
+        "queue_depth_after": 0,
+        "connections": 2
+      }
+    ]
+  },
+  "existing_soak_baseline": {
+    "consumer": {
+      "messages": 10000,
+      "queue_depth_after": 0,
+      "php_allocated_memory_growth_bytes": 0
+    },
+    "durable": {
+      "messages": 10000,
+      "consumers": 2,
+      "queue_depth_after": 0
+    },
+    "workflow": {
+      "workflows": 100,
+      "items": 10000,
+      "reconciliation_attempts": 1020,
+      "reconciliation_errors": 0,
+      "duplicate_handler_executions": 0,
+      "terminal_regressions": 0
+    }
+  },
+  "budgets": {
+    "stable_matched_environment": {
+      "median_successful_rpm_regression_max_percent": 2,
+      "p95_latency_regression_max_percent": 15,
+      "p99_latency_regression_max_percent": 20,
+      "cpu_seconds_per_successful_operation_regression_max_percent": 5
+    },
+    "correctness": {
+      "normal_workload_error_rate_max": 0,
+      "normal_workload_timeouts_max": 0,
+      "expected_failure_response_must_match": true,
+      "durable_queue_depth_after_max": 0,
+      "durable_connection_count_max": 2
+    },
+    "persistent_runtime": {
+      "consumer_rss_growth_max_mib_per_10000_messages": 4,
+      "queue_growth_max": 0,
+      "duplicate_handler_executions_max": 0,
+      "terminal_regressions_max": 0
+    },
+    "notes": [
+      "Cold-start latency is recorded diagnostically and is not compared with the 2% throughput rule.",
+      "Hosted-runner throughput and latency are reference-only because environment.stable=false.",
+      "Batch 8 must capture CPU/RSS in the stable matched environment before enforcing the relative CPU budget."
+    ]
+  }
+}

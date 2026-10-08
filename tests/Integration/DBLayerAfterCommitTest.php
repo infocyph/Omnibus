@@ -7,6 +7,7 @@ use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\Omnibus\Integration\DBLayer\AfterCommitDispatcher;
 use Infocyph\Omnibus\Integration\DBLayer\DBLayerTransport;
 use Infocyph\Omnibus\Integration\DBLayer\QueueSchema;
+use Infocyph\Omnibus\Integration\Runwire\RunwireBinding;
 use Infocyph\Omnibus\MessageBus;
 use Infocyph\Omnibus\Routing\Route;
 use Infocyph\Omnibus\Routing\RouteMap;
@@ -17,6 +18,10 @@ use Infocyph\Omnibus\Tests\Fixtures\TestSerializer;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Transport\Sender;
 use Infocyph\Omnibus\Transport\TransportRegistry;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\Runtime\Enum\RuntimeDriver;
+use Infocyph\Runwire\RuntimeCapabilities;
+use Infocyph\Runwire\RuntimeContext;
 
 function omnibusSqliteConnection(): Connection
 {
@@ -214,4 +219,57 @@ test('DBLayer integration discards nested rollback callbacks and cannot roll bac
         $failingDispatcher->dispatch(new TestCommand('committed despite callback failure'));
     }))->toThrow(RuntimeException::class, 'after-commit callback failed')
         ->and($connection->scalar('SELECT COUNT(*) FROM committed_state'))->toBe(1);
+});
+
+
+test('after-commit work uses the active commit request and restores it afterward', function (): void {
+    $runtime = RuntimeContext::fromCapabilities(
+        new RuntimeCapabilities(
+            RuntimeDriver::NATIVE,
+            persistentProcess: true,
+            persistentApplication: true,
+        ),
+        'omnibus-after-commit',
+        workerSlot: 0,
+        generation: 1,
+    );
+    $request = RequestContext::create($runtime, requestId: 'commit-request');
+    $binding = new RunwireBinding();
+    $connection = omnibusSqliteConnection();
+    $observedRequest = 'unset';
+    $sender = new class($binding, $observedRequest) implements Sender {
+        public function __construct(
+            private readonly RunwireBinding $binding,
+            private string &$observedRequest,
+        ) {}
+
+        public function send(Envelope $envelope, string $queue): Envelope
+        {
+            unset($queue);
+            $this->observedRequest = $this->binding->request()?->requestId ?? 'none';
+
+            return $envelope;
+        }
+    };
+    $dispatcher = new AfterCommitDispatcher(
+        $connection,
+        new MessageBus(
+            new RouteMap([TestCommand::class => new Route('recording')]),
+            new TransportRegistry(['recording' => $sender]),
+            $binding,
+        ),
+    );
+
+    $binding->withRunwire(
+        $runtime,
+        function () use ($connection, $dispatcher): void {
+            $connection->transaction(function () use ($dispatcher): void {
+                $dispatcher->dispatch(new TestCommand('after-commit'));
+            });
+        },
+        $request,
+    );
+
+    expect($observedRequest)->toBe('commit-request')
+        ->and($binding->request())->toBeNull();
 });

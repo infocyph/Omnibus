@@ -4,8 +4,15 @@ declare(strict_types=1);
 
 namespace Infocyph\Omnibus\Consumer;
 
+use Infocyph\Omnibus\Integration\Runwire\RunwireBinding;
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\RuntimeContext;
+
 final class Worker
 {
+    private readonly RunwireBinding $runwire;
+
     private ?bool $previousAsyncSignals = null;
 
     /** @var array<int,callable|int> */
@@ -17,7 +24,10 @@ final class Worker
         private readonly Consumer $consumer,
         private readonly WorkerOptions $options = new WorkerOptions(),
         private readonly ?WorkerLifecycle $lifecycle = null,
-    ) {}
+        ?RunwireBinding $runwire = null,
+    ) {
+        $this->runwire = $runwire ?? $consumer->runwireBinding();
+    }
 
     public function requestStop(): void
     {
@@ -32,6 +42,38 @@ final class Worker
     public function runManaged(WorkerLifecycle $lifecycle): void
     {
         $this->runLoop($lifecycle, false);
+    }
+
+    public function runwireBinding(): RunwireBinding
+    {
+        return $this->runwire;
+    }
+
+    public function withRunwire(
+        RuntimeContext $runtime,
+        callable $callback,
+        ?RequestContext $request = null,
+        ?CoroutineScope $scope = null,
+    ): mixed {
+        return $this->runwire->withRunwire($runtime, $callback, $request, $scope);
+    }
+
+    private function assertSignalSupport(): void
+    {
+        foreach (['pcntl_async_signals', 'pcntl_signal', 'pcntl_signal_get_handler'] as $function) {
+            if (!function_exists($function)) {
+                throw new \RuntimeException(
+                    'Worker signal handling requires ext-pcntl. Install it or use WorkerOptions(handleSignals: false).',
+                );
+            }
+        }
+        foreach (['SIGINT', 'SIGTERM'] as $constant) {
+            if (!defined($constant)) {
+                throw new \RuntimeException(
+                    'Worker signal handling requires ext-pcntl signal constants. Install ext-pcntl or disable signal handling.',
+                );
+            }
+        }
     }
 
     private function externalStopRequested(?WorkerLifecycle $managedLifecycle): bool
@@ -67,6 +109,7 @@ final class Worker
             return;
         }
 
+        $this->assertSignalSupport();
         foreach ([SIGTERM, SIGINT] as $signal) {
             $this->previousSignalHandlers[$signal] = pcntl_signal_get_handler($signal);
         }
@@ -131,7 +174,7 @@ final class Worker
                 }
 
                 if ($idleSleep > 0.0) {
-                    usleep((int) round($this->jittered($idleSleep) * 1_000_000));
+                    $this->runwire->sleep($this->jittered($idleSleep));
                     $idleSleep = min($this->options->maxIdleSleepSeconds, $idleSleep * 2.0);
                     $this->heartbeat($managedLifecycle);
                 }

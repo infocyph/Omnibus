@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Infocyph\Omnibus\Workflow;
 
-use Infocyph\Omnibus\Envelope\BatchStamp;
-use Infocyph\Omnibus\Envelope\ChainStamp;
 use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Transport\Reservation;
 use Infocyph\Omnibus\Transport\Sender;
@@ -77,8 +75,9 @@ final readonly class WorkflowCoordinator
         foreach ($claims as $position => $claim) {
             try {
                 $this->sender->send($claim->item->envelope, $claim->item->queue);
+                $this->store->confirmDispatched($id, $claim->item->itemId, $claim->token);
             } catch (\Throwable $failure) {
-                for ($index = $position, $count = count($claims); $index < $count; $index++) {
+                for ($index = $position + 1, $count = count($claims); $index < $count; $index++) {
                     try {
                         $unattempted = $claims[$index];
                         $this->store->releaseDispatchClaim(
@@ -92,7 +91,6 @@ final readonly class WorkflowCoordinator
 
                 throw $failure;
             }
-            $this->store->confirmDispatched($id, $claim->item->itemId, $claim->token);
             $dispatched++;
         }
 
@@ -101,15 +99,18 @@ final readonly class WorkflowCoordinator
 
     public function fail(Envelope $envelope): void
     {
-        $identity = self::identity($envelope);
+        $identity = WorkflowItem::identity($envelope);
         if ($identity === null) {
             return;
         }
 
-        [$workflowId, $itemId, $index] = $identity;
-        $transition = $this->store->fail($workflowId, $itemId, $index);
+        $transition = $this->store->fail(
+            $identity['workflow_id'],
+            $identity['item_id'],
+            $identity['index'],
+        );
         if ($transition->itemChanged) {
-            $this->emitFailureEvents($envelope, $index, $transition);
+            $this->emitFailureEvents($identity, $transition);
         }
     }
 
@@ -120,23 +121,30 @@ final readonly class WorkflowCoordinator
             return;
         }
 
+        $identity = WorkflowItem::identity($item->envelope);
+        if ($identity === null) {
+            throw new WorkflowInconsistentDelivery('Stored workflow item has no workflow identity.');
+        }
+
         $transition = $this->store->fail($item->workflowId, $item->itemId, $item->index);
         if ($transition->itemChanged) {
-            $this->emitFailureEvents($item->envelope, $item->index, $transition);
+            $this->emitFailureEvents($identity, $transition);
         }
     }
 
     public function settle(Transport $transport, Reservation $reservation): void
     {
         $envelope = $reservation->envelope();
-        $identity = self::identity($envelope);
+        $identity = WorkflowItem::identity($envelope);
         if ($identity === null) {
             $transport->acknowledge($reservation);
 
             return;
         }
 
-        [$workflowId, $itemId, $index] = $identity;
+        $workflowId = $identity['workflow_id'];
+        $itemId = $identity['item_id'];
+        $index = $identity['index'];
         $status = $this->store->itemStatus($workflowId, $itemId, $index);
         if (in_array($status, [
             WorkflowItemStatus::Pending,
@@ -171,7 +179,7 @@ final readonly class WorkflowCoordinator
         }
 
         try {
-            $this->advance($envelope, $transition);
+            $this->advance($identity, $transition);
         } catch (\Throwable $failure) {
             throw new WorkflowPostSettlementFailure(
                 $workflowId,
@@ -184,14 +192,18 @@ final readonly class WorkflowCoordinator
 
     public function succeed(Envelope $envelope): void
     {
-        $identity = self::identity($envelope);
+        $identity = WorkflowItem::identity($envelope);
         if ($identity === null) {
             return;
         }
 
         $this->advance(
-            $envelope,
-            $this->store->succeed($identity[0], $identity[1], $identity[2]),
+            $identity,
+            $this->store->succeed(
+                $identity['workflow_id'],
+                $identity['item_id'],
+                $identity['index'],
+            ),
         );
     }
 
@@ -215,33 +227,18 @@ final readonly class WorkflowCoordinator
         return $envelopes;
     }
 
-    /** @return array{string, string, int}|null */
-    private static function identity(Envelope $envelope): ?array
-    {
-        $chain = $envelope->last(ChainStamp::class);
-        if ($chain instanceof ChainStamp) {
-            return [$chain->workflowId, $chain->itemId, $chain->index];
-        }
-
-        $batch = $envelope->last(BatchStamp::class);
-
-        return $batch instanceof BatchStamp
-            ? [$batch->workflowId, $batch->itemId, $batch->index]
-            : null;
-    }
-
-    private function advance(Envelope $envelope, WorkflowTransition $transition): void
+    /** @param array{kind:'batch'|'chain',workflow_id:string,item_id:string,index:int} $identity */
+    private function advance(array $identity, WorkflowTransition $transition): void
     {
         if (!$transition->itemChanged) {
             return;
         }
 
-        $chain = $envelope->last(ChainStamp::class);
-        if ($chain instanceof ChainStamp) {
+        if ($identity['kind'] === 'chain') {
             if ($transition->completedNow) {
                 $this->dispatchEvent(new ChainCompleted($transition->state));
             } else {
-                $this->dispatchPending($chain->workflowId, 1);
+                $this->dispatchPending($identity['workflow_id'], 1);
             }
 
             return;
@@ -263,21 +260,21 @@ final readonly class WorkflowCoordinator
         }
     }
 
+    /** @param array{kind:'batch'|'chain',workflow_id:string,item_id:string,index:int} $identity */
     private function emitFailureEvents(
-        Envelope $envelope,
-        int $index,
+        array $identity,
         WorkflowTransition $transition,
     ): void {
-        if ($envelope->last(ChainStamp::class) instanceof ChainStamp) {
+        if ($identity['kind'] === 'chain') {
             if ($transition->failedNow) {
-                $this->dispatchEvent(new ChainFailed($transition->state, $index));
+                $this->dispatchEvent(new ChainFailed($transition->state, $identity['index']));
             }
 
             return;
         }
 
         if ($transition->failedNow) {
-            $this->dispatchEvent(new BatchFailed($transition->state, $index));
+            $this->dispatchEvent(new BatchFailed($transition->state, $identity['index']));
         }
         if ($transition->finalizedNow) {
             $this->dispatchEvent(new BatchFinalized($transition->state));

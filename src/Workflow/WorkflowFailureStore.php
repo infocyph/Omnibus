@@ -17,6 +17,9 @@ final readonly class WorkflowFailureStore implements FailureStore
 
     public function add(FailedMessage $failure): void
     {
+        if ($failure->envelope !== null) {
+            WorkflowItem::identity($failure->envelope);
+        }
         $this->inner->add($failure);
         if ($failure->envelope !== null) {
             $this->workflows->fail($failure->envelope);

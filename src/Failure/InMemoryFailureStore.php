@@ -110,7 +110,7 @@ final class InMemoryFailureStore implements FailureStore
     {
         $removed = 0;
         foreach ($this->failures as $id => $failure) {
-            if ($failure->failedAt >= $before) {
+            if ($failure->failedAt >= $before || ($this->retryStates[$id]['status'] ?? 'failed') !== 'failed') {
                 continue;
             }
             unset($this->failures[$id]);

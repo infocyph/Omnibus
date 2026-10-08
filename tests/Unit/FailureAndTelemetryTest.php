@@ -67,7 +67,7 @@ test('failure manager retries decoded messages only after a successful send', fu
         ->and($manager->flush())->toBe(0);
 });
 
-test('failure retry claims exclude overlap, recover after expiry, and release after send failure', function (): void {
+test('failure retry claims exclude overlap, recover after expiry, and retain ambiguous send claims', function (): void {
     $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
     $store = new InMemoryFailureStore($clock);
     $failure = FailedMessage::decoded(
@@ -102,8 +102,11 @@ test('failure retry claims exclude overlap, recover after expiry, and release af
     };
     $manager = new FailureManager($store);
     expect(fn() => $manager->retry('claimed', $failingSender))
-        ->toThrow(RuntimeException::class, 'send unavailable');
+        ->toThrow(RuntimeException::class, 'send unavailable')
+        ->and(fn() => $manager->retry('claimed', new RecordingSender()))
+        ->toThrow(FailureRetryClaimUnavailable::class);
 
+    $clock->advance('+31 seconds');
     $sent = $manager->retry('claimed', new RecordingSender());
     expect($sent->message)->toEqual(new TestCommand('retry'))
         ->and($store->find('claimed'))->toBeNull();
