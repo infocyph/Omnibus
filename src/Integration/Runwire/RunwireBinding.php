@@ -32,7 +32,6 @@ final class RunwireBinding
     /** @var array<string, int> */
     private array $generations = [];
 
-
     /** @var array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null}|null */
     private ?array $rootContext = null;
 
