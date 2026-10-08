@@ -36,9 +36,7 @@ final readonly class DeadlineExecutionScope implements ExecutionScope
         $token = new CancellationToken(
             $this->clock,
             $deadline,
-            $this->runwire === null
-                ? null
-                : fn(): bool => $this->runwire->isCancellationRequested(),
+            $this->runwire?->isCancellationRequested(...),
         );
         $result = $this->inner->run(
             $envelope->with(new CancellationStamp($token)),

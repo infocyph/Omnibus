@@ -41,53 +41,12 @@ final class RunwireBinding
         $this->fiberContexts = new WeakMap();
     }
 
-    public function registerConnection(Connection $connection): void
-    {
-        $this->connections[$connection] = true;
-    }
-
-    public function request(): ?RequestContext
-    {
-        return $this->context()['request'] ?? null;
-    }
-
     public function checkpoint(): void
     {
         $context = $this->context();
         if ($context !== null) {
             $this->assertContext($context['runtime'], $context['request'], $context['scope']);
         }
-    }
-
-    public function isCancellationRequested(): bool
-    {
-        $context = $this->context();
-
-        return $context !== null
-            && (
-                $context['request']?->cancellation->isCancelled() === true
-                || $context['scope']?->cancellation()->isCancelled() === true
-            );
-    }
-
-    public function remainingSeconds(): ?float
-    {
-        $context = $this->context();
-        if ($context === null) {
-            return null;
-        }
-
-        $remaining = array_values(array_filter([
-            $context['request']?->cancellation->deadline()->remainingSeconds(),
-            $context['scope']?->cancellation()->deadline()->remainingSeconds(),
-        ], static fn(?float $seconds): bool => $seconds !== null));
-
-        return $remaining === [] ? null : min($remaining);
-    }
-
-    public function isHostCancellation(\Throwable $failure): bool
-    {
-        return $failure instanceof CancelledException;
     }
 
     /**
@@ -124,6 +83,47 @@ final class RunwireBinding
             $cleanupRequest->complete();
             $this->setContext($fiber, $current);
         }
+    }
+
+    public function isCancellationRequested(): bool
+    {
+        $context = $this->context();
+
+        return $context !== null
+            && (
+                $context['request']?->cancellation->isCancelled() === true
+                || $context['scope']?->cancellation()->isCancelled() === true
+            );
+    }
+
+    public function isHostCancellation(\Throwable $failure): bool
+    {
+        return $failure instanceof CancelledException;
+    }
+
+    public function registerConnection(Connection $connection): void
+    {
+        $this->connections[$connection] = true;
+    }
+
+    public function remainingSeconds(): ?float
+    {
+        $context = $this->context();
+        if ($context === null) {
+            return null;
+        }
+
+        $remaining = array_values(array_filter([
+            $context['request']?->cancellation->deadline()->remainingSeconds(),
+            $context['scope']?->cancellation()->deadline()->remainingSeconds(),
+        ], static fn(?float $seconds): bool => $seconds !== null));
+
+        return $remaining === [] ? null : min($remaining);
+    }
+
+    public function request(): ?RequestContext
+    {
+        return $this->context()['request'] ?? null;
     }
 
     /**

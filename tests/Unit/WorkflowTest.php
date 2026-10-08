@@ -418,7 +418,7 @@ test('workflow operations require the exact item ID and index pair', function ()
 test('cancellation during business execution is terminal-aware and never reports a handler failure', function (): void {
     $sender = new RecordingSender();
     $store = new InMemoryWorkflowStore();
-    $coordinator = new WorkflowCoordinator($store, $sender);
+    $coordinator = new WorkflowCoordinator($store, $sender, dispatchLeaseSeconds: 1);
     $scope = new WorkflowExecutionScope(new DirectExecutionScope(), $store);
     $id = $coordinator->batch([new TestCommand('running')], 'work');
     $envelope = $sender->sent()[0]['envelope'];
@@ -484,14 +484,16 @@ test('partial dispatch failures expose the durable workflow and release every un
             ->and($store->find($failure->workflowId))->not->toBeNull();
 
         $available = $store->claimPending($failure->workflowId, 10);
-        expect($available)->toHaveCount(4 - $failureAt)
+        $expectedIndexes = $failureAt < 3 ? range($failureAt, 2) : [];
+        expect($available)->toHaveCount(3 - $failureAt)
             ->and(array_map(static fn($claim): int => $claim->item->index, $available))
-            ->toBe(range($failureAt - 1, 2));
+            ->toBe($expectedIndexes);
     }
 })->with([1, 2, 3]);
 
 test('a failed initial chain dispatch retains its recoverable workflow ID', function (): void {
-    $store = new InMemoryWorkflowStore();
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $store = new InMemoryWorkflowStore($clock);
     $sender = new class() implements Sender {
         public function send(Envelope $envelope, string $queue): Envelope
         {
@@ -504,11 +506,13 @@ test('a failed initial chain dispatch retains its recoverable workflow ID', func
     };
 
     try {
-        (new WorkflowCoordinator($store, $sender))->chain([new TestCommand('first')], 'work');
+        (new WorkflowCoordinator($store, $sender, dispatchLeaseSeconds: 1))->chain([new TestCommand('first')], 'work');
         test()->fail('Expected chain dispatch failure.');
     } catch (WorkflowDispatchFailed $failure) {
         expect($store->find($failure->workflowId))->not->toBeNull()
-            ->and($store->claimPending($failure->workflowId))->toHaveCount(1);
+            ->and($store->claimPending($failure->workflowId))->toBe([]);
+        $clock->advance('+2 seconds');
+        expect($store->claimPending($failure->workflowId))->toHaveCount(1);
     }
 });
 
@@ -579,7 +583,9 @@ test('a next-chain dispatch failure is reported after the current item remains d
             ->and($failure->operation)->toBe('dispatch-next')
             ->and($transport->size('work'))->toBe(0)
             ->and($failure->state->succeeded)->toBe(1)
-            ->and($store->claimPending($id))->toHaveCount(1);
+            ->and($store->claimPending($id))->toBe([]);
+        $clock->advance('+2 seconds');
+        expect($store->claimPending($id))->toHaveCount(1);
     }
 });
 
