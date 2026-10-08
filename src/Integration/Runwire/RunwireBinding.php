@@ -32,8 +32,6 @@ final class RunwireBinding
     /** @var array<string, int> */
     private array $generations = [];
 
-    // Updated on admission, so an old suspended Fiber cannot reuse this fast path.
-    private ?RuntimeContext $lastAdmittedRuntime = null;
 
     /** @var array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null}|null */
     private ?array $rootContext = null;
@@ -291,7 +289,7 @@ final class RunwireBinding
         if ($runtime->pid !== $currentPid) {
             throw new LogicException('Runwire runtime PID does not match the current Omnibus process.');
         }
-        if ($runtime->generation !== null && $runtime !== $this->lastAdmittedRuntime) {
+        if ($runtime->generation !== null) {
             $latest = $this->generations[$this->generationKey($runtime)] ?? null;
             if ($latest !== null && $runtime->generation < $latest) {
                 throw new LogicException('Stale Runwire runtime generation cannot enter Omnibus.');
@@ -325,14 +323,9 @@ final class RunwireBinding
             return;
         }
 
-        $key = $this->generationKey($runtime);
-        $latest = $this->generations[$key] ?? null;
-        if ($latest !== null && $runtime->generation < $latest) {
-            throw new LogicException('Stale Runwire runtime generation cannot enter Omnibus.');
-        }
-
-        $this->generations[$key] = max($latest ?? $runtime->generation, $runtime->generation);
-        $this->lastAdmittedRuntime = $runtime;
+        // assertContext() already checked the latest accepted generation before
+        // entering this method; there is no second lookup or comparison here.
+        $this->generations[$this->generationKey($runtime)] = $runtime->generation;
     }
 
     /**
