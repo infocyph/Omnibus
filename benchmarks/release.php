@@ -191,7 +191,9 @@ function concurrentHttp(string $name, string $url, int $concurrency, int $status
     return workload($name, 'http', $concurrency, $attempted, $successful, $timeouts, $seconds, $latencies, [
         'expected_http_status' => $status,
         'validated_output' => true,
-        'server_implementation' => 'php-cli-built-in-single-worker',
+        'server_implementation' => (int) (getenv('OMNIBUS_BENCHMARK_HTTP_WORKERS') ?: 1) > 1
+            ? 'php-cli-built-in-multiworker'
+            : 'php-cli-built-in-single-worker',
         'server_workers' => (int) (getenv('OMNIBUS_BENCHMARK_HTTP_WORKERS') ?: 1),
         'client_processes' => $concurrency,
         'router_reconstructs_bus_per_request' => true,
