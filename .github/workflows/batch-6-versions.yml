@@ -1,0 +1,82 @@
+name: Batch 6 matched-version comparisons
+
+on:
+  push:
+    branches:
+      - feature/runwire-2.1
+
+permissions:
+  contents: read
+
+jobs:
+  comparison:
+    if: contains(github.event.head_commit.message, '[compare-version]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: candidate
+      - uses: actions/checkout@v7
+        with:
+          ref: '2.6'
+          path: baseline
+      - uses: actions/checkout@v7
+        with:
+          ref: '2.6'
+          path: dependency-only
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_sqlite, pcntl, posix
+          coverage: none
+          tools: composer:v2
+      - name: Use identical release workload harnesses
+        run: |
+          for target in baseline dependency-only; do
+            cp candidate/benchmarks/release.php "$target/benchmarks/release.php"
+            cp candidate/benchmarks/release-host.php "$target/benchmarks/release-host.php"
+          done
+      - name: Adopt only the 3.0 dependency floor in the second 2.6 checkout
+        run: |
+          php -r '
+            $path="dependency-only/composer.json";
+            $config=json_decode(file_get_contents($path),true,flags:JSON_THROW_ON_ERROR);
+            $config["require"]["infocyph/uid"]="^6.0";
+            $config["require-dev"]["infocyph/cachelayer"]="^4.0";
+            $config["require-dev"]["infocyph/dblayer"]="^6.0";
+            $config["require-dev"]["infocyph/runwire"]="2.1.1";
+            file_put_contents($path,json_encode($config,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR));
+          '
+      - name: Resolve each variant with isolated Composer dependencies
+        run: |
+          for target in baseline dependency-only candidate; do
+            (cd "$target" && composer update --no-interaction --prefer-dist --no-progress --prefer-stable)
+            (cd "$target" && composer check-platform-reqs)
+          done
+      - name: Run alternating matched workload trials
+        run: |
+          mkdir -p results
+          for trial in 1 2 3; do
+            (cd baseline && OMNIBUS_BENCHMARK_BOUND=0 php benchmarks/release.php "../results/2.6-$trial.json" > /dev/null)
+            (cd candidate && OMNIBUS_BENCHMARK_BOUND=0 php benchmarks/release.php "../results/3.0-unbound-$trial.json" > /dev/null)
+            (cd dependency-only && OMNIBUS_BENCHMARK_BOUND=0 php benchmarks/release.php "../results/dependency-only-$trial.json" > /dev/null)
+            (cd candidate && OMNIBUS_BENCHMARK_BOUND=1 php benchmarks/release.php "../results/3.0-bound-$trial.json" > /dev/null)
+          done
+      - name: Verify correctness and report diagnostic median RPM
+        run: |
+          for variant in 2.6 dependency-only 3.0-unbound 3.0-bound; do
+            for trial in 1 2 3; do
+              jq -e 'all(.workloads[]; .result.failed_operations == 0 and .result.timeouts == 0)' \
+                "results/$variant-$trial.json" > /dev/null
+            done
+            echo "$variant"
+            jq -s -r '[.[] | .workloads[] | select(.name=="request_host_warm_c4") | .result.successful_rpm] | sort | .[1]' \
+              "results/$variant-1.json" "results/$variant-2.json" "results/$variant-3.json"
+          done
+          echo "Hosted-runner comparison is diagnostic, NOT the stable performance release gate."
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batch-6-matched-version-trials
+          path: results/*.json
+          retention-days: 14

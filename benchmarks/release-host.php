@@ -9,6 +9,10 @@ use Infocyph\Omnibus\MessageBus;
 use Infocyph\Omnibus\Routing\RouteMap;
 use Infocyph\Omnibus\Transport\SyncTransport;
 use Infocyph\Omnibus\Transport\TransportRegistry;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\Runtime\Enum\RuntimeDriver;
+use Infocyph\Runwire\RuntimeCapabilities;
+use Infocyph\Runwire\RuntimeContext;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
@@ -35,7 +39,24 @@ header('Content-Type: application/json');
 $failurePath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) === '/failure';
 
 try {
-    $envelope = $bus->dispatch(new OmnibusReleaseHttpMessage($failurePath ? -1 : 42));
+    $message = new OmnibusReleaseHttpMessage($failurePath ? -1 : 42);
+    if (getenv('OMNIBUS_BENCHMARK_BOUND') === '1') {
+        $runtime = RuntimeContext::fromCapabilities(
+            new RuntimeCapabilities(RuntimeDriver::NATIVE, persistentProcess: true, persistentApplication: true),
+            'omnibus-release-benchmark',
+            workerSlot: 0,
+            generation: 1,
+        );
+        $request = RequestContext::create($runtime);
+
+        try {
+            $envelope = $bus->withRunwire($runtime, static fn() => $bus->dispatch($message), $request);
+        } finally {
+            $request->complete();
+        }
+    } else {
+        $envelope = $bus->dispatch($message);
+    }
     $handled = $envelope->last(HandledStamp::class);
     $value = $handled instanceof HandledStamp ? $handled->result : null;
     if ($failurePath || $value !== 42) {
