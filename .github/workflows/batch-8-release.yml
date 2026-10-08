@@ -25,7 +25,6 @@ jobs:
 
   engineering-gates:
     name: Exact-head PHPForge release checks and dependency audit
-    if: contains(github.event.head_commit.message, '[release-preflight]')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -63,85 +62,4 @@ jobs:
         with:
           name: batch-8-candidate-lock-and-platform
           path: build/release-evidence/
-          retention-days: 30
-  case-inventory:
-    name: Strict integration test discovery inventory
-    if: contains(github.event.head_commit.message, '[count-backends]')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          extensions: memcached, redis, pdo_mysql, pdo_pgsql, pdo_sqlite, pdo_sqlsrv
-          coverage: none
-          tools: composer:v2
-      - name: Resolve exact test dependencies
-        run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
-      - name: Enumerate registered test cases without executing external I/O
-        env:
-          INTEGRATION_SERVICES: '["mysql","mariadb","postgres","mssql","sqlite","redis","valkey","memcached"]'
-          IC_SERVICE_DATABASE: phpforge
-          IC_SERVICE_USERNAME: phpforge
-          IC_SERVICE_PASSWORD: phpforge_test
-          IC_MSSQL_USER: sa
-          IC_MSSQL_PASSWORD: inventory_only
-          IC_REDIS_HOST: 127.0.0.1
-          IC_REDIS_PORT: '6379'
-          IC_REDIS_PASSWORD: inventory_only
-          IC_VALKEY_HOST: 127.0.0.1
-          IC_VALKEY_PORT: '6380'
-          IC_VALKEY_PASSWORD: inventory_only
-          IC_MEMCACHED_HOST: 127.0.0.1
-          IC_MEMCACHED_PORT: '11211'
-        run: |
-          mkdir -p build/inventory
-          php vendor/bin/pest --configuration vendor/infocyph/phpforge/resources/pest.xml --bootstrap vendor/autoload.php --list-tests tests/Integration > build/inventory/all-cases.txt
-          sed -n '1,120p' build/inventory/all-cases.txt
-          php -r '
-            $lines = file("build/inventory/all-cases.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            $cases = array_values(array_filter($lines, static fn(string $line): bool =>
-              str_contains($line, "P\\Tests\\Integration\\")
-            ));
-            $counts = [];
-            foreach (["mysql","mariadb","pgsql","mssql","sqlite","redis","valkey","memcached"] as $backend) {
-              $counts[$backend] = count(array_filter($cases, static fn(string $line): bool =>
-                stripos($line, $backend) !== false
-              ));
-              if ($counts[$backend] === 0) {
-                throw new RuntimeException("No registered integration test for required backend " . $backend);
-              }
-            }
-            echo json_encode(["registered_matching_test_cases" => $counts,"total_registered_integration_cases"=>count($cases),"note"=>"Counts are registered test cases with this backend in the dataset or test identifier, not executed cases; names may include cross-backend cases."], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL;
-          ' | tee build/inventory/backend-counts.json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: batch-8-backend-discovery
-          path: build/inventory/
-          retention-days: 30
-
-  persistent-host-soak:
-    name: 300-second persistent request/consumer lifecycle soak
-    if: contains(github.event.head_commit.message, '[release-soak]')
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          coverage: none
-          tools: composer:v2
-      - run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
-      - name: Exercise short smoke to validate harness
-        run: php benchmarks/release-300s-soak.php 1
-      - name: Run full bounded persistent lifecycle
-        run: |
-          php benchmarks/release-300s-soak.php 300 | tee release-300s-soak.json
-          php -r '$r=json_decode(file_get_contents("release-300s-soak.json"),true,flags:JSON_THROW_ON_ERROR); if ($r["elapsed_seconds"]<300 || $r["unique_business_side_effects"]!==32 || $r["final_queue_depth"]!==0) exit(1);'
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-300s-soak
-          path: release-300s-soak.json
           retention-days: 30

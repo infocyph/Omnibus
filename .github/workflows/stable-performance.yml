@@ -2,9 +2,6 @@ name: Stable release performance certification
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/runwire-2.1
 
 permissions:
   contents: read
@@ -15,7 +12,6 @@ concurrency:
 
 jobs:
   stable-performance:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[stable-performance]')
     runs-on: [self-hosted, linux, x64, omnibus-stable]
     timeout-minutes: 90
     steps:

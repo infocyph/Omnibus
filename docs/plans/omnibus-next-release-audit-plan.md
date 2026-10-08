@@ -351,6 +351,24 @@ Final candidate QA must run at the last documentation/validator commit, not rely
 
 Exit gate: **NOT MET** until a dedicated `omnibus-stable` self-hosted runner passes `.github/workflows/stable-performance.yml` for the final immutable candidate, any validation findings are resolved, and the owner explicitly approves the release. Hosted runner and backend evidence are recorded without waiving budgets. Nonperformance implementation, PHPForge QA, production packaging, strict docs and single-process 300-second soak are complete; no performance acceptance or release approval is implied. Implementation completion, local validation, hosted certification, and publication remain separately recorded states.
 
+## Release CI pruning and required coverage (2026-10-08)
+
+All seven feature-branch workflow definitions were reviewed against Batch 8, historical GitHub Actions artifacts, and the authoritative PHPForge gates. The stable gate is **not** waived. The normal required checks stay active:
+
+| Workflow | Disposition | Coverage |
+| --- | --- | --- |
+| `security-standards.yml` | **Keep** | Original reusable PHPForge PHP 8.4/8.5 analysis, service-backed prefer-lowest/stable QA, benchmark smoke, production install and replica writer affinity; no PHPForge suppression or config relaxation. |
+| `batch-7-consumers.yml` | **Keep** | Executable examples on 8.4/8.5, independent Composer archive + optional adapters + real FastCGI/FPM, strict Sphinx. |
+| `batch-8-release.yml` | **Keep; two unconditional jobs** | On each feature push: exact-head live advisory audit, `ic:process`, `ic:tests:details`, `ic:release:guard`, immutable lock/SHA/platform evidence and clean tree; plus synthetic validator rejection/acceptance self-test. |
+| `stable-performance.yml` | **Keep; workflow_dispatch only** | Seven matched trials, four real workers, 2% RPM/CV and latency/CPU/RSS budgets. A dedicated `omnibus-stable` runner must be online, and a passing execution for the **current immutable candidate SHA** is a release prerequisite. No regular-push skipped or indefinitely queued status. |
+| `batch-6-profiling.yml` | **Remove workflow** | Historical codec, duplicate-group, SQL index/contention and million-row retention evidence already produced and retained in `docs/evidence/` and old Actions artifacts. Normal detector coverage remains in PHPForge; diagnostic scripts remain accessible. |
+| `batch-6-versions.yml` | **Remove workflow** | Noisy hosted version/HTTP comparisons superseded by dedicated stable acceptance, with prior diagnostic results documented. |
+| `runwire-attribution.yml` | **Remove workflow** | Historic attribution/A-B profiling already completed and documented; not a release acceptance or distinct regression gate. |
+
+Completed one-time `[count-backends]` discovery and `[release-soak]` 300-second host-soak jobs are removed from the regular preflight definition. Their validated results and reproducer scripts remain. Those jobs were historical evidence, **not** part of every-commit CI. The external PHPForge reusable workflow may deliberately skip its conditional SARIF/report upload when no report exists; this is not a missing QA lane.
+
+**Release state remains held** until the dedicated stable-performance workflow is manually dispatched on the candidate branch and produces a passing, exact-SHA result; after any subsequent change rerun all affected QA. Workflow removals do not waive the 2% regression criterion, and no release or merge is authorized. GitHub branch-protection required-check configuration must be confirmed by a repository administrator, since the GitHub connection cannot read that protected setting.
+
 ## Audit artifacts and reproducibility
 
 The audit left production PHP and Composer files unchanged. Temporary evidence from this session:
