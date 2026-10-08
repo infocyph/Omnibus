@@ -149,7 +149,10 @@ try {
         ? 'EXPLAIN ANALYZE SELECT id FROM omnibus_contention_messages WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT 100'
         : 'EXPLAIN (ANALYZE, BUFFERS) SELECT id FROM omnibus_contention_messages WHERE queue_name = ? AND available_at <= ? AND (reserved_until IS NULL OR reserved_until <= ?) ORDER BY available_at, id LIMIT 100';
     $now = (int) floor(microtime(true) * 1_000_000);
-    $executionPlan = $connection->select($explainSql, ['contention', $now, $now]);
+    $explainStatement = $connection->getPdo()->prepare($explainSql);
+    $explainStatement->execute(['contention', $now, $now]);
+    $executionPlan = $explainStatement->fetchAll(PDO::FETCH_ASSOC);
+    $explainStatement->closeCursor();
 
     $run = bin2hex(random_bytes(8));
     $started = hrtime(true);
