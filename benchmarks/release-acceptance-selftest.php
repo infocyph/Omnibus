@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Exercise the standalone release validator with controlled evidence, including
  * failure cases. This self-test never claims production benchmark certification.
  */
-function acceptanceFixtures(string $directory): void
+function acceptanceFixtures(string $directory, bool $hosted = false): void
 {
     foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound'] as $variant) {
         for ($trial = 1; $trial <= 7; $trial++) {
@@ -51,7 +51,8 @@ function acceptanceFixtures(string $directory): void
                 "$directory/$variant-$trial.json",
                 json_encode([
                     'environment' => [
-                        'stable' => true,
+                        'stable' => !$hosted,
+                        'runner_environment' => $hosted ? 'github-hosted' : 'self-hosted',
                         'release' => $variant,
                         'http_server_workers' => 4,
                         'source_revision' => $revision,
@@ -65,10 +66,10 @@ function acceptanceFixtures(string $directory): void
 }
 
 /** @return array{exit:int,output:string} */
-function validateAcceptance(string $directory): array
+function validateAcceptance(string $directory, string $mode = 'dedicated'): array
 {
     $process = proc_open(
-        [PHP_BINARY, __DIR__ . '/release-acceptance.php', $directory],
+        [PHP_BINARY, __DIR__ . '/release-acceptance.php', $directory, $mode],
         [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
         $pipes,
     );
@@ -114,6 +115,23 @@ try {
         || count($report['workloads']['3.0-unbound'] ?? []) !== 6) {
         throw new RuntimeException('Release report lost per-workload evidence.');
     }
+    acceptanceFixtures($directory, true);
+    $hosted = validateAcceptance($directory, 'hosted');
+    if ($hosted['exit'] !== 0) {
+        throw new RuntimeException('Valid matched hosted-runner evidence rejected: ' . $hosted['output']);
+    }
+    $hostedReport = json_decode($hosted['output'], true, 512, JSON_THROW_ON_ERROR);
+    if (($hostedReport['certification_scope'] ?? null) !== 'github-hosted-matched'
+        || ($hostedReport['environment_stable'] ?? null) !== false) {
+        throw new RuntimeException('Hosted evidence incorrectly presented as dedicated certification.');
+    }
+    if (validateAcceptance($directory)['exit'] === 0) {
+        throw new RuntimeException('Dedicated mode accepted hosted evidence.');
+    }
+    acceptanceFixtures($directory);
+    if (validateAcceptance($directory, 'hosted')['exit'] === 0) {
+        throw new RuntimeException('Hosted mode accepted dedicated evidence.');
+    }
     assertRejected($directory, static function (array &$document): void {
         array_pop($document['workloads']);
     }, 'Missing or unexpected benchmark workload');
@@ -144,7 +162,7 @@ try {
         throw new RuntimeException('2% release throughput budget was bypassed: ' . $failed['output']);
     }
 
-    fwrite(STDOUT, 'Release validator self-test: passed (valid evidence, six malformed-evidence cases, and throughput regression).' . PHP_EOL);
+    fwrite(STDOUT, 'Release validator self-test: passed (runner-mode separation, malformed evidence, and throughput regression).' . PHP_EOL);
 } finally {
     foreach (glob($directory . '/*') ?: [] as $file) {
         unlink($file);

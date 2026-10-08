@@ -436,6 +436,7 @@ $document = [
         'xdebug' => extension_loaded('xdebug'),
         'extensions' => get_loaded_extensions(),
         'runner' => getenv('GITHUB_ACTIONS') === 'true' ? 'github-actions' : 'local',
+        'runner_environment' => getenv('RUNNER_ENVIRONMENT') ?: 'local',
         'release' => getenv('OMNIBUS_BENCHMARK_RELEASE') ?: 'unlabeled',
         'source_revision' => getenv('OMNIBUS_BENCHMARK_REVISION') ?: 'unlabeled',
         'http_server_implementation' => 'php-cli-built-in-multiworker-when-configured',

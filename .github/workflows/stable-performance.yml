@@ -1,18 +1,21 @@
-name: Stable release performance certification
+name: Hosted matched release performance acceptance
 
 on:
+  push:
+    branches:
+      - feature/runwire-2.1
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: omnibus-stable-performance
-  cancel-in-progress: false
+  group: omnibus-hosted-performance-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   stable-performance:
-    runs-on: [self-hosted, linux, x64, omnibus-stable]
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
@@ -56,9 +59,9 @@ jobs:
             sha256sum "$target/composer.lock" > "results/$target-lock.sha256"
           done
           git -C candidate rev-parse HEAD > results/candidate-revision.txt
-      - name: Seven alternating trials on isolated four-worker host
+      - name: Seven alternating matched trials on one hosted runner
         env:
-          OMNIBUS_BENCHMARK_STABLE: '1'
+          OMNIBUS_BENCHMARK_STABLE: '0'
           OMNIBUS_BENCHMARK_HTTP_WORKERS: '4'
           OMNIBUS_BENCHMARK_REQUESTS_PER_CLIENT: '1000'
         run: |
@@ -80,10 +83,11 @@ jobs:
                 php benchmarks/release.php "../results/$variant-$trial.json" > /dev/null)
             done
           done
-      - name: Enforce unwaived release budgets
+      - name: Enforce unwaived hosted matched-release budgets
         run: |
-          php candidate/benchmarks/release-acceptance.php results | tee results/acceptance.json
-          jq -e --rawfile sha results/candidate-revision.txt '.passed == true and .candidate_revision == ($sha | rtrimstr("\n"))' results/acceptance.json
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          php candidate/benchmarks/release-acceptance.php results hosted | tee results/acceptance.json
+          jq -e --rawfile sha results/candidate-revision.txt '.passed == true and .certification_scope == "github-hosted-matched" and .environment_stable == false and .runner_environment == "github-hosted" and .candidate_revision == ($sha | rtrimstr("\n"))' results/acceptance.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -23,11 +23,16 @@ function benchmarkCv(array $numbers): float
 }
 
 $directory = $argv[1] ?? '';
+$mode = $argv[2] ?? 'dedicated';
+if (!in_array($mode, ['dedicated', 'hosted'], true)) {
+    throw new InvalidArgumentException('Expected dedicated or hosted benchmark mode.');
+}
 if (!is_dir($directory)) {
-    throw new InvalidArgumentException('Expected directory containing stable benchmark trial JSON.');
+    throw new InvalidArgumentException('Expected directory containing matched benchmark trial JSON.');
 }
 $results = [];
 $fingerprint = null;
+$runnerEnvironment = null;
 $revisions = [];
 $failures = [];
 foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound'] as $variant) {
@@ -40,12 +45,17 @@ foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound']
     foreach ($files as $file) {
         $document = json_decode((string) file_get_contents($file), true, 512, JSON_THROW_ON_ERROR);
         $env = $document['environment'] ?? [];
-        if (($env['stable'] ?? false) !== true || ($env['release'] ?? '') !== $variant
+        $expectedStable = $mode === 'dedicated';
+        $expectedRunner = $mode === 'hosted' ? 'github-hosted' : 'self-hosted';
+        if (($env['stable'] ?? null) !== $expectedStable
+            || ($env['runner_environment'] ?? null) !== $expectedRunner
+            || ($env['release'] ?? '') !== $variant
             || ($env['http_server_workers'] ?? null) !== 4
             || !is_string($env['source_revision'] ?? null)
             || $env['source_revision'] === 'unlabeled') {
-            throw new RuntimeException('Unstable, unlabelled, or incorrect host trial: ' . $file);
+            throw new RuntimeException('Incorrect runner mode, unlabelled source, or host trial: ' . $file);
         }
+        $runnerEnvironment = $env['runner_environment'];
         if ($fingerprint !== null && $fingerprint !== $env['fingerprint']) {
             throw new RuntimeException('Benchmark environment fingerprint changed between trials.');
         }
@@ -165,7 +175,7 @@ foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound']
     }
     $cv = benchmarkCv(array_column($trials, 'rpm'));
     if ($cv > 0.02) {
-        $failures[] = sprintf('%s RPM CV %.2f%% exceeds stable 2%%', $variant, $cv * 100);
+        $failures[] = sprintf('%s RPM CV %.2f%% exceeds matched-trial 2%%', $variant, $cv * 100);
     }
     $results[$variant] = $measurements + ['rpm_cv_percent' => $cv * 100];
 }
@@ -194,6 +204,9 @@ foreach ([['2.6', '3.0-unbound'], ['3.0-host-only', '3.0-bound']] as [$baseline,
 fwrite(STDOUT, json_encode([
     'passed' => $failures === [],
     'candidate_revision' => array_key_first($revisions['3.0-unbound']),
+    'certification_scope' => $mode === 'hosted' ? 'github-hosted-matched' : 'isolated-dedicated',
+    'environment_stable' => $mode === 'dedicated',
+    'runner_environment' => $runnerEnvironment,
     'environment_fingerprint' => $fingerprint,
     'variants' => $results,
     'workloads' => $workloadSummaries,
@@ -201,5 +214,5 @@ fwrite(STDOUT, json_encode([
     'failures' => $failures,
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL);
 if ($failures !== []) {
-    throw new RuntimeException('Stable release performance failed its unwaived budgets.');
+    throw new RuntimeException('Matched release performance failed its unwaived budgets.');
 }
