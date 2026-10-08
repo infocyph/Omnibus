@@ -181,3 +181,31 @@ jobs:
           path: batch-6-duplicates.txt
           retention-days: 14
 
+
+  retention-history:
+    name: SQLite 100k and 1m failure history and active claim retention
+    if: contains(github.event.head_commit.message, '[retention-million]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_sqlite
+          coverage: none
+          tools: composer:v2
+      - run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+      - name: Check retention semantics against 100k and 1m historical failures
+        run: |
+          mkdir -p build/retention
+          php benchmarks/failure-retention.php 100000 > build/retention/100k.json
+          jq -e '.history_depth==100000 and .pruned_unclaimed==99998 and .retained_retrying_and_sent==2 and .final_failure_rows==0' build/retention/100k.json
+          php benchmarks/failure-retention.php 1000000 > build/retention/1m.json
+          jq -e '.history_depth==1000000 and .pruned_unclaimed==999998 and .retained_retrying_and_sent==2 and .final_failure_rows==0' build/retention/1m.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: batch-8-100k-1m-failure-retention
+          path: build/retention/
+          retention-days: 30
