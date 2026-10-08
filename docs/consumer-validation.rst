@@ -15,7 +15,9 @@ dependencies installed in this checkout:
 
 ``standalone-consumer.php`` performs a complete in-memory send, bounded
 consumer receive/ack, idempotent business-key processing and PSR-14 event
-dispatch through a host-managed ``WorkerLifecycle``. Its in-memory queue is
+dispatch through a host-managed ``WorkerLifecycle``. It also uses
+``FailureManager::retry()`` to claim, replay and remove a simulated terminal
+failure before the consumer finishes its business side effect. Its in-memory queue is
 a semantic smoke fixture, **not** persistent storage or a multi-process broker.
 
 ``runwire-forwarding.php`` uses a passed Runwire ``RuntimeContext`` and

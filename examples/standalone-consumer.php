@@ -7,8 +7,11 @@ use Infocyph\Omnibus\Consumer\Consumer;
 use Infocyph\Omnibus\Consumer\Worker;
 use Infocyph\Omnibus\Consumer\WorkerLifecycle;
 use Infocyph\Omnibus\Consumer\WorkerOptions;
+use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Event\EventDispatcher;
 use Infocyph\Omnibus\Event\ListenerMap;
+use Infocyph\Omnibus\Failure\FailedMessage;
+use Infocyph\Omnibus\Failure\FailureManager;
 use Infocyph\Omnibus\Failure\InMemoryFailureStore;
 use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Handler\HandlerMap;
@@ -92,6 +95,24 @@ if (count($effects) !== 1 || $events !== ['same-business-key']
     || $transport->size('work') !== 0 || $failures->all() !== []
     || $lifecycle->heartbeats < 2) {
     throw new RuntimeException('Standalone consumer, lifecycle, event or idempotency check failed.');
+}
+
+$failures->add(FailedMessage::decoded(
+    'failed-example',
+    'work',
+    new Envelope(new ExampleWork('replayed-business-key')),
+    1,
+    $clock->now(),
+    RuntimeException::class,
+    'simulated-failure',
+));
+$manager = new FailureManager($failures);
+$manager->retry('failed-example', $transport, 'work');
+$replayed = $consumer->run('work');
+if ($replayed->succeeded !== 1 || count($effects) !== 2
+    || $events !== ['same-business-key', 'replayed-business-key']
+    || $failures->find('failed-example') !== null) {
+    throw new RuntimeException('Failure claim/replay and idempotent recovery failed.');
 }
 
 fwrite(STDOUT, "standalone-consumer-ok\n");
