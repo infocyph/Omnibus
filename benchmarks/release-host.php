@@ -40,7 +40,9 @@ $failurePath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) === '/fai
 
 try {
     $message = new OmnibusReleaseHttpMessage($failurePath ? -1 : 42);
-    if (getenv('OMNIBUS_BENCHMARK_BOUND') === '1') {
+    $bound = getenv('OMNIBUS_BENCHMARK_BOUND') === '1';
+    $hostOnly = getenv('OMNIBUS_BENCHMARK_HOST_ONLY') === '1';
+    if ($bound || $hostOnly) {
         $runtime = RuntimeContext::fromCapabilities(
             new RuntimeCapabilities(RuntimeDriver::NATIVE, persistentProcess: true, persistentApplication: true),
             'omnibus-release-benchmark',
@@ -50,7 +52,9 @@ try {
         $request = RequestContext::create($runtime);
 
         try {
-            $envelope = $bus->withRunwire($runtime, static fn() => $bus->dispatch($message), $request);
+            $envelope = $bound
+                ? $bus->withRunwire($runtime, static fn() => $bus->dispatch($message), $request)
+                : $bus->dispatch($message);
         } finally {
             $request->complete();
         }

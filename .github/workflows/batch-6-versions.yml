@@ -61,11 +61,12 @@ jobs:
             (cd baseline && OMNIBUS_BENCHMARK_BOUND=0 php benchmarks/release.php "../results/2.6-$trial.json" > /dev/null)
             (cd candidate && OMNIBUS_BENCHMARK_BOUND=0 php benchmarks/release.php "../results/3.0-unbound-$trial.json" > /dev/null)
             (cd dependency-only && OMNIBUS_BENCHMARK_BOUND=0 php benchmarks/release.php "../results/dependency-only-$trial.json" > /dev/null)
+            (cd candidate && OMNIBUS_BENCHMARK_HOST_ONLY=1 php benchmarks/release.php "../results/3.0-host-only-$trial.json" > /dev/null)
             (cd candidate && OMNIBUS_BENCHMARK_BOUND=1 php benchmarks/release.php "../results/3.0-bound-$trial.json" > /dev/null)
           done
       - name: Verify correctness and report diagnostic median RPM
         run: |
-          for variant in 2.6 dependency-only 3.0-unbound 3.0-bound; do
+          for variant in 2.6 dependency-only 3.0-unbound 3.0-host-only 3.0-bound; do
             for trial in 1 2 3; do
               jq -e 'all(.workloads[]; .result.failed_operations == 0 and .result.timeouts == 0)' \
                 "results/$variant-$trial.json" > /dev/null
