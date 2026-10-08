@@ -104,7 +104,7 @@ jobs:
       - name: Install selected optional adapters without dev packages
         run: |
           cd "$RUNNER_TEMP/consumer"
-          composer require --no-dev --no-interaction --prefer-dist --no-progress \
+          composer require --update-no-dev --no-interaction --prefer-dist --no-progress \
             "infocyph/dblayer:^6.0" "infocyph/cachelayer:^4.0" "infocyph/runwire:2.1.1"
           composer check-platform-reqs
           php "$GITHUB_WORKSPACE/examples/runwire-forwarding.php" "$RUNNER_TEMP/consumer/vendor/autoload.php"
