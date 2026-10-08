@@ -112,6 +112,43 @@ test('Runwire binding forwards exact host identities and restores every borrowed
     }
 });
 
+test('late adapter registration in a bound callback still forwards nested dispatch ownership', function (): void {
+    $runtime = omnibusRunwireRuntime();
+    $request = RequestContext::create($runtime, requestId: 'late-registration');
+    $binding = new RunwireBinding();
+    $connection = new Connection(ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]));
+    $observed = null;
+    $sender = new class($connection, $observed) implements Sender {
+        public function __construct(private Connection $connection, private mixed &$observed) {}
+
+        public function send(Envelope $envelope, string $queue): Envelope
+        {
+            unset($queue);
+            $this->observed = $this->connection->runwireBinding();
+
+            return $envelope;
+        }
+    };
+    $bus = new MessageBus(
+        new RouteMap(default: new Route('recording')),
+        new TransportRegistry(['recording' => $sender]),
+        $binding,
+    );
+
+    $bus->withRunwire($runtime, function () use ($binding, $connection, $bus): void {
+        $binding->registerConnection($connection);
+        $bus->dispatch(new TestCommand('late-registration'));
+    }, $request);
+
+    expect($observed['runtime'] ?? null)->toBe($runtime)
+        ->and($observed['request'] ?? null)->toBe($request)
+        ->and($connection->runwireBinding())->toBeNull()
+        ->and($binding->runtime())->toBeNull();
+});
+
 test('one Consumer can be reused across completed Runwire requests without retaining context', function (): void {
     $runtime = omnibusRunwireRuntime();
     $binding = new RunwireBinding();
