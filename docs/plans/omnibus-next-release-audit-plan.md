@@ -4,7 +4,7 @@ Date: 2026-10-07 (Asia/Dhaka). Audited production revision: `17a86f28215b36f237a
 
 Target: **3.0.0 directly from 2.6**. The user has selected the next major and the full improvement scope; there is no intermediate patch/minor release in this plan.
 
-Status: **Batches 0–5 complete; Batch 6 implementation and ordinary QA complete, regression/performance acceptance explicitly deferred by owner; Batch 7 next.** The branch is not ready to certify 3.0.0: Batches 7–8 and final matched-environment performance acceptance remain open. O07's two inherited complexity violations were resolved in Batches 1–2 without relaxing PHPForge limits. No release has been tagged or published.
+Status: **Batches 0–5 complete; Batch 6 implementation/ordinary QA complete with regression deferred by owner; Batch 7 implementation and consumer QA complete; Batch 8 next.** The branch is not ready to certify 3.0.0: Batches 7–8 and final matched-environment performance acceptance remain open. O07's two inherited complexity violations were resolved in Batches 1–2 without relaxing PHPForge limits. No release has been tagged or published.
 
 Engineering authority: [PHPForge engineering principles](../../vendor/infocyph/phpforge/resources/engineering-principles.md) and [agent workflow](../../vendor/infocyph/phpforge/resources/AGENTS.md), as installed during this audit.
 
@@ -224,7 +224,7 @@ No new NATS/Kafka/AMQP/SQS SDK adapter, default parallel handler execution, time
 | 4 | Passed-instance Runwire composition | 3 | Full runtime contract above | **Complete** |
 | 5 | Lease, cancellation, ambiguous-delivery recovery | 4 | U02, U06 | **Complete** |
 | 6 | Measured performance, structure, and storage improvements | 5 | U03, U04, U05, U07 | **Implementation / QA complete; performance acceptance deferred** |
-| 7 | 3.0 migration, executable examples, consumer packaging | 6 | U08, all public changes | **In progress — implementation/QA** |
+| 7 | 3.0 migration, executable examples, consumer packaging | 6 | U08, all public changes | **Implementation complete; executable/package/doc QA passed** |
 | 8 | Exact-candidate release certification | 7 | All release gates | Pending |
 
 Implement in this order; keep source-mutating processors sequential and reuse successful analyzer results. Each batch should be reviewable with its production changes, focused regressions, updated relevant docs, and recorded validation. Any production change after certification requires checks appropriate to that change and renewed final-SHA evidence.
@@ -322,12 +322,12 @@ Implementation / ordinary-QA gate: **passed** on `2564ee4907b0c140812d5347185f83
 
 Owners: README, existing Sphinx docs, documentation example tests, new executable examples where useful, consumer/packaging fixtures.
 
-- [ ] Add the 3.0 upgrade guide: dependency floors, optional extensions, signal options, passed-context lifetime, cancellation outcomes, lease sizing, deployment/cutover, and intentional breaks. Retain relevant 2.6/2.5 storage history.
-- [ ] Update integration/backend/operation/testing/performance docs and remove stale current-release dependency claims or feature-freeze wording; keep genuinely future broker adapters scoped separately.
-- [ ] Add executable direct/intermediary forwarding, host-managed consumer, coroutine/fallback, no-optional-package, failure recovery, and idempotency examples. Keep source and docs examples synchronized.
-- [ ] Complete U08 with clean `--no-dev` consumer installs, each selected optional integration, independent PSR clock/event interoperability, and genuine FPM plus a representative persistent host.
-- [ ] Verify Composer archive contents, PSR-4/casing, production optimized autoloading, platform requirements, and absence of development-only files/dependencies. Do not force authoritative classmaps into consumers that generate classes.
-- [ ] Build Sphinx strictly and run executable documentation/consumer tests independently of the library's dev autoloader.
+- [x] Add the 3.0 upgrade guide: dependency floors, optional extensions, signal options, passed-context lifetime, cancellation outcomes, lease sizing, deployment/cutover, and intentional breaks. Retain relevant 2.6/2.5 storage history.
+- [x] Update integration/backend/operation/testing/performance docs and remove stale current-release dependency claims or feature-freeze wording; keep genuinely future broker adapters scoped separately.
+- [x] Add executable direct/intermediary forwarding, host-managed consumer, coroutine/fallback, no-optional-package, failure recovery, and idempotency examples. Keep source and docs examples synchronized.
+- [x] Complete U08 with clean `--no-dev` consumer installs, each selected optional integration, independent PSR clock/event interoperability, and genuine FPM plus a representative persistent host.
+- [x] Verify Composer archive contents, PSR-4/casing, production optimized autoloading, platform requirements, and absence of development-only files/dependencies. Do not force authoritative classmaps into consumers that generate classes.
+- [x] Build Sphinx strictly and run executable documentation/consumer tests independently of the library's dev autoloader.
 
 Exit gate: a consumer can follow the upgrade and forwarding examples successfully, package artifacts install cleanly, and documentation accurately describes the delivered 3.0 behavior.
 

@@ -125,19 +125,3 @@ jobs:
       - name: Build strict HTML documentation
         run: python -m sphinx -n -W -b html docs build/sphinx
 
-  format-examples:
-    name: PHPForge exact example formatting
-    if: contains(github.event.head_commit.message, '[format7]')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          coverage: none
-          tools: composer:v2
-      - run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
-      - name: Print exact PHPForge Pint fixes
-        run: |
-          vendor/bin/pint --config=vendor/infocyph/phpforge/resources/pint.json examples/runwire-forwarding.php
-          git diff -- examples/runwire-forwarding.php

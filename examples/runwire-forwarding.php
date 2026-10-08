@@ -73,6 +73,7 @@ if ($binding->request() !== null || $binding->runtime() !== null) {
 
 for ($index = 0; $index < 100; $index++) {
     $next = RequestContext::create($runtime);
+
     try {
         $result = $bus->withRunwire(
             $runtime,
