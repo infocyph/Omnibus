@@ -200,6 +200,48 @@ test('ambiguous workflow dispatch retains the attempted claim but releases unatt
         ->and($sender->attempts)->toBe(3);
 });
 
+
+test('workflow confirmation failures release only unattempted dispatch claims immediately', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $store = new InMemoryWorkflowStore($clock);
+    $sender = new class($store) implements Sender {
+        public int $attempts = 0;
+
+        public function __construct(private readonly InMemoryWorkflowStore $store) {}
+
+        public function send(Envelope $envelope, string $queue): Envelope
+        {
+            unset($queue);
+            $this->attempts++;
+            if ($this->attempts === 1) {
+                $identity = \Infocyph\Omnibus\Workflow\WorkflowItem::identity($envelope);
+                if ($identity === null) {
+                    throw new LogicException('Expected a stamped workflow item.');
+                }
+                $this->store->fail($identity['workflow_id'], $identity['item_id'], $identity['index']);
+            }
+
+            return $envelope;
+        }
+    };
+    $coordinator = new WorkflowCoordinator($store, $sender, dispatchLeaseSeconds: 60);
+    $workflowId = null;
+
+    try {
+        $coordinator->batch([
+            new TestCommand('confirmation-fails'),
+            new TestCommand('unattempted'),
+        ], 'work');
+    } catch (WorkflowDispatchFailed $failure) {
+        $workflowId = $failure->workflowId;
+    }
+
+    expect($workflowId)->toBeString()
+        ->and($sender->attempts)->toBe(1)
+        ->and($coordinator->dispatchPending($workflowId, 10))->toBe(1)
+        ->and($sender->attempts)->toBe(2);
+});
+
 test('ambiguous unique send holds the detached lease until its TTL expires', function (): void {
     $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
     $locks = new InMemoryLockProvider($clock);

@@ -75,6 +75,7 @@ final readonly class WorkflowCoordinator
         foreach ($claims as $position => $claim) {
             try {
                 $this->sender->send($claim->item->envelope, $claim->item->queue);
+                $this->store->confirmDispatched($id, $claim->item->itemId, $claim->token);
             } catch (\Throwable $failure) {
                 for ($index = $position + 1, $count = count($claims); $index < $count; $index++) {
                     try {
@@ -90,7 +91,6 @@ final readonly class WorkflowCoordinator
 
                 throw $failure;
             }
-            $this->store->confirmDispatched($id, $claim->item->itemId, $claim->token);
             $dispatched++;
         }
 

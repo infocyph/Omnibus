@@ -4,7 +4,7 @@ Date: 2026-10-07 (Asia/Dhaka). Audited production revision: `17a86f28215b36f237a
 
 Target: **3.0.0 directly from 2.6**. The user has selected the next major and the full improvement scope; there is no intermediate patch/minor release in this plan.
 
-Status: **Batch 0 implementation complete; Batch 1 is next.** The checkout is not ready to certify 3.0.0. O07 remains an explicit inherited release blocker until Batches 1–2 remove both complexity violations. No release has been tagged or published.
+Status: **Batches 0–5 complete with recorded exact-SHA CI evidence; Batch 6 next.** The branch is not ready to certify 3.0.0: Batches 6–8 and final matched-environment performance acceptance remain open. O07's two inherited complexity violations were resolved in Batches 1–2 without relaxing PHPForge limits. No release has been tagged or published.
 
 Engineering authority: [PHPForge engineering principles](../../vendor/infocyph/phpforge/resources/engineering-principles.md) and [agent workflow](../../vendor/infocyph/phpforge/resources/AGENTS.md), as installed during this audit.
 
