@@ -10,6 +10,19 @@ permissions:
   contents: read
 
 jobs:
+  acceptance-validator:
+    name: Stable performance validator adversarial self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+      - name: Verify accepted and rejected performance evidence
+        run: php benchmarks/release-acceptance-selftest.php
+
   engineering-gates:
     name: Exact-head PHPForge release checks and dependency audit
     if: contains(github.event.head_commit.message, '[release-preflight]')
