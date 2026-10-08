@@ -149,6 +149,72 @@ test('late adapter registration in a bound callback still forwards nested dispat
         ->and($binding->runtime())->toBeNull();
 });
 
+test('a host can bind CacheLayer after entering Omnibus and forward the nested operation', function (): void {
+    $runtime = omnibusRunwireRuntime();
+    $request = RequestContext::create($runtime);
+    $observed = null;
+    $sender = new class($observed) implements Sender {
+        public function __construct(private mixed &$observed) {}
+
+        public function send(Envelope $envelope, string $queue): Envelope
+        {
+            unset($queue);
+            $this->observed = CacheRunwireIntegration::current();
+
+            return $envelope;
+        }
+    };
+    $bus = new MessageBus(
+        new RouteMap(default: new Route('recording')),
+        new TransportRegistry(['recording' => $sender]),
+    );
+
+    try {
+        $bus->withRunwire($runtime, static function () use ($bus, $runtime): void {
+            CacheRunwireIntegration::bind($runtime);
+            $bus->dispatch(new TestCommand('late-cache-binding'));
+        }, $request);
+
+        expect($observed?->runtime)->toBe($runtime)
+            ->and($observed?->request)->toBe($request)
+            ->and(CacheRunwireIntegration::current())->toBeNull()
+            ->and(CacheRunwireIntegration::runtime())->toBe($runtime);
+    } finally {
+        CacheRunwireIntegration::release($runtime);
+        $request->complete();
+    }
+});
+
+test('cold binding does not autoload an unused optional CacheLayer integration', function (): void {
+    $probe = <<<'PHP'
+require $argv[1];
+$runtime = Infocyph\Runwire\RuntimeContext::standalone();
+$request = Infocyph\Runwire\RequestContext::create($runtime);
+$binding = new Infocyph\Omnibus\Integration\Runwire\RunwireBinding();
+$before = class_exists(Infocyph\CacheLayer\Integration\Runwire\RunwireIntegration::class, false);
+$result = $binding->withRunwire($runtime, fn() => $binding->run(fn() => 42), $request);
+$after = class_exists(Infocyph\CacheLayer\Integration\Runwire\RunwireIntegration::class, false);
+$request->complete();
+fwrite(STDOUT, json_encode([$before, $result, $after], JSON_THROW_ON_ERROR));
+PHP;
+    $process = proc_open(
+        [PHP_BINARY, '-r', $probe, dirname(__DIR__, 2).'/vendor/autoload.php'],
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+    );
+    if (!is_resource($process)) {
+        throw new RuntimeException('Unable to start the cold binding probe.');
+    }
+    $output = stream_get_contents($pipes[1]);
+    $errors = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+
+    expect(proc_close($process))->toBe(0)
+        ->and($errors)->toBe('')
+        ->and($output)->toBe('[false,42,false]');
+});
+
 test('one Consumer can be reused across completed Runwire requests without retaining context', function (): void {
     $runtime = omnibusRunwireRuntime();
     $binding = new RunwireBinding();
@@ -281,6 +347,64 @@ test('closed coroutine scopes reject Runwire binding before executing callbacks'
         ))->toBe('open scope');
     });
 });
+
+test('a host closing its borrowed scope blocks business work inside an active binding', function (): void {
+    $binding = new RunwireBinding();
+    $runtime = omnibusRunwireRuntime(coroutines: true);
+    $ran = false;
+
+    (new CoroutineRuntime())->run(static function (CoroutineScope $scope) use ($binding, $runtime, &$ran): void {
+        $binding->withRunwire($runtime, static function () use ($binding, $scope, &$ran): void {
+            $scope->close();
+
+            expect(fn() => $binding->run(static function () use (&$ran): void {
+                $ran = true;
+            }))->toThrow(LogicException::class, 'already closed');
+        }, scope: $scope);
+    });
+
+    expect($ran)->toBeFalse()
+        ->and($binding->scope())->toBeNull();
+});
+
+if (function_exists('pcntl_fork') && function_exists('pcntl_waitpid') && function_exists('posix_kill')) {
+    test('an inherited active Runwire binding rejects operations in a forked process', function (): void {
+        $binding = new RunwireBinding();
+        $runtime = omnibusRunwireRuntime();
+
+        $binding->withRunwire($runtime, static function () use ($binding): void {
+            $pid = pcntl_fork();
+            if ($pid === -1) {
+                throw new RuntimeException('Unable to fork the binding ownership probe.');
+            }
+            if ($pid === 0) {
+                $signal = SIGUSR2;
+                try {
+                    $binding->run(static fn(): null => null);
+                } catch (LogicException $failure) {
+                    $signal = str_contains($failure->getMessage(), 'PID') ? SIGUSR1 : SIGUSR2;
+                }
+
+                pcntl_signal($signal, SIG_DFL);
+                pcntl_sigprocmask(SIG_UNBLOCK, [$signal]);
+                $childPid = getmypid();
+                if (!is_int($childPid) || !posix_kill($childPid, $signal)) {
+                    throw new RuntimeException('Unable to terminate the binding ownership probe.');
+                }
+                while (true) {
+                    usleep(10_000);
+                }
+            }
+
+            $reaped = pcntl_waitpid($pid, $status);
+            expect($reaped)->toBe($pid)
+                ->and(pcntl_wifsignaled($status))->toBeTrue()
+                ->and(pcntl_wtermsig($status))->toBe(SIGUSR1);
+        });
+
+        expect($binding->runtime())->toBeNull();
+    });
+}
 
 test('Worker idle waiting borrows a Runwire coroutine scope and retains synchronous fallback', function (): void {
     $runtime = omnibusRunwireRuntime(coroutines: true);

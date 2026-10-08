@@ -18,34 +18,28 @@ use WeakMap;
 
 final class RunwireBinding
 {
-    /** @var WeakMap<Connection, bool> */
-    private WeakMap $connections;
+    /** @var WeakMap<Connection, bool>|null */
+    private ?WeakMap $connections = null;
 
     /**
      * @var WeakMap<
      *   Fiber<mixed, mixed, mixed, mixed>,
-     *   array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null}
-     * >
+     *   array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null,generationKey:string|null}
+     * >|null
      */
-    private WeakMap $fiberContexts;
+    private ?WeakMap $fiberContexts = null;
 
     /** @var array<string, int> */
     private array $generations = [];
 
-    /** @var array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null}|null */
+    /** @var array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null,generationKey:string|null}|null */
     private ?array $rootContext = null;
-
-    public function __construct()
-    {
-        $this->connections = new WeakMap();
-        $this->fiberContexts = new WeakMap();
-    }
 
     public function checkpoint(): void
     {
         $context = $this->context();
         if ($context !== null) {
-            $this->assertContext($context['runtime'], $context['request'], $context['scope']);
+            $this->assertContext($context['runtime'], $context['request'], $context['scope'], $context['generationKey']);
         }
     }
 
@@ -65,7 +59,7 @@ final class RunwireBinding
             return $callback();
         }
 
-        $this->assertRuntime($current['runtime']);
+        $this->assertRuntime($current['runtime'], $current['generationKey']);
         $cleanupRequest = RequestContext::create(
             $current['runtime'],
             new RequestExecutionPolicy(maxExecutionSeconds: $maxSeconds),
@@ -75,6 +69,7 @@ final class RunwireBinding
             'runtime' => $current['runtime'],
             'request' => $cleanupRequest,
             'scope' => null,
+            'generationKey' => $current['generationKey'],
         ]);
 
         try {
@@ -103,6 +98,7 @@ final class RunwireBinding
 
     public function registerConnection(Connection $connection): void
     {
+        $this->connections ??= new WeakMap();
         $this->connections[$connection] = true;
     }
 
@@ -138,14 +134,16 @@ final class RunwireBinding
             return $callback();
         }
 
-        $this->assertContext($context['runtime'], $context['request'], $context['scope']);
-        $cacheBound = class_exists(CacheRunwireIntegration::class)
+        $this->assertContext($context['runtime'], $context['request'], $context['scope'], $context['generationKey']);
+        // A host binding loads this integration; an unbound optional package
+        // should not be autoloaded merely to inspect its empty runtime state.
+        $cacheBound = class_exists(CacheRunwireIntegration::class, false)
             && CacheRunwireIntegration::runtime() === $context['runtime'];
-        if (!$cacheBound && count($this->connections) === 0) {
+        if (!$cacheBound && count($this->connections ?? []) === 0) {
             return $callback();
         }
 
-        $operation = static fn(): mixed => $callback();
+        $operation = $callback;
         if ($cacheBound) {
             $next = $operation;
             $operation = static fn(): mixed => CacheRunwireIntegration::share(
@@ -155,7 +153,7 @@ final class RunwireBinding
             );
         }
 
-        foreach ($this->connections as $connection => $_registered) {
+        foreach ($this->connections ?? [] as $connection => $_registered) {
             unset($_registered);
             $next = $operation;
             $operation = static fn(): mixed => $connection->withRunwire(
@@ -195,7 +193,7 @@ final class RunwireBinding
             return;
         }
 
-        $this->assertContext($context['runtime'], $context['request'], $context['scope']);
+        $this->assertContext($context['runtime'], $context['request'], $context['scope'], $context['generationKey']);
         if (
             $context['scope'] !== null
             && $context['runtime']->supports(RuntimeCapability::RUNWIRE_COROUTINES)
@@ -204,7 +202,7 @@ final class RunwireBinding
         } else {
             usleep((int) min(PHP_INT_MAX, ceil($seconds * 1_000_000)));
         }
-        $this->assertContext($context['runtime'], $context['request'], $context['scope']);
+        $this->assertContext($context['runtime'], $context['request'], $context['scope'], $context['generationKey']);
     }
 
     /**
@@ -231,13 +229,19 @@ final class RunwireBinding
 
         $effectiveRequest = $request ?? $current['request'] ?? null;
         $effectiveScope = $scope ?? $current['scope'] ?? null;
-        $this->assertContext($runtime, $effectiveRequest, $effectiveScope);
-        $this->rememberGeneration($runtime);
+        // Runtime identity is immutable; reuse its key within this binding,
+        // but read the live generation and cancellation state at every boundary.
+        $generationKey = $current['generationKey'] ?? $this->generationKey($runtime);
+        $this->assertContext($runtime, $effectiveRequest, $effectiveScope, $generationKey);
+        if ($runtime->generation !== null && $generationKey !== null) {
+            $this->generations[$generationKey] = $runtime->generation;
+        }
 
         $next = [
             'runtime' => $runtime,
             'request' => $effectiveRequest,
             'scope' => $effectiveScope,
+            'generationKey' => $generationKey,
         ];
         $fiber = Fiber::getCurrent();
         $hadPrevious = $current !== null;
@@ -247,8 +251,8 @@ final class RunwireBinding
             // The entry context was already validated. Without borrowed adapters,
             // avoid repeating that validation before invoking the caller.
             // Nested bus/consumer operations still validate via run().
-            if (count($this->connections) === 0
-                && (!class_exists(CacheRunwireIntegration::class)
+            if (count($this->connections ?? []) === 0
+                && (!class_exists(CacheRunwireIntegration::class, false)
                     || CacheRunwireIntegration::runtime() !== $runtime)) {
                 return $callback();
             }
@@ -263,8 +267,9 @@ final class RunwireBinding
         RuntimeContext $runtime,
         ?RequestContext $request,
         ?CoroutineScope $scope,
+        ?string $generationKey,
     ): void {
-        $this->assertRuntime($runtime);
+        $this->assertRuntime($runtime, $generationKey);
         if ($request !== null && $request->runtime() !== $runtime) {
             throw new LogicException('Runwire request context belongs to a different runtime.');
         }
@@ -281,22 +286,22 @@ final class RunwireBinding
         }
     }
 
-    private function assertRuntime(RuntimeContext $runtime): void
+    private function assertRuntime(RuntimeContext $runtime, ?string $generationKey): void
     {
         $pid = getmypid();
         $currentPid = is_int($pid) ? $pid : 0;
         if ($runtime->pid !== $currentPid) {
             throw new LogicException('Runwire runtime PID does not match the current Omnibus process.');
         }
-        if ($runtime->generation !== null) {
-            $latest = $this->generations[$this->generationKey($runtime)] ?? null;
+        if ($generationKey !== null) {
+            $latest = $this->generations[$generationKey] ?? null;
             if ($latest !== null && $runtime->generation < $latest) {
                 throw new LogicException('Stale Runwire runtime generation cannot enter Omnibus.');
             }
         }
     }
 
-    /** @return array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null}|null */
+    /** @return array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null,generationKey:string|null}|null */
     private function context(): ?array
     {
         $fiber = Fiber::getCurrent();
@@ -307,8 +312,12 @@ final class RunwireBinding
         return $this->fiberContexts[$fiber] ?? null;
     }
 
-    private function generationKey(RuntimeContext $runtime): string
+    private function generationKey(RuntimeContext $runtime): ?string
     {
+        if ($runtime->generation === null) {
+            return null;
+        }
+
         return implode(':', [
             $runtime->driver->value,
             $runtime->mode,
@@ -316,20 +325,9 @@ final class RunwireBinding
         ]);
     }
 
-    private function rememberGeneration(RuntimeContext $runtime): void
-    {
-        if ($runtime->generation === null) {
-            return;
-        }
-
-        // assertContext() already checked the latest accepted generation before
-        // entering this method; there is no second lookup or comparison here.
-        $this->generations[$this->generationKey($runtime)] = $runtime->generation;
-    }
-
     /**
      * @param Fiber<mixed, mixed, mixed, mixed>|null $fiber
-     * @param array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null}|null $context
+     * @param array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null,generationKey:string|null}|null $context
      */
     private function setContext(?Fiber $fiber, ?array $context): void
     {
@@ -344,6 +342,7 @@ final class RunwireBinding
             return;
         }
 
+        $this->fiberContexts ??= new WeakMap();
         $this->fiberContexts[$fiber] = $context;
     }
 }
