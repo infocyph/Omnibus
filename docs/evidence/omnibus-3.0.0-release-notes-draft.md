@@ -26,3 +26,7 @@
 Batches 0–7 implementation is tracked in `docs/plans/omnibus-next-release-audit-plan.md`; mandatory release preflight, 300-second persistent-host soak and all final-SHA checks belong to Batch 8.
 
 **Release blocking:** The maximum 2% matched-environment successful-request-RPM regression gate, deeper host/resource and driver-specific performance acceptance, and user review remain open. Hosted runner component timings are not production acceptance. **Do not merge, tag, or publish** until these gates are explicitly closed.
+
+## Advisory audit note
+
+Composer's full lockfile currently includes the abandoned transitive **development** dependency `doctrine/annotations`. The final-preflight workflow verifies core production advisories with `composer audit --locked --no-dev`, then audits all locked dependencies while **reporting** inherited abandonment (not hiding it) using `--abandoned=report`. Actual security advisories remain fatal in both passes. No upstream package/version changes are silently applied to bypass PHPForge.

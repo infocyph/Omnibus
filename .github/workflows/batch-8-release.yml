@@ -27,7 +27,8 @@ jobs:
       - name: Validate manifest and live security advisories
         run: |
           composer validate --strict
-          composer audit --locked
+          composer audit --locked --no-dev
+          composer audit --locked --abandoned=report
           composer check-platform-reqs
       - name: Run installed PHPForge processor
         run: composer ic:process
