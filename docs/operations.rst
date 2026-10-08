@@ -2,7 +2,7 @@ Consumer operations and telemetry
 =================================
 
 Omnibus 2.6 durable-storage cutover
-----------------------------------
+-----------------------------------
 
 Do not leave Omnibus 2.5 readers running against shared DB queue, workflow or
 failure storage once 2.6 writers start. The new payload wrapper is unreadable

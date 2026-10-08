@@ -38,7 +38,7 @@ execution/transaction policy, CacheLayer owns lock/counter primitives, and
 Omnibus owns delivery/workflow semantics.
 
 3.0 deployment and host lifecycle
--------------------------------
+---------------------------------
 
 Use a coordinated cutover where all queue readers, failure-retry tools, and
 workflow dispatchers share durable storage. Inventory every participating
