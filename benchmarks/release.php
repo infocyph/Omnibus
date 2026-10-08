@@ -227,6 +227,7 @@ function observedHttp(
         touch($stop);
         $monitorExit = proc_close($monitor);
     }
+
     try {
         if ($monitorExit !== 0) {
             throw new RuntimeException('Host RSS/CPU sampling failed.');

@@ -167,17 +167,3 @@ jobs:
           path: results/*.json
           retention-days: 30
 
-  pint-host-diagnostics:
-    if: contains(github.event.head_commit.message, '[pint-host]')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          coverage: none
-          tools: composer:v2
-      - run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
-      - run: |
-          vendor/bin/pint --config=vendor/infocyph/phpforge/resources/pint.json benchmarks/release.php
-          git diff -- benchmarks/release.php
