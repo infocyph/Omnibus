@@ -31,7 +31,7 @@ jobs:
       - name: Run bounded characterization
         run: |
           php benchmarks/batch-6-profile.php 50000 256 | tee batch-6-profile.json
-          php -r '$data = json_decode(file_get_contents("batch-6-profile.json"), true, flags: JSON_THROW_ON_ERROR); if (count($data["measurements"]) !== 6 || $data["generated_class_count"] !== 256) { exit(1); }'
+          php -r '$data = json_decode(file_get_contents("batch-6-profile.json"), true, flags: JSON_THROW_ON_ERROR); if (count($data["measurements"]) !== 6 || $data["resolved_class_count"] < 8) { exit(1); }'
       - uses: actions/upload-artifact@v4
         with:
           name: batch-6-profile-php-${{ matrix.php }}

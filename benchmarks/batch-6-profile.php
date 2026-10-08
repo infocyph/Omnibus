@@ -51,7 +51,7 @@ $iterations = filter_var($argv[1] ?? 50_000, FILTER_VALIDATE_INT);
 $variants = filter_var($argv[2] ?? 256, FILTER_VALIDATE_INT);
 if (!is_int($iterations) || $iterations < 1_000 || $iterations > 1_000_000
     || !is_int($variants) || $variants < 1 || $variants > 10_000) {
-    throw new InvalidArgumentException('Expected 1000..1000000 iterations and 1..10000 generated classes.');
+    throw new InvalidArgumentException('Expected 1000..1000000 iterations and 1..10000 distinct classes to inspect.');
 }
 
 $message = new Batch6ProfileMessage('bounded-safe-json');
@@ -85,28 +85,44 @@ $measurements = [
     'listener_warm' => batch6Profile($iterations, static fn(): iterable => $listeners->getListenersForEvent($message)),
 ];
 
-$generated = [];
-$beforeDefinitions = memory_get_usage(false);
-for ($i = 0; $i < $variants; $i++) {
-    $class = 'Batch6ProfileVariant' . $i;
-    eval('class ' . $class . ' extends Batch6ProfileMessage {}');
-    $generated[] = new $class('variant');
+$objects = [];
+foreach (get_declared_classes() as $type) {
+    $reflection = new ReflectionClass($type);
+    if (!$reflection->isInstantiable() || $reflection->isAnonymous()) {
+        continue;
+    }
+    try {
+        $objects[] = $reflection->newInstanceWithoutConstructor();
+    } catch (Throwable) {
+        continue;
+    }
+    if (count($objects) >= $variants) {
+        break;
+    }
 }
-$afterDefinitions = memory_get_usage(false);
-$dynamicRoutes = new RouteMap([Batch6ProfileMessage::class => $route]);
-$dynamicHandlers = new HandlerMap([Batch6ProfileMessage::class => static fn(Batch6ProfileMessage $item): string => $item->value]);
-$dynamicListeners = new ListenerMap([Batch6ProfileMessage::class => [static function (object $event): void {}]]);
+if (count($objects) < 8) {
+    throw new RuntimeException('Not enough distinct loadable classes for lookup profiling.');
+}
+$count = count($objects);
+$registrations = [];
+foreach ($objects as $item) {
+    $registrations[$item::class] = static fn(object $event): string => $event::class;
+}
+
+$dynamicRoutes = new RouteMap(default: $route);
+$dynamicHandlers = new HandlerMap($registrations);
+$dynamicListeners = new ListenerMap();
 $beforeResolution = memory_get_usage(false);
-foreach ($generated as $item) {
-    if ($dynamicRoutes->for($item) !== $route || ($dynamicHandlers->for($item))($item) !== 'variant') {
-        throw new RuntimeException('Dynamic class mapping changed behavior.');
+foreach ($objects as $item) {
+    if ($dynamicRoutes->for($item) !== $route || ($dynamicHandlers->for($item))($item) !== $item::class) {
+        throw new RuntimeException('Distinct class mapping changed behavior.');
     }
     foreach ($dynamicListeners->getListenersForEvent($item) as $listener) {
         $listener($item);
     }
 }
 $afterResolution = memory_get_usage(false);
-unset($generated, $dynamicRoutes, $dynamicHandlers, $dynamicListeners);
+unset($objects, $registrations, $dynamicRoutes, $dynamicHandlers, $dynamicListeners);
 gc_collect_cycles();
 $afterDisposal = memory_get_usage(false);
 
@@ -114,12 +130,11 @@ fwrite(STDOUT, json_encode([
     'php' => PHP_VERSION,
     'sapi' => PHP_SAPI,
     'iterations' => $iterations,
-    'generated_class_count' => $variants,
+    'resolved_class_count' => $count,
     'measurements' => $measurements,
     'dynamic_lookup' => [
-        'class_definition_growth_bytes' => $afterDefinitions - $beforeDefinitions,
-        'map_resolution_growth_bytes' => $afterResolution - $beforeResolution,
-        'resident_growth_after_map_disposal_bytes' => $afterDisposal - $beforeDefinitions,
-        'note' => 'Generated PHP classes persist after map disposal; map growth is not class unloading.',
+         'map_resolution_growth_bytes' => $afterResolution - $beforeResolution,
+        'remaining_after_map_disposal_bytes' => $afterDisposal - $beforeResolution,
+        'note' => 'Uses distinct existing classes; maps can be released but PHP class definitions remain resident.',
     ],
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL);

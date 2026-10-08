@@ -237,8 +237,8 @@ test('JSON codec rejects cyclic payloads, malformed UTF-8 and nonfinite values b
     $codec = static fn(array $data): CallbackMessageCodec => new CallbackMessageCodec(
         'adversarial',
         TestCommand::class,
-        static fn(TestCommand $message): array => $data,
-        static fn(array $data): TestCommand => new TestCommand('decoded'),
+        static fn(TestCommand $message): array => $data + ['message' => $message->value],
+        static fn(array $data): TestCommand => new TestCommand((string) ($data['message'] ?? 'decoded')),
     );
 
     expect(fn() => $codec(['cycle' => $cycle])->encode(new TestCommand('cycle')))
