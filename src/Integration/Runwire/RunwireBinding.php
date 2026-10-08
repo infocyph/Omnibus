@@ -307,6 +307,15 @@ final class RunwireBinding
         return $this->fiberContexts[$fiber] ?? null;
     }
 
+    private function generationKey(RuntimeContext $runtime): string
+    {
+        return implode(':', [
+            $runtime->driver->value,
+            $runtime->mode,
+            (string) ($runtime->workerSlot ?? -1),
+        ]);
+    }
+
     private function rememberGeneration(RuntimeContext $runtime): void
     {
         if ($runtime->generation === null) {
@@ -320,15 +329,6 @@ final class RunwireBinding
         }
 
         $this->generations[$key] = max($latest ?? $runtime->generation, $runtime->generation);
-    }
-
-    private function generationKey(RuntimeContext $runtime): string
-    {
-        return implode(':', [
-            $runtime->driver->value,
-            $runtime->mode,
-            (string) ($runtime->workerSlot ?? -1),
-        ]);
     }
 
     /**
