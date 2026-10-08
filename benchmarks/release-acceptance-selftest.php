@@ -144,7 +144,7 @@ try {
         throw new RuntimeException('2% release throughput budget was bypassed: ' . $failed['output']);
     }
 
-    fwrite(STDOUT, "Release validator self-test: passed (valid evidence, six malformed-evidence cases, and throughput regression)." . PHP_EOL);
+    fwrite(STDOUT, 'Release validator self-test: passed (valid evidence, six malformed-evidence cases, and throughput regression).' . PHP_EOL);
 } finally {
     foreach (glob($directory . '/*') ?: [] as $file) {
         unlink($file);
