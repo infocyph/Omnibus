@@ -128,5 +128,5 @@ fwrite(STDOUT, json_encode([
     'failures' => $failures,
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL);
 if ($failures !== []) {
-    exit(1);
+    throw new RuntimeException('Stable release performance failed its unwaived budgets.');
 }
