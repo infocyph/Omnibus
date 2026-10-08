@@ -63,15 +63,7 @@ final readonly class Consumer
         $received = $succeeded = $released = $failed = 0;
         $this->runwire->checkpoint();
         foreach ($this->receiver->receive($queue, $limit, $visibilitySeconds) as $reservation) {
-            try {
-                $this->runwire->checkpoint();
-            } catch (\Throwable $failure) {
-                if ($this->runwire->isHostCancellation($failure)) {
-                    break;
-                }
-
-                throw $failure;
-            }
+            $this->runwire->checkpoint();
             $received++;
             $decodeFailure = $reservation->decodingFailure();
             if ($decodeFailure !== null) {
@@ -108,17 +100,9 @@ final readonly class Consumer
                 );
             } catch (\Throwable $exception) {
                 if ($this->runwire->isHostCancellation($exception)) {
-                    break;
+                    throw $exception;
                 }
-                try {
-                    $this->runwire->checkpoint();
-                } catch (\Throwable $failure) {
-                    if ($this->runwire->isHostCancellation($failure)) {
-                        break;
-                    }
-
-                    throw $failure;
-                }
+                $this->runwire->checkpoint();
                 if ($this->retry->shouldRetry($exception, $reservation->attempt)) {
                     $this->receiver->release(
                         $reservation,
