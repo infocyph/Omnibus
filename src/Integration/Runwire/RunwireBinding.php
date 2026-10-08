@@ -265,6 +265,15 @@ final class RunwireBinding
         $scope?->cancellation()->throwIfCancelled();
     }
 
+    private function assertRuntime(RuntimeContext $runtime): void
+    {
+        $pid = getmypid();
+        $currentPid = is_int($pid) ? $pid : 0;
+        if ($runtime->pid !== $currentPid) {
+            throw new LogicException('Runwire runtime PID does not match the current Omnibus process.');
+        }
+    }
+
     /** @return array{runtime:RuntimeContext,request:RequestContext|null,scope:CoroutineScope|null}|null */
     private function context(): ?array
     {
@@ -274,15 +283,6 @@ final class RunwireBinding
         }
 
         return $this->fiberContexts[$fiber] ?? null;
-    }
-
-    private function assertRuntime(RuntimeContext $runtime): void
-    {
-        $pid = getmypid();
-        $currentPid = is_int($pid) ? $pid : 0;
-        if ($runtime->pid !== $currentPid) {
-            throw new LogicException('Runwire runtime PID does not match the current Omnibus process.');
-        }
     }
 
     private function rememberGeneration(RuntimeContext $runtime): void
