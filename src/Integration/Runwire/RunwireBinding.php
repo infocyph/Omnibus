@@ -110,7 +110,6 @@ final class RunwireBinding
         $cleanupRequest = RequestContext::create(
             $current['runtime'],
             new RequestExecutionPolicy(maxExecutionSeconds: $maxSeconds),
-            requestId: ($current['request']?->requestId ?? 'omnibus') . ':cleanup',
         );
         $fiber = Fiber::getCurrent();
         $this->setContext($fiber, [

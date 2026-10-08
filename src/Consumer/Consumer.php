@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\Omnibus\Consumer;
 
+use Infocyph\Omnibus\Envelope\Envelope;
 use Infocyph\Omnibus\Envelope\MessageIdStamp;
 use Infocyph\Omnibus\Failure\FailedMessage;
 use Infocyph\Omnibus\Failure\FailureInput;
@@ -13,6 +14,7 @@ use Infocyph\Omnibus\Handler\HandlerInvoker;
 use Infocyph\Omnibus\Integration\Runwire\RunwireBinding;
 use Infocyph\Omnibus\Retry\RetryStrategy;
 use Infocyph\Omnibus\Transport\Receiver;
+use Infocyph\Omnibus\Transport\Reservation;
 use Infocyph\Runwire\Coroutine\CoroutineScope;
 use Infocyph\Runwire\RequestContext;
 use Infocyph\Runwire\RuntimeContext;
@@ -99,35 +101,11 @@ final readonly class Consumer
                     },
                 );
             } catch (\Throwable $exception) {
-                if ($this->runwire->isHostCancellation($exception)) {
-                    throw $exception;
-                }
-                $this->runwire->checkpoint();
-                if ($this->retry->shouldRetry($exception, $reservation->attempt)) {
-                    $this->receiver->release(
-                        $reservation,
-                        $this->retry->delaySeconds($reservation->attempt),
-                    );
+                if ($this->settleFailure($exception, $reservation, $envelope)) {
                     $released++;
-
-                    continue;
+                } else {
+                    $failed++;
                 }
-
-                $messageIdStamp = $envelope->last(MessageIdStamp::class);
-                $messageId = $messageIdStamp instanceof MessageIdStamp
-                    ? $messageIdStamp->id
-                    : FailureInput::id('', $reservation->queue, $reservation->receipt);
-                $this->failures->add(FailedMessage::decoded(
-                    $messageId,
-                    $reservation->queue,
-                    $envelope,
-                    $reservation->attempt,
-                    $this->clock->now(),
-                    $exception::class,
-                    $exception->getMessage(),
-                ));
-                $this->receiver->reject($reservation);
-                $failed++;
 
                 continue;
             }
@@ -140,5 +118,42 @@ final readonly class Consumer
         }
 
         return new ConsumerResult($received, $succeeded, $released, $failed);
+    }
+
+    private function settleFailure(
+        \Throwable $exception,
+        Reservation $reservation,
+        Envelope $envelope,
+    ): bool {
+        if ($this->runwire->isHostCancellation($exception)) {
+            throw $exception;
+        }
+
+        $this->runwire->checkpoint();
+        if ($this->retry->shouldRetry($exception, $reservation->attempt)) {
+            $this->receiver->release(
+                $reservation,
+                $this->retry->delaySeconds($reservation->attempt),
+            );
+
+            return true;
+        }
+
+        $messageIdStamp = $envelope->last(MessageIdStamp::class);
+        $messageId = $messageIdStamp instanceof MessageIdStamp
+            ? $messageIdStamp->id
+            : FailureInput::id('', $reservation->queue, $reservation->receipt);
+        $this->failures->add(FailedMessage::decoded(
+            $messageId,
+            $reservation->queue,
+            $envelope,
+            $reservation->attempt,
+            $this->clock->now(),
+            $exception::class,
+            $exception->getMessage(),
+        ));
+        $this->receiver->reject($reservation);
+
+        return false;
     }
 }
