@@ -1,11 +1,11 @@
 name: "Security & Standards"
 
 on:
-  workflow_dispatch:
   schedule:
     - cron: "0 0 * * 0"
   push:
     branches: [ "main", "master" ]
+    tags: [ "v*", "[0-9]*" ]
   pull_request:
     branches: [ "main", "master", "develop", "development" ]
 
@@ -13,7 +13,16 @@ permissions:
   contents: read
 
 jobs:
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    uses: infocyph/phpforge/.github/workflows/release.yml@main
+    permissions:
+      contents: write
+    secrets:
+      COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+
   phpforge:
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
     uses: infocyph/phpforge/.github/workflows/security-standards.yml@main
     permissions:
       security-events: write
@@ -33,6 +42,7 @@ jobs:
       benchmark_stable_environment: false
 
   replica-affinity:
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
     name: "Replica writer affinity"
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -103,6 +113,7 @@ jobs:
           down --volumes
 
   executable-examples:
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
     name: Executable examples (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
     strategy:
@@ -125,6 +136,7 @@ jobs:
           php examples/runwire-forwarding.php
 
   packed-consumer:
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
     name: Production archive, optional integrations and real PHP-FPM
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -205,6 +217,7 @@ jobs:
         run: docker rm -f omnibus-consumer-fpm >/dev/null 2>&1 || true
 
   strict-sphinx:
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
     name: Strict Sphinx and cross references
     runs-on: ubuntu-latest
     steps:
