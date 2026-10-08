@@ -25,7 +25,7 @@
 
 Batches 0–7 implementation and QA plus the Batch 8 nonperformance preflight are tracked in `docs/plans/omnibus-next-release-audit-plan.md`; the PHPForge release preflight and 300-second single-process host soak have passed; stable performance comparison, deeper host/resource and release authorization still belong to Batch 8.
 
-**Release blocking:** The maximum 2% matched-environment successful-request-RPM regression gate, deeper host/resource and driver-specific performance acceptance, and user review remain open. Hosted runner component timings are not production acceptance. **Do not merge, tag, or publish** until these gates are explicitly closed.
+**Release blocking:** Dedicated stable-runner matched 2% RPM/p95/p99/CPU/RSS certification and owner approval remain open. Deep 100k MySQL/PostgreSQL and SQLite 1m retention evidence, actual multi-worker CPU/RSS and backend discovery counts are recorded. Shared GitHub-hosted measurements do not authorize release. Hosted runner component timings are not production acceptance. **Do not merge, tag, or publish** until these gates are explicitly closed.
 
 ## Advisory audit note
 

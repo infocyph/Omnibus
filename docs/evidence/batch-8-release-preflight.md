@@ -21,3 +21,7 @@ Date: 2026-10-08 (Asia/Dhaka)
 ## Disposition
 
 All currently accepted production changes keep the native DBLayer/CacheLayer/Runwire boundaries, conditional ownership, durable at-least-once idempotency and unchanged PHPForge rules. Nonperformance engineering work is complete. The 3.0.0 **release gate remains open** for the listed items.
+
+## Deep backend and multi-worker evidence added in final audit
+
+See `docs/evidence/batch-8-deep-benchmark.md` for 100k MySQL/PostgreSQL contention, SQLite 1m failure-history pruning, backend case discovery counts, five-process host CPU/RSS, p95/p99 and the measured 2.6 ↔ 3.0 variants. The dedicated `omnibus-stable` runner is now the sole unpassed *performance* certification gate, alongside exact-head final acceptance and owner release authorization. No benchmark thresholds have changed.
