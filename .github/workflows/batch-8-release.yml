@@ -24,6 +24,13 @@ jobs:
           tools: composer:v2
       - name: Resolve dependency lock
         run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+      - name: Record exact candidate SHA, resolved locks and execution platform
+        run: |
+          mkdir -p build/release-evidence
+          git rev-parse HEAD > build/release-evidence/candidate-sha.txt
+          sha256sum composer.lock > build/release-evidence/composer-lock.sha256
+          composer show --locked --format=json > build/release-evidence/composer-lock.json
+          php -r 'echo json_encode(["php"=>PHP_VERSION,"sapi"=>PHP_SAPI,"extensions"=>get_loaded_extensions(),"os"=>PHP_OS_FAMILY],JSON_PRETTY_PRINT|JSON_THROW_ON_ERROR),PHP_EOL;' > build/release-evidence/php-platform.json
       - name: Validate manifest and live security advisories
         run: |
           composer validate --strict
@@ -38,6 +45,12 @@ jobs:
           composer ic:release:guard
       - name: Check the tooling did not mutate tracked files
         run: git diff --exit-code -- .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: batch-8-candidate-lock-and-platform
+          path: build/release-evidence/
+          retention-days: 30
   case-inventory:
     name: Strict integration test discovery inventory
     if: contains(github.event.head_commit.message, '[count-backends]')
