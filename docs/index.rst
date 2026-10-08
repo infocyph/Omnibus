@@ -27,6 +27,7 @@ adapters, and provider-neutral broadcasts.
    scheduling-and-broadcasting
    operations
    integration
+   consumer-validation
    upgrading
    future-integrations
    testing

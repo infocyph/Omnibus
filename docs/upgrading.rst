@@ -37,6 +37,66 @@ The adapter ownership boundaries remain unchanged: DBLayer owns database
 execution/transaction policy, CacheLayer owns lock/counter primitives, and
 Omnibus owns delivery/workflow semantics.
 
+3.0 deployment and host lifecycle
+-------------------------------
+
+Use a coordinated cutover where all queue readers, failure-retry tools, and
+workflow dispatchers share durable storage. Inventory every participating
+process and upgrade the required packages together:
+
+.. code-block:: console
+
+   composer require infocyph/omnibus:^3.0
+   composer require infocyph/dblayer:^6.0
+   composer require infocyph/cachelayer:^4.0
+   composer require infocyph/runwire:^2.1.1
+
+The last three packages are **optional**: install only those used by the
+application. Do not keep older DBLayer, CacheLayer or Runwire generations in an
+application that loads their Omnibus adapters. Test the PHP extension
+capabilities actually used by the host, rather than requiring PCNTL/POSIX in
+every FPM deployment.
+
+Before cutover, stop old consumers and producers, drain/record in-flight
+reservations, inspect failed-message retry state, and back up durable queue,
+workflow and failure records. Upgrade all workers, administrative/replay
+commands and producers accessing the same stores before restarting traffic.
+Omnibus 3.0 introduces no new default schema; however, a 2.5 process **must
+not** read 2.6+ wrapped payloads. The historical 2.6 compatibility and
+rollback restrictions below continue to apply. Validate rollback using a
+restored/converted dataset and reconcile durable side effects; do not assume
+an application-code rollback alone restores compatibility.
+
+For host-owned requests, pass the already-created Runwire
+``RuntimeContext`` and the active ``RequestContext`` to
+``MessageBus::withRunwire()``, ``Consumer::withRunwire()`` or
+``Worker::withRunwire()``. Do not construct a new runtime on every message,
+do not use a completed request, and do not reuse request contexts between
+successive jobs. Bind a new request for each host operation and call
+``RequestContext::complete()`` in ``finally`` when the host owns it.
+A Fiber must receive the runtime/request explicitly: ambient state in the
+parent Fiber is not automatically forwarded. Without a coroutine scope,
+Runwire-aware sleep uses the cooperative fallback; it cannot interrupt
+arbitrary blocking PHP I/O.
+
+Cancellation before handler admission is surfaced to the host without an
+automatic retry. After successful handler execution, Omnibus attempts
+acknowledgement/settlement inside a bounded worker-owned cleanup request;
+failure of settlement leaves at-least-once reconciliation to the durable
+reservation and idempotent handler. A cancelled original request must never
+process the next prefetched message. Set the visibility timeout above the
+measured p99 handler, settlement, serial prefetch waiting and jitter budgets.
+Set workflow dispatch/retry and uniqueness leases above the full send/recovery
+window; do not assume lease auto-renewal where the provider has none. Treat
+ambiguous delivery as at-least-once and reconcile via stable message/business
+IDs and conditional ownership, not blind resend.
+
+Host-managed workers use ``Worker::runManaged($lifecycle)`` or bounded
+``Consumer::run()``. Explicit signal handling (disabled by default) remains
+the responsibility of a CLI process with PCNTL; FPM and host-managed workers
+should not install their own global handlers. See :doc:`consumer-validation`
+for executable examples and independent consumer/FPM checks.
+
 2.6.0
 -----
 

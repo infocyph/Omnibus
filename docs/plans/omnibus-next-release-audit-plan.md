@@ -224,7 +224,7 @@ No new NATS/Kafka/AMQP/SQS SDK adapter, default parallel handler execution, time
 | 4 | Passed-instance Runwire composition | 3 | Full runtime contract above | **Complete** |
 | 5 | Lease, cancellation, ambiguous-delivery recovery | 4 | U02, U06 | **Complete** |
 | 6 | Measured performance, structure, and storage improvements | 5 | U03, U04, U05, U07 | **Implementation / QA complete; performance acceptance deferred** |
-| 7 | 3.0 migration, executable examples, consumer packaging | 6 | U08, all public changes | Pending |
+| 7 | 3.0 migration, executable examples, consumer packaging | 6 | U08, all public changes | **In progress — implementation/QA** |
 | 8 | Exact-candidate release certification | 7 | All release gates | Pending |
 
 Implement in this order; keep source-mutating processors sequential and reuse successful analyzer results. Each batch should be reviewable with its production changes, focused regressions, updated relevant docs, and recorded validation. Any production change after certification requires checks appropriate to that change and renewed final-SHA evidence.

@@ -80,3 +80,12 @@ Provider integrations
 Redis, AMQP, SQS, telemetry, and broadcasting accept small provider contracts or
 callbacks. Keep SDK retry, credential, connection-pool, and shutdown policy in
 the adapter layer. Validate provider capability at bootstrap when possible.
+
+3.0 consumer verification
+-------------------------
+
+Follow :doc:`consumer-validation` to run source and isolated Composer archive
+smoke tests. In a host-owned process, forwarding uses an explicitly supplied
+Runwire runtime and request; ordinary request/CLI paths remain signal-free and
+do not create a Runwire runtime. Reuse the active host-owned connection and
+lifecycle contracts rather than constructing a second process supervisor.

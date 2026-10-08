@@ -11,7 +11,7 @@ Performance comes from explicit construction and bounded work:
 * dispatch performs no scanning or reflection discovery;
 * clocks are read once per logical timestamp calculation;
 * in-memory, database, Redis, and broker receives are bounded;
-* DBLayer 5 caps dynamic reservation, workflow-claim, and workflow-insert
+* DBLayer 6 caps dynamic reservation, workflow-claim, and workflow-insert
   batches to the active connection's effective bind budget;
 * optional policies and telemetry are decorators, absent from unselected paths;
 * durable schemas and maps are prepared before request/consumer work.
@@ -86,7 +86,7 @@ records startup/shutdown wall time, idle parent CPU, completed recycle cycles,
 and parent-memory growth. The WorkerPool contract tests separately assert that
 children are fully reaped after normal stop and restart-budget exhaustion.
 
-The DBLayer 5 baseline removes Omnibus's former outer transaction retry loop.
+Since 2.5, Omnibus delegates transaction retries to DBLayer (6.x for Omnibus 3.0) rather than wrapping them again.
 Contention results should therefore show no transaction callback amplification:
 a three-attempt DBLayer transaction executes at most three times, not nine.
 This ownership change does not weaken receipt, claim-token, or workflow-state
@@ -126,3 +126,15 @@ Compare the same PHP version, dependency lock, hardware, warmup, iteration
 count, and backend. Treat statistically noisy changes cautiously. Correctness,
 security, bounded resource use, and delivery guarantees take priority over a
 microbenchmark improvement.
+
+Batch 6 version comparison
+--------------------------
+
+The 3.0 release audit records same-runner 2.6, dependency-only 2.6,
+unbound 3.0, host-context-only 3.0 and Runwire-bound 3.0 trials in
+``docs/evidence/batch-6-review.md``. Those diagnostic medians are not a
+production capacity estimate or evidence that the maximum 2% median
+successful-request-RPM regression budget has been met. The final candidate
+requires a stable matched environment, repeated trials, representative
+queue failures/retries/contention and live persistent-host resource accounting.
+The owner has deferred that **release acceptance decision**, not waived it.

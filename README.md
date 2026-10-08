@@ -114,7 +114,7 @@ synchronous result, or throw into the consumer's existing retry/failure path.
 It does not intercept routing, serialization, transport I/O, PSR events, or
 worker process lifecycle. See the
 [handler middleware guide](docs/handler-middleware.rst) and
-[2.6 upgrade notes](docs/upgrading.rst).
+[3.0 upgrade notes](docs/upgrading.rst).
 
 `Consumer::run()` performs one bounded receive call. `Worker` provides the
 long-running loop for one process. Hosts may supply a framework-neutral
@@ -127,6 +127,9 @@ remains an optional explicitly selected alternative backend; construct PDO,
 Redis/Valkey, AMQP, SQS, and other process-bound resources inside its worker
 factory after fork. External Supervisor, systemd, Docker, or Kubernetes remains
 the preferred production supervisor when available.
+
+The [consumer verification guide](docs/consumer-validation.rst) provides
+runnable source, packed-consumer, FPM, and explicit Runwire forwarding probes.
 
 ## Delivery semantics
 
@@ -141,9 +144,8 @@ one connection; cross-system compositions remain at-least-once.
 
 ## Future integrations
 
-This release is feature-frozen. A following release may add optional NATS
-JetStream and Kafka transports without changing Omnibus's role as the
-application-level message bus:
+Potential future releases may add optional NATS JetStream and Kafka transports
+without changing Omnibus's role as the application-level message bus:
 
 - NATS JetStream through the broker boundary, mapping durable pull consumers,
   ACK/NAK, delayed redelivery, and stable message IDs.

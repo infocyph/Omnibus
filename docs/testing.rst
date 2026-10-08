@@ -164,3 +164,23 @@ services; strict integration discovery; representative benchmark artifact
 validation; and strict Sphinx documentation. The package-level portable-core
 probe is kept separate so it can be executed in a runtime where PCNTL/POSIX are
 actually unavailable rather than simulated as missing.
+
+Independent consumer and documentation verification
+---------------------------------------------------
+
+The repository's ``examples/standalone-consumer.php`` exercises an in-memory
+PSR-14 event, a host-managed worker, and idempotent duplicate business keys.
+``examples/runwire-forwarding.php`` checks direct/intermediary/Fiber forwarding
+and fresh request lifetimes through a persistent Runwire runtime. CI additionally
+installs the production Composer archive in an isolated ``--no-dev`` consumer,
+repeats the standalone probe against that consumer's autoloader, and issues an
+actual FastCGI request to PHP-FPM using ``examples/fpm-request.php``.
+Run a strict Sphinx build with:
+
+.. code-block:: console
+
+   python -m pip install -r docs/requirements.txt
+   python -m sphinx -n -W -b html docs build/sphinx
+
+This is distinct from the library's development autoloader and verifies that
+unselected integration libraries do not become core Composer requirements.
