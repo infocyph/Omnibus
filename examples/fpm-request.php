@@ -26,4 +26,4 @@ $bus = new MessageBus(
 $result = $bus->dispatch(new ExampleFpmMessage(42))->last(HandledStamp::class)?->result;
 http_response_code($result === 42 ? 200 : 500);
 header('Content-Type: application/json');
-echo json_encode(['ok' => $result === 42, 'value' => $result], JSON_THROW_ON_ERROR);
+file_put_contents('php://output', json_encode(['ok' => $result === 42, 'value' => $result], JSON_THROW_ON_ERROR));
