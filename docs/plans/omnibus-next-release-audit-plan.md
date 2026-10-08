@@ -331,6 +331,18 @@ Owners: README, existing Sphinx docs, documentation example tests, new executabl
 
 Exit gate: a consumer can follow the upgrade and forwarding examples successfully, package artifacts install cleanly, and documentation accurately describes the delivered 3.0 behavior.
 
+### Final security/correctness re-audit — three release blockers (2026-10-08)
+
+The PR was rechecked at `64ee866` and three previously unhandled trust/lifecycle states were reproduced. These are blocking correctness findings, not optional performance or cosmetic work:
+
+- [x] **Redis/Valkey leading-zero corruption:** `HINCRBY` rejects values such as `00`, `01`, and `0001` even though they contain only digits; Redis Lua errors do not roll back preceding queue mutations. Validate **canonical non-negative decimal strings** (exactly `0` or a nonzero-leading decimal in signed-64-bit safe range) before any `ZREM`/`ZADD`/receipt change. Preserve correct boundary `9223372036854775806` and reject `9223372036854775807` before increment. Extend real Redis **and Valkey** snapshot assertions for ready and expired reservation candidates. Production fix `src/Integration/Redis/RedisTransport.php`, test `tests/Integration/NativeRedisPolicyTest.php`.
+- [x] **Stale resumed generation:** A suspended generation-1 Fiber must fail upon resumption after generation 2 has been accepted, before any new business work. Check the same per-driver/mode/worker-slot generation registry at every active operation, not only at initial `withRunwire` admission; verify Fiber-local cleanup on rejection. Production fix `src/Integration/Runwire/RunwireBinding.php`, test `tests/Feature/RunwireContextBindingTest.php`.
+- [x] **Closed coroutine scope:** Runwire 2.1.1 does not expose a public `isClosed()` method; its lifecycle-guarded `CoroutineScope::barrier(1)` rejects closed/failed scopes before callback execution. Require this guard for an attached scope while preserving an open-scope path. No reflection, provider mutation or cancellation suppression. Same production and feature tests as above.
+
+The first Redis change accidentally duplicated the rest of the source file during patch substitution; it was rebuilt from the pre-change Git revision with only the narrow Lua method edited. The exact-source syntax must pass PHPForge. The later clean-tree check found only deterministic PHPForge method ordering in the Runwire helper, resolved without changing standards.
+
+**QA acceptance for these findings:** the latest commit must pass the exact-head PHPForge processor, `ic:tests:details`, `ic:release:guard`, no tracked formatter changes, and strict Redis/Valkey service tests on PHP 8.4 and 8.5. Passing functional QA alone does not waive the separate hosted matched-RPM release-performance gate, which remains unwaived. No release/merge/tag until all gates pass and the owner approves.
+
 ### Batch 8 — Certify the final 3.0.0 candidate
 
 Owners: repository CI/PHPForge integration, matched performance environment, final evidence and release notes.
