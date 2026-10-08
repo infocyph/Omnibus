@@ -223,7 +223,7 @@ No new NATS/Kafka/AMQP/SQS SDK adapter, default parallel handler execution, time
 | 3 | New dependency baseline and portable core | 2 | UID 6, CacheLayer 4, DBLayer 6, Runwire 2.1.1; U01 | **Complete** |
 | 4 | Passed-instance Runwire composition | 3 | Full runtime contract above | **Complete** |
 | 5 | Lease, cancellation, ambiguous-delivery recovery | 4 | U02, U06 | **Complete** |
-| 6 | Measured performance, structure, and storage improvements | 5 | U03, U04, U05, U07 | **Next** |
+| 6 | Measured performance, structure, and storage improvements | 5 | U03, U04, U05, U07 | **In progress — profiling/QA** |
 | 7 | 3.0 migration, executable examples, consumer packaging | 6 | U08, all public changes | Pending |
 | 8 | Exact-candidate release certification | 7 | All release gates | Pending |
 
