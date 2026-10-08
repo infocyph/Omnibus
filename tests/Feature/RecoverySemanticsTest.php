@@ -363,3 +363,29 @@ test('after-response work does not retain the originating Runwire request', func
     expect($observedRequest)->toBe('none')
         ->and($binding->request())->toBeNull();
 });
+
+test('in-memory failure pruning preserves active and sent retry claims', function (): void {
+    $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
+    $store = new InMemoryFailureStore($clock);
+    foreach (['unclaimed', 'active', 'sent'] as $id) {
+        $store->add(FailedMessage::decoded(
+            $id,
+            'work',
+            new Envelope(new TestCommand($id)),
+            1,
+            $clock->now()->modify('-2 days'),
+            RuntimeException::class,
+            'failed',
+        ));
+    }
+    $active = $store->claimRetry('active');
+    $sent = $store->claimRetry('sent');
+    expect($store->markRetrySent($sent))->toBeTrue()
+        ->and($store->prune($clock->now()))->toBe(1)
+        ->and($store->find('unclaimed'))->toBeNull()
+        ->and($store->find('active'))->not->toBeNull()
+        ->and($store->find('sent'))->not->toBeNull()
+        ->and($store->releaseRetry($active))->toBeTrue()
+        ->and($store->prune($clock->now()))->toBe(1)
+        ->and($store->removeRetried($sent))->toBeTrue();
+});

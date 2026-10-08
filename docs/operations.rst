@@ -236,6 +236,12 @@ Monitor terminal failure count, oldest failure age, visible queue depth,
 attempt distribution, and handler duration. Define retention and pruning in the
 application. Back up the durable failure table according to its operational
 value and payload sensitivity.
+``FailureStore::prune()`` removes only old unclaimed ``failed`` records:
+active ``retrying`` claims and ``sent`` records awaiting conditional removal
+are retained even if older than the retention cutoff. Do not use ``clear()``
+as a scheduled pruning shortcut: it bypasses that ownership protection.
+Reconcile stranded ``sent`` records with downstream delivery before an
+operator explicitly removes them.
 
 See :ref:`host-owned-worker-loop`, :ref:`failure-inspection-and-replay`, and
 :ref:`telemetry-decorators` for complete runtime compositions.

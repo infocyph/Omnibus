@@ -796,3 +796,28 @@ test('durable workflow creation rejects duplicate message identities atomically'
         ->and($store->find($workflowId))->toBeNull()
         ->and($store->findItemByMessageId('durable-workflow-message'))->toBeNull();
 });
+
+test('DBLayer pruning preserves in-flight and sent retry reconciliation state', function (): void {
+    [, , $failures, $clock] = omnibusDatabaseQueue();
+    foreach (['prune-free', 'prune-active', 'prune-sent'] as $id) {
+        $failures->add(FailedMessage::decoded(
+            $id,
+            'work',
+            new Envelope(new TestCommand($id)),
+            1,
+            $clock->now()->modify('-2 days'),
+            RuntimeException::class,
+            'failed',
+        ));
+    }
+    $active = $failures->claimRetry('prune-active');
+    $sent = $failures->claimRetry('prune-sent');
+    expect($failures->markRetrySent($sent))->toBeTrue()
+        ->and($failures->prune($clock->now()))->toBe(1)
+        ->and($failures->find('prune-free'))->toBeNull()
+        ->and($failures->find('prune-active'))->not->toBeNull()
+        ->and($failures->find('prune-sent'))->not->toBeNull()
+        ->and($failures->releaseRetry($active))->toBeTrue()
+        ->and($failures->prune($clock->now()))->toBe(1)
+        ->and($failures->removeRetried($sent))->toBeTrue();
+});

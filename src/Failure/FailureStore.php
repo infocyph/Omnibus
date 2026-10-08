@@ -19,6 +19,7 @@ interface FailureStore
 
     public function markRetrySent(FailureRetryClaim $claim): bool;
 
+    /** Retire only unclaimed failed records; preserve retrying and sent reconciliation states. */
     public function prune(\DateTimeImmutable $before): int;
 
     public function releaseRetry(FailureRetryClaim $claim): bool;

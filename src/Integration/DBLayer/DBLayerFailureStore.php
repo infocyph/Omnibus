@@ -174,7 +174,7 @@ final readonly class DBLayerFailureStore implements FailureStore
     public function prune(\DateTimeImmutable $before): int
     {
         return $this->connection->delete(
-            "DELETE FROM {$this->table} WHERE failed_at < ?",
+            "DELETE FROM {$this->table} WHERE failed_at < ? AND retry_status = 'failed'",
             [Time::fromDate($before)],
         );
     }
