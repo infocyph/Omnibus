@@ -153,6 +153,8 @@ try {
     $explainStatement->execute(['contention', $now, $now]);
     $executionPlan = $explainStatement->fetchAll(PDO::FETCH_ASSOC);
     $explainStatement->closeCursor();
+    // Forked workers must not inherit a live parent PDO socket.
+    $connection->disconnect();
 
     $run = bin2hex(random_bytes(8));
     $started = hrtime(true);
