@@ -1,0 +1,63 @@
+name: Batch 8 release preflight
+
+on:
+  push:
+    branches:
+      - feature/runwire-2.1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  engineering-gates:
+    name: Exact-head PHPForge release checks and dependency audit
+    if: contains(github.event.head_commit.message, '[release-preflight]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Resolve dependency lock
+        run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+      - name: Validate manifest and live security advisories
+        run: |
+          composer validate --strict
+          composer audit --locked
+          composer check-platform-reqs
+      - name: Run installed PHPForge processor
+        run: composer ic:process
+      - name: Run detailed QA and release acceptance
+        run: |
+          composer ic:tests:details
+          composer ic:release:guard
+      - name: Check the tooling did not mutate tracked files
+        run: git diff --exit-code -- .
+  persistent-host-soak:
+    name: 300-second persistent request/consumer lifecycle soak
+    if: contains(github.event.head_commit.message, '[release-soak]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+      - name: Exercise short smoke to validate harness
+        run: php benchmarks/release-300s-soak.php 1
+      - name: Run full bounded persistent lifecycle
+        run: |
+          php benchmarks/release-300s-soak.php 300 | tee release-300s-soak.json
+          php -r '$r=json_decode(file_get_contents("release-300s-soak.json"),true,flags:JSON_THROW_ON_ERROR); if ($r["elapsed_seconds"]<300 || $r["unique_business_side_effects"]!==32 || $r["final_queue_depth"]!==0) exit(1);'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-300s-soak
+          path: release-300s-soak.json
+          retention-days: 30
