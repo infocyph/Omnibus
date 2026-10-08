@@ -94,10 +94,10 @@ try {
     if ($indexSet !== 'current') {
         if ($driver === 'mysql') {
             $connection->statement(
-                'DROP INDEX omnibus_contention_messages_queue_idx ON omnibus_contention_messages',
+                'DROP INDEX omnibus_contention_messages_ready_idx ON omnibus_contention_messages',
             );
         } else {
-            $connection->statement('DROP INDEX omnibus_contention_messages_queue_idx');
+            $connection->statement('DROP INDEX omnibus_contention_messages_ready_idx');
         }
         $connection->statement(
             'CREATE INDEX omnibus_contention_messages_ready_idx ON omnibus_contention_messages (queue_name, available_at, id)',

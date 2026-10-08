@@ -37,3 +37,63 @@ jobs:
           name: batch-6-profile-php-${{ matrix.php }}
           path: batch-6-profile.json
           retention-days: 14
+
+  sql-plans:
+    name: Durable queue index characterization
+    if: contains(github.event.head_commit.message, '[db-plan]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: phpforge
+          MYSQL_USER: phpforge
+          MYSQL_PASSWORD: phpforge_test
+          MYSQL_ROOT_PASSWORD: phpforge_root_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pphpforge_root_test"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: phpforge
+          POSTGRES_USER: phpforge
+          POSTGRES_PASSWORD: phpforge_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U phpforge -d phpforge"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+    env:
+      IC_SERVICE_DATABASE: phpforge
+      IC_SERVICE_USERNAME: phpforge
+      IC_SERVICE_PASSWORD: phpforge_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, pdo_pgsql, pcntl, posix
+          coverage: none
+          tools: composer:v2
+      - name: Install benchmark dependencies
+        run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+      - name: Compare index candidates on representative seeded queues
+        run: |
+          mkdir -p build/batch-6-db
+          for driver in mysql pgsql; do
+            for candidate in current candidate candidate-reclaim; do
+              php benchmarks/db-contention.php "$driver" 2 10000 "$candidate" \
+                > "build/batch-6-db/$driver-$candidate.json"
+              php -r '$r=json_decode(file_get_contents($argv[1]),true,flags:JSON_THROW_ON_ERROR); if ($r["acknowledged"]!==10000 || $r["missing_settlements"]!==0 || $r["duplicate_or_stale_settlements"]!==0) exit(1);' \
+                "build/batch-6-db/$driver-$candidate.json"
+            done
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batch-6-db-plans
+          path: build/batch-6-db/*.json
+          retention-days: 14
