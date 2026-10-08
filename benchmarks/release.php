@@ -192,7 +192,7 @@ function concurrentHttp(string $name, string $url, int $concurrency, int $status
         'expected_http_status' => $status,
         'validated_output' => true,
         'server_implementation' => 'php-cli-built-in-single-worker',
-        'server_workers' => 1,
+        'server_workers' => (int) (getenv('OMNIBUS_BENCHMARK_HTTP_WORKERS') ?: 1),
         'client_processes' => $concurrency,
         'router_reconstructs_bus_per_request' => true,
     ], 25);
@@ -208,9 +208,17 @@ function httpBaselines(): array
     if (!is_string($log)) {
         throw new RuntimeException('Unable to allocate benchmark host log.');
     }
+    $workerCount = filter_var(getenv('OMNIBUS_BENCHMARK_HTTP_WORKERS') ?: 1, FILTER_VALIDATE_INT);
+    if (!is_int($workerCount) || $workerCount < 1 || $workerCount > 16) {
+        throw new InvalidArgumentException('HTTP benchmark worker count must be between 1 and 16.');
+    }
+
+    // PHP_CLI_SERVER_WORKERS creates actual independent accepting server processes.
+    $environment = getenv();
+    $environment['PHP_CLI_SERVER_WORKERS'] = (string) $workerCount;
     $process = proc_open([
         PHP_BINARY, '-S', "127.0.0.1:$port", 'benchmarks/release-host.php',
-    ], [0 => ['file', '/dev/null', 'r'], 1 => ['file', $log, 'a'], 2 => ['file', $log, 'a']], $pipes, dirname(__DIR__));
+    ], [0 => ['file', '/dev/null', 'r'], 1 => ['file', $log, 'a'], 2 => ['file', $log, 'a']], $pipes, dirname(__DIR__), $environment);
     if (!is_resource($process)) {
         throw new RuntimeException('Unable to start benchmark host.');
     }
@@ -361,7 +369,8 @@ $document = [
         'runner' => getenv('GITHUB_ACTIONS') === 'true' ? 'github-actions' : 'local',
         'release' => getenv('OMNIBUS_BENCHMARK_RELEASE') ?: 'unlabeled',
         'source_revision' => getenv('OMNIBUS_BENCHMARK_REVISION') ?: 'unlabeled',
-        'http_server_implementation' => 'single-worker-php-cli',
+        'http_server_implementation' => 'php-cli-built-in-multiworker-when-configured',
+        'http_server_workers' => (int) (getenv('OMNIBUS_BENCHMARK_HTTP_WORKERS') ?: 1),
     ],
     'workloads' => [...httpBaselines(), ...durableBaselines()],
 ];

@@ -81,3 +81,85 @@ jobs:
           name: batch-6-matched-version-trials
           path: results/*.json
           retention-days: 14
+
+  actual-host-workers:
+    if: contains(github.event.head_commit.message, '[host-compare]')
+    name: Four real PHP host workers, matched GitHub-runner diagnostic
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: candidate
+      - uses: actions/checkout@v7
+        with:
+          ref: '2.6'
+          path: baseline
+      - uses: actions/checkout@v7
+        with:
+          ref: '2.6'
+          path: dependency-only
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_sqlite, pcntl, posix
+          coverage: none
+          tools: composer:v2
+      - name: Share same benchmark harness across released baseline and candidate
+        run: |
+          for target in baseline dependency-only; do
+            cp candidate/benchmarks/release.php "$target/benchmarks/release.php"
+            cp candidate/benchmarks/release-host.php "$target/benchmarks/release-host.php"
+          done
+          php -r '
+            $p="dependency-only/composer.json";
+            $c=json_decode(file_get_contents($p),true,flags:JSON_THROW_ON_ERROR);
+            $c["require"]["infocyph/uid"]="^6.0";
+            $c["require-dev"]["infocyph/cachelayer"]="^4.0";
+            $c["require-dev"]["infocyph/dblayer"]="^6.0";
+            $c["require-dev"]["infocyph/runwire"]="2.1.1";
+            file_put_contents($p,json_encode($c,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR));
+          '
+      - name: Resolve isolated Composer dependencies and verify platform
+        run: |
+          for target in baseline dependency-only candidate; do
+            (cd "$target" && composer update --no-interaction --prefer-dist --no-progress --prefer-stable && composer check-platform-reqs)
+          done
+      - name: Execute real 4-worker host comparisons with balanced trial order
+        env:
+          OMNIBUS_BENCHMARK_HTTP_WORKERS: '4'
+        run: |
+          mkdir -p results
+          for trial in 1 2 3; do
+            if [ "$trial" -eq 2 ]; then
+              variants="3.0-bound 3.0-host-only 3.0-unbound dependency-only 2.6"
+            else
+              variants="2.6 dependency-only 3.0-unbound 3.0-host-only 3.0-bound"
+            fi
+            for variant in $variants; do
+              case "$variant" in
+                2.6) dir=baseline; flags="OMNIBUS_BENCHMARK_BOUND=0" ;;
+                dependency-only) dir=dependency-only; flags="OMNIBUS_BENCHMARK_BOUND=0" ;;
+                3.0-unbound) dir=candidate; flags="OMNIBUS_BENCHMARK_BOUND=0" ;;
+                3.0-host-only) dir=candidate; flags="OMNIBUS_BENCHMARK_HOST_ONLY=1" ;;
+                3.0-bound) dir=candidate; flags="OMNIBUS_BENCHMARK_BOUND=1" ;;
+              esac
+              (cd "$dir" && env "$flags" OMNIBUS_BENCHMARK_RELEASE="$variant" OMNIBUS_BENCHMARK_REVISION="$(git rev-parse HEAD)" \
+                php benchmarks/release.php "../results/$variant-$trial.json" >/dev/null)
+              jq -e '.environment.http_server_workers==4 and .environment.stable==false and all(.workloads[]; .result.failed_operations==0 and .result.timeouts==0)' \
+                "results/$variant-$trial.json" > /dev/null
+            done
+          done
+      - name: Publish diagnostic throughput and tail latencies
+        run: |
+          for variant in 2.6 dependency-only 3.0-unbound 3.0-host-only 3.0-bound; do
+            jq -s -r --arg variant "$variant" '{variant:$variant, median_correct_rpm:([.[] | .workloads[] | select(.name=="request_host_warm_c4") | .result.successful_rpm] | sort | .[1]), p95_ms:([.[] | .workloads[] | select(.name=="request_host_warm_c4") | .result.latency_ms.p95] | sort | .[1]), p99_ms:([.[] | .workloads[] | select(.name=="request_host_warm_c4") | .result.latency_ms.p99] | sort | .[1])}' \
+              "results/$variant-1.json" "results/$variant-2.json" "results/$variant-3.json"
+          done
+          echo "GH hosted environment.stable=false. Do not certify final 2% RPM acceptance from this job."
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: batch-8-four-php-workers
+          path: results/*.json
+          retention-days: 30
