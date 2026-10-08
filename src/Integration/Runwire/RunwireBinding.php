@@ -139,12 +139,14 @@ final class RunwireBinding
         }
 
         $this->assertContext($context['runtime'], $context['request'], $context['scope']);
-        $operation = static fn(): mixed => $callback();
+        $cacheBound = class_exists(CacheRunwireIntegration::class)
+            && CacheRunwireIntegration::runtime() === $context['runtime'];
+        if (!$cacheBound && count($this->connections) === 0) {
+            return $callback();
+        }
 
-        if (
-            class_exists(CacheRunwireIntegration::class)
-            && CacheRunwireIntegration::runtime() === $context['runtime']
-        ) {
+        $operation = static fn(): mixed => $callback();
+        if ($cacheBound) {
             $next = $operation;
             $operation = static fn(): mixed => CacheRunwireIntegration::share(
                 $context['request'],
