@@ -1,6 +1,6 @@
 # Batch 6 measured performance and structural review
 
-Status: implementation in progress; final exact-SHA quality and matched-environment release-performance certification remain separate.
+Status: implementation and standard QA complete on `2564ee4907b0c140812d5347185f83fe1ef89870`; performance/regression acceptance intentionally deferred by owner until after implementation. The release is **not certified**.
 
 ## Current profiler evidence
 
@@ -60,3 +60,19 @@ Found and fixed a material retention defect: `FailureStore::prune()` could remov
 - Compare 2.6/dependency-only, unbound 3.0 and host-bound 3.0 in a matched workload/environment, with failures, retries, cache hit/miss, and contention.
 - Run exact-head PHPForge gates and regression suites after the final Batch 6 changes.
 - Never treat GitHub-hosted component measurements as the stable 2% release RPM certification (Batch 8).
+
+## Latest exact-head QA and matched-version diagnostic (2026-10-08)
+
+On `2564ee4907b0c140812d5347185f83fe1ef89870`, Security & Standards run `37727960935`, codec profiling `37727955141`, and matched-version workflow `37727955123` **all passed**. The security/QA matrix covered PHP 8.4/8.5 analysis, lowest/stable QA, release benchmark smoke, clean installation, and replica writer affinity.
+
+The second matched runner trial, with 3 medians per variant, measured successful warm concurrency-4 requests per minute:
+
+| Variant | Median successful RPM |
+| --- | ---: |
+| Released 2.6 | 109,660.95 |
+| 2.6 + newer dependencies | 109,844.39 |
+| 3.0 unbound | 106,881.53 |
+| 3.0 host context setup only | 99,467.92 |
+| 3.0 Runwire bound | 98,317.73 |
+
+Creating/tearing down a fresh host context on every request accounts for much of the observed difference, but this harness is **not** equivalent to a production persistent host. The observed numerical regression is not waived. Preserve benchmark artifacts; defer interpretation, larger multi-driver backlog/retention evidence and production-equivalent regression gate to Batch 8 when implementation is complete. No unverified index or codec change is justified.

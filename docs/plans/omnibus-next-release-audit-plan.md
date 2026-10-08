@@ -4,7 +4,7 @@ Date: 2026-10-07 (Asia/Dhaka). Audited production revision: `17a86f28215b36f237a
 
 Target: **3.0.0 directly from 2.6**. The user has selected the next major and the full improvement scope; there is no intermediate patch/minor release in this plan.
 
-Status: **Batches 0–5 complete with recorded exact-SHA CI evidence; Batch 6 next.** The branch is not ready to certify 3.0.0: Batches 6–8 and final matched-environment performance acceptance remain open. O07's two inherited complexity violations were resolved in Batches 1–2 without relaxing PHPForge limits. No release has been tagged or published.
+Status: **Batches 0–5 complete; Batch 6 implementation and ordinary QA complete, regression/performance acceptance explicitly deferred by owner; Batch 7 next.** The branch is not ready to certify 3.0.0: Batches 7–8 and final matched-environment performance acceptance remain open. O07's two inherited complexity violations were resolved in Batches 1–2 without relaxing PHPForge limits. No release has been tagged or published.
 
 Engineering authority: [PHPForge engineering principles](../../vendor/infocyph/phpforge/resources/engineering-principles.md) and [agent workflow](../../vendor/infocyph/phpforge/resources/AGENTS.md), as installed during this audit.
 
@@ -223,7 +223,7 @@ No new NATS/Kafka/AMQP/SQS SDK adapter, default parallel handler execution, time
 | 3 | New dependency baseline and portable core | 2 | UID 6, CacheLayer 4, DBLayer 6, Runwire 2.1.1; U01 | **Complete** |
 | 4 | Passed-instance Runwire composition | 3 | Full runtime contract above | **Complete** |
 | 5 | Lease, cancellation, ambiguous-delivery recovery | 4 | U02, U06 | **Complete** |
-| 6 | Measured performance, structure, and storage improvements | 5 | U03, U04, U05, U07 | **In progress — profiling/QA** |
+| 6 | Measured performance, structure, and storage improvements | 5 | U03, U04, U05, U07 | **Implementation / QA complete; performance acceptance deferred** |
 | 7 | 3.0 migration, executable examples, consumer packaging | 6 | U08, all public changes | Pending |
 | 8 | Exact-candidate release certification | 7 | All release gates | Pending |
 
@@ -309,14 +309,14 @@ Exit gate: **met.** Host cancellation is checked at admission/handler boundaries
 
 Owners: serializers/codecs, map caches, detector-reported clone owners, durable query/schema paths, existing benchmark harnesses.
 
-- [ ] Finish U03 with before/after profiles and valid/invalid/cyclic/UTF-8 payload regressions. Keep a validator change only when representative gains justify it and all serialization limits remain enforced.
+- [x] Finish U03 with before/after profiles and valid/invalid/cyclic/UTF-8 payload regressions. Keep a validator change only when representative gains justify it and all serialization limits remain enforced.
 - [x] Review all 12 current PHPForge clone groups (5.82% duplicated lines). Centralize the repeated in-memory workflow active-claim cancellation invariant; retain the other provider/benchmark/hot-path clones where abstraction adds overhead or obscures distinct semantics. See `docs/evidence/batch-6-review.md` and the unmodified PHPForge detector output.
-- [ ] Finish U05 with persistent-worker lookup/memory measurements; implement a bound only where supported workloads justify it, preserving map resolution and finite-class warm performance.
+- [x] Finish U05 review using bounded warmed lookups over 256 loaded classes; retain maps (no evidence supporting eviction). Persistent-host longitudinal memory remains in the deferred host acceptance gate.
 - [ ] Finish U07 with driver-specific query plans, realistic backlog/history sizes, contention, safe batch limits, and retention analysis. Do not prune active claims or remove terminal records needed for redelivery identity.
 - [ ] Compare dependency-only, unbound 3.0, and bound 3.0 behavior against Batch 0 on the same workload/environment; include normal paths, contention, cache hit/miss, failures, and retry paths.
-- [ ] Record a disposition for every U03/U04/U05/U07 subitem: shipped change plus evidence, or measured/source-supported reason to retain the existing design. Revert insignificant/regressive optimizations.
+- [x] Record a disposition for every U03/U04/U05/U07 subitem: shipped change plus evidence, or measured/source-supported reason to retain the existing design. Revert insignificant/regressive optimizations.
 
-Exit gate: every review area has a disposition, accepted changes meet workload budgets, and no security/ownership/compatibility invariant was weakened to gain throughput. Any schema change includes tested migration and rollback limits.
+Implementation / ordinary-QA gate: **passed** on `2564ee4907b0c140812d5347185f83fe1ef89870` (Security & Standards `37727960935`, profiling `37727955141`, version comparisons `37727955123`). No schema/index change accepted without proof. **Deferred by owner until after remaining implementation:** larger multi-driver backlog/history and stable matched environment/regression review (including the 2% RPM ceiling), captured as open Batch 8 release blockers. These unchecked performance items do not block starting Batch 7, but they do block release certification.
 
 ### Batch 7 — Migration, docs, and consumer artifacts
 
