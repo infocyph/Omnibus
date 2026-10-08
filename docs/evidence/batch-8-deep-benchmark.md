@@ -52,8 +52,8 @@ For the comparable paths, the observed median unbound 3.0 RPM reduction from rel
 
 **Critical qualifier:** This is real multi-process HTTP but **not** a dedicated, isolated stable production Runwire host. Its `environment.stable` was `false`, and the router still constructs request-local PHP userland state. Therefore these metrics are **diagnostic** and do not close the mandatory 2% release gate.
 
-## Unwaived final acceptance
+## Original acceptance contract and current policy
 
-The repository now includes `benchmarks/release-acceptance.php` and `.github/workflows/stable-performance.yml`. They require a provisioned dedicated self-hosted Linux runner labeled `omnibus-stable`, seven alternating correct-response trials per variant, a common environment fingerprint and source revision, complete CPU/RSS/p95/p99 metrics, and strict pre-existing budget enforcement. There is no verified successful execution on that runner yet.
+The repository now includes `benchmarks/release-acceptance.php` and `.github/workflows/stable-performance.yml`. The original contract required a dedicated self-hosted Linux runner labeled `omnibus-stable`; the owner later selected same-job GitHub-hosted comparison. The active workflow requires seven alternating correct-response trials per variant, a common environment fingerprint and source revision, complete CPU/RSS/p95/p99 metrics, and exports `environment_stable=false`. After profiling and the owner-approved cost trade-off on 2026-10-08, RPM limits are 2% for unbound-vs-2.6 and 3% for bound-vs-host-only; other limits remain unchanged. See [current binding evidence](runwire-binding-overhead.md).
 
-Final source/lock SHA and exact-head PHPForge/consumer audit must be captured after the last changes; no merge, tag or publication until the dedicated gate passes and owner authorizes.
+Final source/lock SHA and exact-head PHPForge/consumer audit must be captured after the last changes; no merge, tag or publication until the current matched gate passes for the final candidate and the owner authorizes publication.

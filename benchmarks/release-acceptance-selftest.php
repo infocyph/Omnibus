@@ -100,6 +100,16 @@ function assertRejected(string $directory, Closure $change, string $reason): voi
     }
 }
 
+function setAcceptanceRpm(string $directory, string $variant, float $rpm): void
+{
+    for ($trial = 1; $trial <= 7; $trial++) {
+        $file = "$directory/$variant-$trial.json";
+        $document = json_decode((string) file_get_contents($file), true, 512, JSON_THROW_ON_ERROR);
+        $document['workloads'][3]['result']['successful_rpm'] = $rpm;
+        file_put_contents($file, json_encode($document, JSON_THROW_ON_ERROR));
+    }
+}
+
 $directory = sys_get_temp_dir() . '/omnibus-release-selftest-' . bin2hex(random_bytes(8));
 if (!mkdir($directory, 0700)) {
     throw new RuntimeException('Cannot create release self-test directory.');
@@ -113,8 +123,27 @@ try {
     }
     $report = json_decode($pass['output'], true, 512, JSON_THROW_ON_ERROR);
     if (($report['passed'] ?? false) !== true
-        || count($report['workloads']['3.0-unbound'] ?? []) !== 6) {
+        || count($report['workloads']['3.0-unbound'] ?? []) !== 6
+        || ($report['comparisons'][0]['limits']['rpm_regression_percent'] ?? null) !== 2
+        || ($report['comparisons'][1]['limits']['rpm_regression_percent'] ?? null) !== 3
+        || ($report['budget_policy'] ?? null) !== 'omnibus-3.0-scoped-runwire-2026-10-08') {
         throw new RuntimeException('Release report lost per-workload evidence.');
+    }
+    setAcceptanceRpm($directory, '3.0-bound', 243_750);
+    $acceptedCost = validateAcceptance($directory);
+    if ($acceptedCost['exit'] !== 0) {
+        throw new RuntimeException('Approved 2.5% binding overhead rejected: ' . $acceptedCost['output']);
+    }
+    setAcceptanceRpm($directory, '3.0-unbound', 292_500);
+    $unboundCost = validateAcceptance($directory);
+    if ($unboundCost['exit'] === 0 || !str_contains($unboundCost['output'], 'exceeds 2.0%')) {
+        throw new RuntimeException('Binding trade-off weakened unbound 2% budget: ' . $unboundCost['output']);
+    }
+    acceptanceFixtures($directory);
+    setAcceptanceRpm($directory, '3.0-bound', 242_250);
+    $excessBindingCost = validateAcceptance($directory);
+    if ($excessBindingCost['exit'] === 0 || !str_contains($excessBindingCost['output'], 'exceeds 3.0%')) {
+        throw new RuntimeException('Binding overhead exceeded its 3% cap: ' . $excessBindingCost['output']);
     }
     acceptanceFixtures($directory, true);
     $hosted = validateAcceptance($directory, 'hosted');
@@ -160,18 +189,13 @@ try {
         $document['workloads'][3]['result']['latency_ms']['p95'] = -1;
     }, 'Invalid benchmark latency');
     acceptanceFixtures($directory);
-    for ($trial = 1; $trial <= 7; $trial++) {
-        $file = "$directory/3.0-unbound-$trial.json";
-        $document = json_decode((string) file_get_contents($file), true, 512, JSON_THROW_ON_ERROR);
-        $document['workloads'][3]['result']['successful_rpm'] = 270_000;
-        file_put_contents($file, json_encode($document, JSON_THROW_ON_ERROR));
-    }
+    setAcceptanceRpm($directory, '3.0-unbound', 270_000);
     $failed = validateAcceptance($directory);
     if ($failed['exit'] === 0 || !str_contains($failed['output'], 'rpm_regression_percent')) {
         throw new RuntimeException('2% release throughput budget was bypassed: ' . $failed['output']);
     }
 
-    fwrite(STDOUT, 'Release validator self-test: passed (runner-mode separation, malformed evidence, and throughput regression).' . PHP_EOL);
+    fwrite(STDOUT, 'Release validator self-test: passed (runner-mode separation, malformed evidence, scoped binding cost, and unbound throughput regression).' . PHP_EOL);
 } finally {
     foreach (glob($directory . '/*') ?: [] as $file) {
         unlink($file);

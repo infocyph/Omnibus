@@ -2,7 +2,9 @@
 
 The review of `6857fba698bc7ff984bec0b106de9691f55dfa03` reproduced all three corrected integrity/lifetime boundaries, but its [seven-trial hosted acceptance](https://github.com/infocyph/Omnibus/actions/runs/37755456311) failed: Runwire-bound HTTP RPM was 3.642% below the host-only control against the unchanged 2% limit. Unbound 3.0 regressed 1.278% against 2.6. Per-variant RPM CV stayed below 1%.
 
-The first remediation, `045038a28dd3740f003b2df2356f7aa2356356e3`, passed its full QA, consumers and preflight, but [hosted acceptance](https://github.com/infocyph/Omnibus/actions/runs/37763453626) still failed: binding RPM regression decreased to **2.451%**, above the same 2% limit. Unbound 3.0 was 0.636% faster than 2.6; all other budgets passed and per-variant RPM CV remained below 1%. That failed result is retained, not waived or dismissed as noise. The follow-up further simplifies first-use validation and root-context handling; its committed candidate requires fresh hosted acceptance.
+The first remediation, `045038a28dd3740f003b2df2356f7aa2356356e3`, passed its full QA, consumers and preflight, but [hosted acceptance](https://github.com/infocyph/Omnibus/actions/runs/37763453626) still failed: binding RPM regression decreased to **2.451%**, above the same 2% limit. Unbound 3.0 was 0.636% faster than 2.6; all other budgets passed and per-variant RPM CV remained below 1%. That failed result is retained, not waived or dismissed as noise.
+
+The first-use follow-up, `e326a3b9932f7f3c099722ecb3ca6b462d29740b`, also passed [full QA](https://github.com/infocyph/Omnibus/actions/runs/37768088690), [consumers/docs](https://github.com/infocyph/Omnibus/actions/runs/37768082955), and [release preflight](https://github.com/infocyph/Omnibus/actions/runs/37768082941). Its [seven-trial hosted performance acceptance](https://github.com/infocyph/Omnibus/actions/runs/37768082950) **failed**: bound RPM regression is **2.349%**, unbound regression is **1.391%**, and the sole failing budget is the bound 2% RPM limit. Host-only and bound RPM CV are 0.355% and 0.360%, respectively. Bound tail latency, CPU and RSS budgets pass. The improvements have not closed performance certification; no Runwire defect has been demonstrated.
 
 ## Attribution and ownership
 
@@ -36,4 +38,48 @@ Further profiling used the existing PHP 8.4 container and a separate 100-sample 
 
 Three alternating local four-worker HTTP pairs completed 40,000 correct warm-c4 responses per trial with no failed responses. Host-only RPM CV was 13.17% and bound CV was 9.24%, so this environment cannot establish the 2% release criterion. No local throughput claim is accepted from those noisy measurements.
 
-Final acceptance remains the exact committed candidate's hosted seven-trial HTTP comparison, full PHP/service/dependency matrix, consumers/docs, and release preflight. All RPM, tail, CPU, RSS, correctness, and variance limits remain unchanged. The workflow artifacts carry the candidate SHA and authoritative post-commit results; a failing or inconclusive result does not become a pass through this document.
+The follow-up's fresh 300-second process-local consumer soak completed 18,096,152 jobs, left queue depth zero, and reported zero PHP allocated-memory growth with an 8 MiB peak. This checks the CLI consumer lifecycle; it does not establish cross-process RSS stability or HTTP throughput.
+
+## Engineering-principles optimization review
+
+The review applies [PHPForge's optimization and acceptance rules](../../vendor/infocyph/phpforge/resources/engineering-principles.md), including allocations, bounded reuse, call overhead, runtime capability resolution, Composer loading, and SAPI-specific OPcache verification.
+
+| Approach | Disposition and constraint |
+| --- | --- |
+| Reduce allocation and cold loading | Applied lazy WeakMaps and avoided autoloading an unused optional CacheLayer integration. Host bindings remain discoverable even when established inside an active callback. |
+| Reuse immutable computed values | Applied execution-local runtime identity reuse. PID, generation, completion, cancellation and scope liveness remain live checks. |
+| Simplify control flow and reduce call overhead | Applied direct root-context assignment/restoration, first-use validation simplification, and removal of a redundant callback wrapper. No additional production classes or raised complexity limits. |
+| Change the context array representation | Packed-tuple prototypes were measured outside the repository and discarded because they did not establish a repeatable improvement. |
+| Combine Runwire cancellation internals | An isolated prototype did not establish a repeatable benefit. Neither installed vendor code nor the Runwire repository was changed. This experiment does not establish an upstream defect. |
+| Optimize Composer and OPcache setup | Optimized authoritative autoloading is already configured. Actual HTTP-SAPI OPcache was checked rather than inferred from parent CLI flags. No speculative JIT, preloading or optimizer-flag change was accepted. |
+| Remove repeated validation | Immutable identity is reused, but host-owned mutable lifetimes can change inside callbacks. Checks at admission and operation entry remain necessary; the fork, stale-generation, cancellation and closed-scope regressions must stay green. |
+
+Component and fresh-process profiles guide implementation choices; only the representative hosted comparison decides HTTP RPM acceptance. Further changes require measured benefit with these same ownership/lifecycle boundaries and unchanged budgets.
+
+## Full HTTP profile and approved integration cost (2026-10-08)
+
+The follow-up source `e326a3b9932f7f3c099722ecb3ca6b462d29740b` was profiled with [XHProf 2.3.10](https://pecl.php.net/package/xhprof/2.3.10) compiled inside the existing `php:8.4-cli-bookworm` container. The workspace was mounted read-only. A temporary router enabled function profiling around the original `benchmarks/release-host.php`; it changed only variant selection and profile capture. Four HTTP workers processed eight alternating blocks of 50 requests per variant, after 25 unprofiled warm-up requests for each variant. All **800 profiled responses** were HTTP 200 with exactly `{"ok":true,"value":42}`.
+
+The captured call graph has 798 median calls for host-only and 826 for bound, an additional 28 calls. The outer Composer `ClassLoader::loadClass()` count is 38 for each variant; no additional cold-loading gap was found. The added binding work includes:
+
+| Boundary | Calls per bound request |
+| --- | ---: |
+| `RunwireBinding::withRunwire()` | 1 |
+| `RunwireBinding::assertContext()` | 2 |
+| `RequestContext::runtime()` / `completed()` | 2 each |
+| `CancellationToken::throwIfCancelled()` / `refreshDeadline()` | 2 each |
+
+Admission validation protects the arbitrary host callback. Operation validation protects dispatch after that callback may have changed completion, cancellation, scope, PID or generation state. Removing the second checkpoint would reintroduce covered semantic failures. Profiling did not identify a further obvious safe reduction with a demonstrated benefit. Instrumented timings are not uninstrumented throughput evidence; XHProf is absent from release acceptance. Raw session profiles and the aggregation are retained under `/tmp/omnibus-http-profile/`, not distributed with the library.
+
+Following the owner's approval to proceed with profiling and the scoped cost trade-off, the active acceptance policy is `omnibus-3.0-scoped-runwire-2026-10-08`:
+
+- Unbound-vs-2.6 successful-RPM regression remains capped at **2%**.
+- Bound-vs-host-only successful-RPM overhead is capped at **3%**. The observed 2.349% is accepted as an integration cost; the cap provides 0.651 percentage points of headroom. This is an engineering capacity decision, not a claim that the failed 2% result was statistical noise.
+- p95 (15%), p99 (20%), CPU (5%), RPM CV (2%), RSS growth (4 MiB per 10k requests), correctness, minimum measurement windows and worker accounting retain their existing limits.
+- Revisit the bound cost budget when the binding/runtime implementation or representative workload changes. Future regressions over 3% still fail; request lifetime and ownership checks cannot be removed for speed.
+
+The validator exports each comparison's active limits and the policy identifier. Its adversarial self-test accepts 2.5% only for the bound comparison, rejects 2.5% unbound regression, and rejects 3.1% bound overhead, alongside existing malformed/correctness/runner-mode checks. Re-evaluating the old `e326a3b` measurements passes this scoped policy, but is explicitly **historical reassessment, not fresh final-candidate certification**. Its original Actions run remains failed under the original 2% contract.
+
+The batch-specific workflows are removed. Consumer/examples, independent production packaging/FPM and strict documentation checks are consolidated into `security-standards.yml`; PHPForge retains the supported-runtime/service/dependency matrix and quality/advisory checks. The acceptance self-test runs in `stable-performance.yml` before the seven-trial comparison. The redundant release QA workflow no longer repeats the same checks.
+
+Final acceptance requires the updated candidate's hosted seven-trial comparison and full consolidated QA. The workflow artifacts carry the candidate SHA, lock hashes, active limits and authoritative post-commit results. No merge, tag or publication is authorized by accepting this integration cost.

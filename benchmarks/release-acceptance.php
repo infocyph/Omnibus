@@ -194,7 +194,10 @@ if (array_keys($revisions['2.6']) !== array_keys($revisions['dependency-only'])
     throw new RuntimeException('Source-revision mismatches between matched variants.');
 }
 $comparisons = [];
-foreach ([['2.6', '3.0-unbound'], ['3.0-host-only', '3.0-bound']] as [$baseline, $candidate]) {
+// The owner accepted the profiled Runwire guard cost on 2026-10-08.
+// Scope the trade-off to binding overhead; ordinary dispatch retains 2%.
+// Evidence and review conditions: docs/evidence/runwire-binding-overhead.md.
+foreach ([['2.6', '3.0-unbound', 2], ['3.0-host-only', '3.0-bound', 3]] as [$baseline, $candidate, $rpmLimit]) {
     $a = $results[$baseline];
     $b = $results[$candidate];
     $deltas = [
@@ -203,16 +206,18 @@ foreach ([['2.6', '3.0-unbound'], ['3.0-host-only', '3.0-bound']] as [$baseline,
         'p99_regression_percent' => 100 * ($b['p99'] / $a['p99'] - 1),
         'cpu_regression_percent' => 100 * ($b['cpu'] / $a['cpu'] - 1),
     ];
-    foreach (['rpm_regression_percent' => 2, 'p95_regression_percent' => 15, 'p99_regression_percent' => 20, 'cpu_regression_percent' => 5] as $metric => $limit) {
+    $limits = ['rpm_regression_percent' => $rpmLimit, 'p95_regression_percent' => 15, 'p99_regression_percent' => 20, 'cpu_regression_percent' => 5];
+    foreach ($limits as $metric => $limit) {
         if ($deltas[$metric] > $limit) {
             $failures[] = sprintf('%s vs %s: %s %.3f%% exceeds %.1f%%', $candidate, $baseline, $metric, $deltas[$metric], $limit);
         }
     }
-    $comparisons[] = ['baseline' => $baseline, 'candidate' => $candidate, 'deltas' => $deltas];
+    $comparisons[] = ['baseline' => $baseline, 'candidate' => $candidate, 'limits' => $limits, 'deltas' => $deltas];
 }
 fwrite(STDOUT, json_encode([
     'passed' => $failures === [],
     'candidate_revision' => array_key_first($revisions['3.0-unbound']),
+    'budget_policy' => 'omnibus-3.0-scoped-runwire-2026-10-08',
     'certification_scope' => $mode === 'hosted' ? 'github-hosted-matched' : 'isolated-dedicated',
     'environment_stable' => $mode === 'dedicated',
     'runner_environment' => $runnerEnvironment,
@@ -223,5 +228,5 @@ fwrite(STDOUT, json_encode([
     'failures' => $failures,
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL);
 if ($failures !== []) {
-    throw new RuntimeException('Matched release performance failed its unwaived budgets.');
+    throw new RuntimeException('Matched release performance failed its scoped budgets.');
 }

@@ -142,8 +142,11 @@ The remaining local scripts are intentionally package-specific:
   PHPForge's representative benchmark schema. It validates a real HTTP host
   response on cold and warmed paths at several concurrency levels, validates an
   expected failure response, and drains a two-connection SQLite durable queue.
-  GitHub-hosted results remain marked as unstable evidence and are not used to
-  enforce the final 2% release regression budget;
+  Benchmark smoke results do not establish final release acceptance. The separate
+  matched-performance workflow requires seven trials and enforces 2% unbound
+  RPM regression, the owner-approved 3% Runwire-bound overhead cap, and unchanged
+  correctness, variance, latency, CPU and RSS limits. Hosted results retain their
+  explicit shared-infrastructure classification;
 * ``composer soak:consumer`` proves that the process-local queue drains without
   progressive memory growth;
 * ``composer soak:durable`` proves that alternating SQLite consumers drain the

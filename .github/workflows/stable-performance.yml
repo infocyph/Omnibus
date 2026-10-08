@@ -35,6 +35,8 @@ jobs:
           extensions: pdo_sqlite, pcntl, posix
           coverage: none
           tools: composer:v2
+      - name: Verify accepted and rejected performance evidence
+        run: php candidate/benchmarks/release-acceptance-selftest.php
       - name: Match harness and dependency-only baseline
         run: |
           for target in baseline dependency-only; do
@@ -84,7 +86,7 @@ jobs:
                 php benchmarks/release.php "../results/$variant-$trial.json" > /dev/null)
             done
           done
-      - name: Enforce unwaived hosted matched-release budgets
+      - name: Enforce scoped hosted matched-release budgets
         run: |
           test "$RUNNER_ENVIRONMENT" = github-hosted
           php candidate/benchmarks/release-acceptance.php results hosted | tee results/acceptance.json

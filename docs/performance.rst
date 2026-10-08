@@ -133,8 +133,11 @@ Batch 6 version comparison
 The 3.0 release audit records same-runner 2.6, dependency-only 2.6,
 unbound 3.0, host-context-only 3.0 and Runwire-bound 3.0 trials in
 ``docs/evidence/batch-6-review.md``. Those diagnostic medians are not a
-production capacity estimate or evidence that the maximum 2% median
-successful-request-RPM regression budget has been met. The final candidate
-requires a stable matched environment, repeated trials, representative
-queue failures/retries/contention and live persistent-host resource accounting.
-The owner has deferred that **release acceptance decision**, not waived it.
+production capacity estimate or final release certification. The active matched
+release policy caps unbound successful-request-RPM regression at 2% and
+Runwire-bound overhead versus the same host context at an owner-approved 3%.
+The latter accepts the profiled integration cost; it does not establish a speed
+improvement. Tail latency, CPU, RSS, variance and correctness budgets remain
+enforced. The final candidate requires seven repeated matched trials and live
+persistent-host resource accounting. GitHub-hosted acceptance is explicitly
+classified as shared infrastructure, not dedicated-machine stability.

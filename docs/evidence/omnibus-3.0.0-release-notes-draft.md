@@ -23,9 +23,9 @@
 
 ## Verification and publication status
 
-Batches 0–7 implementation and QA plus the Batch 8 nonperformance preflight are tracked in `docs/plans/omnibus-next-release-audit-plan.md`; the PHPForge release preflight and 300-second single-process host soak have passed; stable performance comparison, deeper host/resource and release authorization still belong to Batch 8.
+Batches 0–7 implementation and QA plus the Batch 8 nonperformance preflight are tracked in `docs/plans/omnibus-next-release-audit-plan.md`; the PHPForge release preflight and 300-second single-process host soak have passed; final matched performance comparison and release authorization still belong to Batch 8. The recurring consumer/docs checks now run in `security-standards.yml`, and the acceptance-validator self-test runs in `stable-performance.yml`; the batch-specific workflows have been removed.
 
-**Release blocking:** Dedicated stable-runner matched 2% RPM/p95/p99/CPU/RSS certification and owner approval remain open. Deep 100k MySQL/PostgreSQL and SQLite 1m retention evidence, actual multi-worker CPU/RSS and backend discovery counts are recorded. Shared GitHub-hosted measurements do not authorize release. Hosted runner component timings are not production acceptance. **Do not merge, tag, or publish** until these gates are explicitly closed.
+**Release blocking:** Final-candidate seven-trial matched acceptance on the owner-selected GitHub-hosted runner and publication approval remain open. The active RPM policy retains 2% for unbound dispatch and permits an owner-approved 3% overhead cap only for Runwire binding relative to the same host context; p95/p99, CPU, RSS, variance and correctness limits remain enforced. This is an accepted integration cost, not a demonstrated speed improvement or dedicated-machine stability certification. Deep 100k MySQL/PostgreSQL and SQLite 1m retention evidence, actual multi-worker CPU/RSS and backend discovery counts are recorded. Hosted component timings do not certify application performance. **Do not merge, tag, or publish** until these gates are explicitly closed.
 
 ## Advisory audit note
 
