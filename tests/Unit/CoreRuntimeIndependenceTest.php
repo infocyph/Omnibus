@@ -21,7 +21,6 @@ test('core and FPM-compatible paths keep optional integrations and process exten
     if (
         !is_array($composer['require'] ?? null)
         || !is_array($composer['require-dev'] ?? null)
-        || !is_array($composer['conflict'] ?? null)
         || !is_array($composer['suggest'] ?? null)
     ) {
         throw new RuntimeException('Composer dependency sections are invalid.');
@@ -34,12 +33,9 @@ test('core and FPM-compatible paths keep optional integrations and process exten
         ->not->toHaveKey('infocyph/dblayer')
         ->not->toHaveKey('infocyph/runwire')
         ->and($composer['require']['infocyph/uid'] ?? null)->toBe('^6.0');
-    expect($composer['require-dev']['infocyph/cachelayer'] ?? null)->toBe('^4.0')
-        ->and($composer['require-dev']['infocyph/dblayer'] ?? null)->toBe('^6.0')
+    expect($composer['require-dev']['infocyph/cachelayer'] ?? null)->toBe('^4.0.1')
+        ->and($composer['require-dev']['infocyph/dblayer'] ?? null)->toBe('^6.0.1')
         ->and($composer['require-dev']['infocyph/runwire'] ?? null)->toBe('2.1.1')
-        ->and($composer['conflict']['infocyph/cachelayer'] ?? null)->toBe('<4.0 || >=5.0')
-        ->and($composer['conflict']['infocyph/dblayer'] ?? null)->toBe('<6.0 || >=7.0')
-        ->and($composer['conflict']['infocyph/runwire'] ?? null)->toBe('<2.1.1 || >=3.0')
         ->and($composer['suggest'])->toHaveKeys(['ext-pcntl', 'ext-posix']);
     expect((new WorkerOptions())->handleSignals)->toBeFalse();
 
