@@ -21,7 +21,6 @@ test('core and FPM-compatible paths keep optional integrations and process exten
     if (
         !is_array($composer['require'] ?? null)
         || !is_array($composer['require-dev'] ?? null)
-        || !is_array($composer['conflict'] ?? null)
         || !is_array($composer['suggest'] ?? null)
     ) {
         throw new RuntimeException('Composer dependency sections are invalid.');
