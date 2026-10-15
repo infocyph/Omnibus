@@ -154,6 +154,21 @@ otherwise waits use the synchronous blocking fallback. Ordinary dispatch works
 without Runwire. See the [integration guide](docs/integration.rst) for shared
 DBLayer bindings and the runnable forwarding example.
 
+For a shared bus, the framework may register a provider on its existing binding:
+
+```php
+$bus->runwireBinding()->setRunwireContextProvider([
+    \Infocyph\CacheLayer\Integration\Runwire\RunwireIntegration::class,
+    'current',
+]);
+```
+
+The provider returns the current native `RunwireExecutionContext` or `null`.
+Ordinary `dispatch()` calls then borrow that context, check cancellation and
+restore the binding after each operation, including exceptions and overlapping
+Fibers. Explicit `withRunwire()` bindings take precedence. Installing this hook
+does not bind a runtime globally or start workers; the host owns its contexts.
+
 ## Delivery semantics
 
 Durable transports provide at-least-once delivery. Terminal failures are

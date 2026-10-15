@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\Omnibus\Integration\Runwire;
 
 use Fiber;
+use Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext;
 use Infocyph\CacheLayer\Integration\Runwire\RunwireIntegration as CacheRunwireIntegration;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\Runwire\Coroutine\CoroutineScope;
@@ -20,6 +21,9 @@ final class RunwireBinding
 {
     /** @var WeakMap<Connection, bool>|null */
     private ?WeakMap $connections = null;
+
+    /** @var null|callable():?RunwireExecutionContext */
+    private $contextProvider;
 
     /**
      * @var WeakMap<
@@ -65,6 +69,7 @@ final class RunwireBinding
             new RequestExecutionPolicy(maxExecutionSeconds: $maxSeconds),
         );
         $fiber = Fiber::getCurrent();
+        $previous = $fiber === null ? $this->rootContext : ($this->fiberContexts[$fiber] ?? null);
         $this->setContext($fiber, [
             'runtime' => $current['runtime'],
             'request' => $cleanupRequest,
@@ -76,7 +81,7 @@ final class RunwireBinding
             return $this->run($callback);
         } finally {
             $cleanupRequest->complete();
-            $this->setContext($fiber, $current);
+            $this->setContext($fiber, $previous);
         }
     }
 
@@ -134,7 +139,16 @@ final class RunwireBinding
             return $callback();
         }
 
+        $fiber = Fiber::getCurrent();
+        $explicit = $fiber === null ? $this->rootContext : ($this->fiberContexts[$fiber] ?? null);
+        if ($explicit === null) {
+            return $this->withRunwire($context['runtime'], $callback, $context['request'], $context['scope']);
+        }
+
         $this->assertContext($context['runtime'], $context['request'], $context['scope'], $context['generationKey']);
+        if ($context['generationKey'] !== null && $context['runtime']->generation !== null) {
+            $this->generations[$context['generationKey']] = $context['runtime']->generation;
+        }
         // A host binding loads this integration; an unbound optional package
         // should not be autoloaded merely to inspect its empty runtime state.
         $cacheBound = \class_exists(CacheRunwireIntegration::class, false)
@@ -175,6 +189,17 @@ final class RunwireBinding
     public function scope(): ?CoroutineScope
     {
         return $this->context()['scope'] ?? null;
+    }
+
+    /**
+     * Resolve a caller-owned task context for ordinary native operations.
+     * No request or runtime is captured by the binding itself.
+     *
+     * @param null|callable():?RunwireExecutionContext $provider
+     */
+    public function setRunwireContextProvider(?callable $provider): void
+    {
+        $this->contextProvider = $provider;
     }
 
     public function sleep(float $seconds): void
@@ -319,11 +344,23 @@ final class RunwireBinding
     private function context(): ?array
     {
         $fiber = Fiber::getCurrent();
-        if ($fiber === null) {
-            return $this->rootContext;
+        $explicit = $fiber === null ? $this->rootContext : ($this->fiberContexts[$fiber] ?? null);
+        if ($explicit !== null || $this->contextProvider === null) {
+            return $explicit;
         }
 
-        return $this->fiberContexts[$fiber] ?? null;
+        $context = ($this->contextProvider)();
+        if ($context === null) {
+            return null;
+        }
+
+        return [
+            'runtime' => $context->runtime,
+            'request' => $context->request,
+            'scope' => $context->scope,
+            'generationKey' => $context->runtime->generation === null ? null
+                : $context->runtime->driver->value . ':' . $context->runtime->mode . ':' . ($context->runtime->workerSlot ?? -1),
+        ];
     }
 
     /**

@@ -556,3 +556,75 @@ test('Runwire binding isolates concurrent request ownership by Fiber', function 
     )->and($binding->runtime())->toBeNull()
         ->and($binding->request())->toBeNull();
 });
+
+test('native dispatch resolves a passed context without retaining the request', function (): void {
+    $context = null;
+    $binding = new RunwireBinding();
+    $binding->setRunwireContextProvider(static function () use (&$context): ?\Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext {
+        return $context;
+    });
+    $transport = new InMemoryTransport(new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00')));
+    $bus = new MessageBus(new RouteMap([], new Route('memory', 'default')), new TransportRegistry(['memory' => $transport]), $binding);
+    $runtime = omnibusRunwireRuntime();
+    $request = RequestContext::create($runtime);
+    try {
+        expect($bus->dispatch(new TestCommand('fallback')))->toBeInstanceOf(Envelope::class);
+        $context = new \Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext($runtime, $request);
+        expect($bus->dispatch(new TestCommand('borrowed')))->toBeInstanceOf(Envelope::class)
+            ->and($binding->request())->toBe($request);
+        $request->cancel(CancellationReason::HOST_CANCELLED);
+        expect(fn() => $bus->dispatch(new TestCommand('cancelled')))->toThrow(\Infocyph\Runwire\Exception\CancelledException::class);
+        $binding->cleanup(static fn(): bool => true);
+        $context = null;
+        expect($binding->request())->toBeNull()
+            ->and($bus->dispatch(new TestCommand('fallback-again')))->toBeInstanceOf(Envelope::class);
+    } finally {
+        $request->complete();
+    }
+});
+
+test('provider-backed dispatch isolates overlapping Fibers and clears operation bindings after failure', function (): void {
+    $runtime = omnibusRunwireRuntime();
+    $one = RequestContext::create($runtime);
+    $two = RequestContext::create($runtime);
+    $contexts = new WeakMap();
+    $binding = new RunwireBinding();
+    $binding->setRunwireContextProvider(static function () use ($contexts): ?\Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext {
+        $fiber = Fiber::getCurrent();
+
+        return $fiber === null ? null : ($contexts[$fiber] ?? null);
+    });
+    $sender = new class($binding) implements Sender {
+        public function __construct(private RunwireBinding $binding) {}
+        public function send(Envelope $envelope, string $queue): Envelope
+        {
+            unset($queue);
+            $request = $this->binding->request();
+            Fiber::suspend($request);
+            expect($this->binding->request())->toBe($request);
+            $this->binding->checkpoint();
+
+            return $envelope;
+        }
+    };
+    $bus = new MessageBus(new RouteMap(default: new Route('recording')), new TransportRegistry(['recording' => $sender]), $binding);
+    $first = new Fiber(static fn() => $bus->dispatch(new TestCommand('one')));
+    $second = new Fiber(static fn() => $bus->dispatch(new TestCommand('two')));
+    $contexts[$first] = new \Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext($runtime, $one);
+    $contexts[$second] = new \Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext($runtime, $two);
+    try {
+        expect($first->start())->toBe($one)->and($second->start())->toBe($two);
+        $one->cancel(CancellationReason::HOST_CANCELLED);
+        expect(fn() => $first->resume())->toThrow(\Infocyph\Runwire\Exception\CancelledException::class);
+        $second->resume();
+        expect($second->getReturn())->toBeInstanceOf(Envelope::class)
+            ->and($binding->request())->toBeNull();
+        unset($contexts[$first], $contexts[$second]);
+        $probe = new Fiber(static fn() => $binding->request());
+        $probe->start();
+        expect($probe->getReturn())->toBeNull();
+    } finally {
+        $one->complete();
+        $two->complete();
+    }
+});
