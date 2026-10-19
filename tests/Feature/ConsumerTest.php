@@ -107,7 +107,7 @@ test('queue size reports visible depth rather than delayed messages', function (
     expect($transport->size('default'))->toBe(1);
 });
 
-test('consumer rejects poison payloads once without invoking retry or handlers', function (): void {
+test('consumer rejects poison payloads once without invoking retry or handlers', function (bool $deferred): void {
     $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
     $receiver = new class implements Receiver {
         public int $rejected = 0;
@@ -154,14 +154,19 @@ test('consumer rejects poison payloads once without invoking retry or handlers',
         }
     };
     $failures = new InMemoryFailureStore();
+    $resolutions = 0;
     $consumer = new Consumer(
         $receiver,
         new HandlerInvoker(new HandlerMap([])),
         new ExponentialRetryStrategy(),
-        $failures,
+        $deferred ? static function () use ($failures, &$resolutions): InMemoryFailureStore {
+            ++$resolutions;
+            return $failures;
+        } : $failures,
         $clock,
     );
 
+    expect($resolutions)->toBe(0);
     $result = $consumer->run();
     $failure = $failures->find('poison-1');
 
@@ -170,8 +175,9 @@ test('consumer rejects poison payloads once without invoking retry or handlers',
         ->and($receiver->rejected)->toBe(1)
         ->and($failure?->envelope)->toBeNull()
         ->and($failure?->payload)->toBe('{broken')
-        ->and($failure?->failureClass)->toBe(JsonException::class);
-});
+        ->and($failure?->failureClass)->toBe(JsonException::class)
+        ->and($resolutions)->toBe($deferred ? 1 : 0);
+})->with([false, true]);
 
 test('consumer retries middleware failures with reservation context and then acknowledges', function (): void {
     $clock = new FrozenClock(new DateTimeImmutable('2026-01-01T00:00:00+00:00'));
