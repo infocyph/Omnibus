@@ -95,8 +95,9 @@ lifetimes with the caller's container. Existing concrete senders retain their
 identity. Factory exceptions propagate and later lookups may retry; a factory
 returning anything other than ``Sender`` is rejected when selected.
 
-``Consumer`` accepts either a concrete ``FailureStore`` or a ``Closure`` returning
-one in its existing ``failures`` argument. The factory is called only when a
+``Consumer`` keeps its existing named ``FailureStore`` dependency for constructor
+autowiring. For deferred storage, pass ``failures: null`` and a ``Closure`` in the
+new optional final ``failureStoreResolver`` argument. The factory is called only when a
 terminal or undecodable message must be stored. Empty polls, successful handling,
 and retryable failures do not resolve it. Each storage operation asks the caller
 for the store, preserving caller-owned lifetimes. Factory or persistence failures

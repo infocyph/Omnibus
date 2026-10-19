@@ -159,11 +159,12 @@ test('consumer rejects poison payloads once without invoking retry or handlers',
         $receiver,
         new HandlerInvoker(new HandlerMap([])),
         new ExponentialRetryStrategy(),
-        $deferred ? static function () use ($failures, &$resolutions): InMemoryFailureStore {
+        $deferred ? null : $failures,
+        $clock,
+        failureStoreResolver: $deferred ? static function () use ($failures, &$resolutions): InMemoryFailureStore {
             ++$resolutions;
             return $failures;
-        } : $failures,
-        $clock,
+        } : null,
     );
 
     expect($resolutions)->toBe(0);

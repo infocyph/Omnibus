@@ -26,11 +26,12 @@ it('defers failure storage during empty successful and retryable consumption', f
             }
         }])),
         new ExponentialRetryStrategy(maximumAttempts: 2, initialDelaySeconds: 0),
-        static function () use (&$calls, $failures): FailureStore {
+        null,
+        $clock,
+        failureStoreResolver: static function () use (&$calls, $failures): FailureStore {
             ++$calls;
             return $failures;
         },
-        $clock,
     );
     expect($calls)->toBe(0)->and($consumer->run()->received)->toBe(0)->and($calls)->toBe(0);
     $transport->send(Envelope::wrap(new stdClass()), 'default');
@@ -50,8 +51,9 @@ it('propagates failure-store factory failures without rejecting the reservation'
         $transport,
         new HandlerInvoker(new HandlerMap([stdClass::class => static fn() => throw new RuntimeException('handler failed')])),
         new ExponentialRetryStrategy(maximumAttempts: 1),
-        static fn(): FailureStore => throw $failure,
+        null,
         $clock,
+        failureStoreResolver: static fn(): FailureStore => throw $failure,
     );
     expect(fn() => $consumer->run(visibilitySeconds: 0.01))->toThrow($failure);
     usleep(20000);
@@ -66,8 +68,15 @@ it('rejects an invalid deferred failure store on terminal failure', function ():
         $transport,
         new HandlerInvoker(new HandlerMap([stdClass::class => static fn() => throw new RuntimeException('handler failed')])),
         new ExponentialRetryStrategy(maximumAttempts: 1),
-        static fn(): stdClass => new stdClass(),
+        null,
         $clock,
+        failureStoreResolver: static fn(): stdClass => new stdClass(),
     );
     expect(fn() => $consumer->run())->toThrow(TypeError::class);
+});
+
+it('keeps the failure-store dependency discoverable by existing constructor autowiring', function (): void {
+    $type = new ReflectionClass(Consumer::class)->getConstructor()->getParameters()[3]->getType();
+    expect($type)->toBeInstanceOf(ReflectionNamedType::class);
+    expect($type->getName())->toBe(FailureStore::class);
 });

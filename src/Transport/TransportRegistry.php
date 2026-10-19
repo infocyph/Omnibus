@@ -36,7 +36,7 @@ final readonly class TransportRegistry
             || (!$transport instanceof Sender && !$transport instanceof \Closure)
         ) {
             throw new \InvalidArgumentException(
-                'Transport mappings require bounded names and Sender implementations or Closure factories.',
+                'Transport mappings require bounded names and Sender implementations.',
             );
         }
     }
