@@ -79,6 +79,30 @@ Changing the route does not change business code. Unselected transports,
 failure stores, workflow stores, broker SDKs, and listener maps are not
 resolved by dispatch.
 
+``TransportRegistry`` also accepts ``Closure`` factories returning ``Sender``:
+
+.. code-block:: php
+
+   $transports = new TransportRegistry([
+       'sync' => new SyncTransport($invoker),
+       'redis' => static fn () => $container->get('messaging.redis'),
+   ]);
+
+Construction validates names without invoking factories. Only ``get()`` for
+the selected name calls its factory; other transports remain uninitialized.
+Factories are evaluated on every lookup, leaving shared or request-scoped
+lifetimes with the caller's container. Existing concrete senders retain their
+identity. Factory exceptions propagate and later lookups may retry; a factory
+returning anything other than ``Sender`` is rejected when selected.
+
+``Consumer`` keeps its existing named ``FailureStore`` dependency for constructor
+autowiring. For deferred storage, pass ``failures: null`` and a ``Closure`` in the
+new optional final ``failureStoreResolver`` argument. The factory is called only when a
+terminal or undecodable message must be stored. Empty polls, successful handling,
+and retryable failures do not resolve it. Each storage operation asks the caller
+for the store, preserving caller-owned lifetimes. Factory or persistence failures
+propagate before the reservation is rejected, retaining redelivery semantics.
+
 One consumer call
 -----------------
 

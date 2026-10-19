@@ -22,17 +22,24 @@ use Psr\Clock\ClockInterface;
 
 final readonly class Consumer
 {
+    /** @var FailureStore|(\Closure(): FailureStore) */
+    private FailureStore|\Closure $failures;
+
     private RunwireBinding $runwire;
 
+    /** @param (\Closure(): FailureStore)|null $failureStoreResolver */
     public function __construct(
         private Receiver $receiver,
         private HandlerInvoker $invoker,
         private RetryStrategy $retry,
-        private FailureStore $failures,
+        ?FailureStore $failures,
         private ClockInterface $clock,
         private ExecutionScope $scope = new DirectExecutionScope(),
         ?RunwireBinding $runwire = null,
+        ?\Closure $failureStoreResolver = null,
     ) {
+        $this->failures = $failureStoreResolver ?? $failures
+            ?? throw new \InvalidArgumentException('A failure store or resolver is required.');
         $this->runwire = $runwire ?? new RunwireBinding();
     }
 
@@ -69,7 +76,7 @@ final readonly class Consumer
             $received++;
             $decodeFailure = $reservation->decodingFailure();
             if ($decodeFailure !== null) {
-                $this->failures->add(FailedMessage::undecodable(
+                $this->failureStore()->add(FailedMessage::undecodable(
                     FailureInput::id($reservation->messageId, $reservation->queue, $reservation->receipt),
                     $reservation->queue,
                     $decodeFailure->payload,
@@ -120,6 +127,11 @@ final readonly class Consumer
         return new ConsumerResult($received, $succeeded, $released, $failed);
     }
 
+    private function failureStore(): FailureStore
+    {
+        return $this->failures instanceof \Closure ? ($this->failures)() : $this->failures;
+    }
+
     private function settleFailure(
         \Throwable $exception,
         Reservation $reservation,
@@ -143,7 +155,7 @@ final readonly class Consumer
         $messageId = $messageIdStamp instanceof MessageIdStamp
             ? $messageIdStamp->id
             : FailureInput::id('', $reservation->queue, $reservation->receipt);
-        $this->failures->add(FailedMessage::decoded(
+        $this->failureStore()->add(FailedMessage::decoded(
             $messageId,
             $reservation->queue,
             $envelope,

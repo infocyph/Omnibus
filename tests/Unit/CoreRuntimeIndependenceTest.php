@@ -34,8 +34,8 @@ test('core and FPM-compatible paths keep optional integrations and process exten
         ->not->toHaveKey('infocyph/runwire')
         ->and($composer['require']['infocyph/uid'] ?? null)->toBe('^6.0');
     expect($composer['require-dev']['infocyph/cachelayer'] ?? null)->toBe('^4.0.1')
-        ->and($composer['require-dev']['infocyph/dblayer'] ?? null)->toBe('^6.0.1')
-        ->and($composer['require-dev']['infocyph/runwire'] ?? null)->toBe('2.1.1')
+        ->and($composer['require-dev']['infocyph/dblayer'] ?? null)->toBe('^6.1.2')
+        ->and($composer['require-dev']['infocyph/runwire'] ?? null)->toBe('^2.1.2')
         ->and($composer['suggest'])->toHaveKeys(['ext-pcntl', 'ext-posix']);
     expect((new WorkerOptions())->handleSignals)->toBeFalse();
 
