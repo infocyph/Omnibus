@@ -315,7 +315,7 @@ final class RunwireBinding
 
         $request?->cancellation->throwIfCancelled();
         if ($scope !== null) {
-            // Runwire 2.1 exposes its scope lifecycle through guarded operations,
+            // Runwire exposes its scope lifecycle through guarded operations,
             // not a public isClosed() query. Reject stale scopes before business work.
             $scope->barrier(1);
             $scope->cancellation()->throwIfCancelled();

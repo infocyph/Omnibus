@@ -24,7 +24,7 @@ composer require infocyph/omnibus
 Requirements:
 
 - 64-bit PHP `^8.4` with `ext-ctype` (required by UID 6)
-- `infocyph/uid:^6.0`
+- `infocyph/uid:^6.0.1`
 - `psr/clock:^1.0`
 - `psr/event-dispatcher:^1.0`
 
@@ -34,8 +34,8 @@ and single-process Worker paths do not require process extensions. Explicit
 Worker signal handling requires `ext-pcntl`; the standalone native and Runwire
 WorkerPool backends require the process capabilities they use.
 
-Database integrations support DBLayer 6.x. CacheLayer coordination integrations
-support CacheLayer 4.x. Runwire integration supports Runwire 2.x from 2.1.1.
+Database integrations support DBLayer 6.x from 6.1.4. CacheLayer coordination integrations
+support CacheLayer 4.x from 4.0.2. Runwire integration supports Runwire 3.x.
 DBLayer owns database execution, driver behavior, effective bind limits,
 transaction retries, and after-commit callback lifecycle. Omnibus owns reservations, workflows,
 failure-state transitions, and delivery guarantees. Queue receive and workflow
@@ -122,7 +122,7 @@ long-running loop for one process. Hosts may supply a framework-neutral
 requiring signal delivery for each lifecycle decision. `WorkerOptions`
 defaults to signal-free operation; opt into SIGTERM/SIGINT handling explicitly
 with `handleSignals: true` when `ext-pcntl` is available. The optional native
-`WorkerPool` requires `ext-pcntl` and `ext-posix`. Runwire 2.x from 2.1.1
+`WorkerPool` requires `ext-pcntl` and `ext-posix`. Runwire 3.x
 remains an optional explicitly selected alternative backend; construct PDO,
 Redis/Valkey, AMQP, SQS, and other process-bound resources inside its worker
 factory after fork. External Supervisor, systemd, Docker, or Kubernetes remains

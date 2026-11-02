@@ -209,7 +209,7 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/consumer"
           composer require --update-no-dev --no-interaction --prefer-dist --no-progress \
-            "infocyph/dblayer:^6.0" "infocyph/cachelayer:^4.0" "infocyph/runwire:2.1.1"
+            "infocyph/dblayer:^6.1.4" "infocyph/cachelayer:^4.0.2" "infocyph/runwire:^3.0"
           composer check-platform-reqs
           php "$GITHUB_WORKSPACE/examples/runwire-forwarding.php" "$RUNNER_TEMP/consumer/vendor/autoload.php"
       - name: Close PHP-FPM container

@@ -73,7 +73,7 @@ final class RunwireWorkerPoolBackend implements WorkerPoolBackend
         foreach ([Supervisor::class, WorkerContext::class, WorkerGroup::class] as $class) {
             if (!class_exists($class)) {
                 throw new \RuntimeException(
-                    'The Runwire WorkerPool backend requires infocyph/runwire 2.1.1 or later within the supported 2.x line.',
+                    'The Runwire WorkerPool backend requires infocyph/runwire 3.0 or later within the supported 3.x line.',
                 );
             }
         }

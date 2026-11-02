@@ -106,7 +106,7 @@ path requires booting the other. Ordinary FPM/request and non-pool CLI paths do
 not require Runwire or process extensions and do not construct a pool backend.
 Signal handling is opt-in through ``WorkerOptions(handleSignals: true)`` and
 requires PCNTL. The standalone native ``WorkerPool`` requires PCNTL/POSIX;
-Runwire 2.x from 2.1.1 is an explicitly selected alternative pool backend.
+Runwire 3.x is an explicitly selected alternative pool backend.
 Passing a host context does not select a pool backend or start a supervisor.
 
 Provider integrations

@@ -75,7 +75,7 @@ policy and does not contain the lifecycle object.
 
 ``WorkerPool`` is an optional fixed-process supervisor. Its native Unix/Linux
 backend requires ``ext-pcntl`` and ``ext-posix`` when selected and remains
-usable without Runwire. Runwire 2.x from 2.1.1 is an optional alternative
+usable without Runwire. Runwire 3.x is an optional alternative
 standalone backend and must be selected explicitly; ordinary FPM/request,
 Consumer, and single-process Worker usage does not construct either pool
 backend. The pool keeps the configured concurrency
