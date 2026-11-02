@@ -8,7 +8,7 @@ declare(strict_types=1);
  */
 function acceptanceFixtures(string $directory, bool $hosted = false): void
 {
-    foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound'] as $variant) {
+    foreach (['baseline', 'dependency-only', 'candidate-unbound', 'candidate-host-only', 'candidate-bound'] as $variant) {
         for ($trial = 1; $trial <= 7; $trial++) {
             $workloads = [];
             foreach ([
@@ -36,9 +36,9 @@ function acceptanceFixtures(string $directory, bool $hosted = false): void
                         'failed_operations' => 0,
                         'timeouts' => 0,
                         'successful_rpm' => match ($variant) {
-                            '3.0-unbound' => 297_000,
-                            '3.0-host-only' => 250_000,
-                            '3.0-bound' => 247_500,
+                            'candidate-unbound' => 297_000,
+                            'candidate-host-only' => 250_000,
+                            'candidate-bound' => 247_500,
                             default => 300_000,
                         },
                         'latency_ms' => ['p50' => 1.0, 'p95' => 2.0, 'p99' => 3.0],
@@ -47,7 +47,7 @@ function acceptanceFixtures(string $directory, bool $hosted = false): void
                     ],
                 ];
             }
-            $revision = str_starts_with($variant, '3.0-') ? 'candidate-revision' : 'baseline-revision';
+            $revision = str_starts_with($variant, 'candidate-') ? 'candidate-revision' : 'baseline-revision';
             file_put_contents(
                 "$directory/$variant-$trial.json",
                 json_encode([
@@ -90,7 +90,7 @@ function validateAcceptance(string $directory, string $mode = 'dedicated'): arra
 function assertRejected(string $directory, Closure $change, string $reason): void
 {
     acceptanceFixtures($directory);
-    $file = "$directory/3.0-unbound-1.json";
+    $file = "$directory/candidate-unbound-1.json";
     $document = json_decode((string) file_get_contents($file), true, 512, JSON_THROW_ON_ERROR);
     $change($document);
     file_put_contents($file, json_encode($document, JSON_THROW_ON_ERROR));
@@ -123,24 +123,24 @@ try {
     }
     $report = json_decode($pass['output'], true, 512, JSON_THROW_ON_ERROR);
     if (($report['passed'] ?? false) !== true
-        || count($report['workloads']['3.0-unbound'] ?? []) !== 6
+        || count($report['workloads']['candidate-unbound'] ?? []) !== 6
         || ($report['comparisons'][0]['limits']['rpm_regression_percent'] ?? null) !== 2
         || ($report['comparisons'][1]['limits']['rpm_regression_percent'] ?? null) !== 3
-        || ($report['budget_policy'] ?? null) !== 'omnibus-3.0-scoped-runwire-2026-10-08') {
+        || ($report['budget_policy'] ?? null) !== 'omnibus-3.1-scoped-runwire-2026-11-02') {
         throw new RuntimeException('Release report lost per-workload evidence.');
     }
-    setAcceptanceRpm($directory, '3.0-bound', 243_750);
+    setAcceptanceRpm($directory, 'candidate-bound', 243_750);
     $acceptedCost = validateAcceptance($directory);
     if ($acceptedCost['exit'] !== 0) {
         throw new RuntimeException('Approved 2.5% binding overhead rejected: ' . $acceptedCost['output']);
     }
-    setAcceptanceRpm($directory, '3.0-unbound', 292_500);
+    setAcceptanceRpm($directory, 'candidate-unbound', 292_500);
     $unboundCost = validateAcceptance($directory);
     if ($unboundCost['exit'] === 0 || !str_contains($unboundCost['output'], 'exceeds 2.0%')) {
         throw new RuntimeException('Binding trade-off weakened unbound 2% budget: ' . $unboundCost['output']);
     }
     acceptanceFixtures($directory);
-    setAcceptanceRpm($directory, '3.0-bound', 242_250);
+    setAcceptanceRpm($directory, 'candidate-bound', 242_250);
     $excessBindingCost = validateAcceptance($directory);
     if ($excessBindingCost['exit'] === 0 || !str_contains($excessBindingCost['output'], 'exceeds 3.0%')) {
         throw new RuntimeException('Binding overhead exceeded its 3% cap: ' . $excessBindingCost['output']);
@@ -158,7 +158,7 @@ try {
     if (validateAcceptance($directory)['exit'] === 0) {
         throw new RuntimeException('Dedicated mode accepted hosted evidence.');
     }
-    $short = "$directory/3.0-unbound-1.json";
+    $short = "$directory/candidate-unbound-1.json";
     $shortDocument = json_decode((string) file_get_contents($short), true, 512, JSON_THROW_ON_ERROR);
     $shortDocument['workloads'][3]['duration_seconds'] = 0.45;
     file_put_contents($short, json_encode($shortDocument, JSON_THROW_ON_ERROR));
@@ -189,7 +189,7 @@ try {
         $document['workloads'][3]['result']['latency_ms']['p95'] = -1;
     }, 'Invalid benchmark latency');
     acceptanceFixtures($directory);
-    setAcceptanceRpm($directory, '3.0-unbound', 270_000);
+    setAcceptanceRpm($directory, 'candidate-unbound', 270_000);
     $failed = validateAcceptance($directory);
     if ($failed['exit'] === 0 || !str_contains($failed['output'], 'rpm_regression_percent')) {
         throw new RuntimeException('2% release throughput budget was bypassed: ' . $failed['output']);

@@ -35,7 +35,7 @@ and installs it in a separate Composer project without development dependencies,
 using the
 project's own optimized (not authoritative) autoloader. The standalone probe
 is then run against **that consumer autoloader**, followed by installation of
-selected optional DBLayer 6, CacheLayer 4 and Runwire 2.1.1 integrations.
+selected optional DBLayer 6, CacheLayer 4 and Runwire 3.0 integrations.
 Development-only paths must not occur in the release archive.
 
 PHP-FPM request

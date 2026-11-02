@@ -35,7 +35,7 @@ $fingerprint = null;
 $runnerEnvironment = null;
 $revisions = [];
 $failures = [];
-foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound'] as $variant) {
+foreach (['baseline', 'dependency-only', 'candidate-unbound', 'candidate-host-only', 'candidate-bound'] as $variant) {
     $files = glob($directory . '/' . $variant . '-*.json');
     if (!is_array($files) || count($files) !== 7) {
         throw new RuntimeException('Exactly seven independent trials required for ' . $variant);
@@ -188,16 +188,16 @@ foreach (['2.6', 'dependency-only', '3.0-unbound', '3.0-host-only', '3.0-bound']
         'trial_windows_seconds' => array_column($trials, 'window_seconds'),
     ];
 }
-if (array_keys($revisions['2.6']) !== array_keys($revisions['dependency-only'])
-    || array_keys($revisions['3.0-unbound']) !== array_keys($revisions['3.0-host-only'])
-    || array_keys($revisions['3.0-unbound']) !== array_keys($revisions['3.0-bound'])) {
+if (array_keys($revisions['baseline']) !== array_keys($revisions['dependency-only'])
+    || array_keys($revisions['candidate-unbound']) !== array_keys($revisions['candidate-host-only'])
+    || array_keys($revisions['candidate-unbound']) !== array_keys($revisions['candidate-bound'])) {
     throw new RuntimeException('Source-revision mismatches between matched variants.');
 }
 $comparisons = [];
 // The owner accepted the profiled Runwire guard cost on 2026-10-08.
 // Scope the trade-off to binding overhead; ordinary dispatch retains 2%.
 // Evidence and review conditions: docs/evidence/runwire-binding-overhead.md.
-foreach ([['2.6', '3.0-unbound', 2], ['3.0-host-only', '3.0-bound', 3]] as [$baseline, $candidate, $rpmLimit]) {
+foreach ([['baseline', 'candidate-unbound', 2], ['candidate-host-only', 'candidate-bound', 3]] as [$baseline, $candidate, $rpmLimit]) {
     $a = $results[$baseline];
     $b = $results[$candidate];
     $deltas = [
@@ -216,8 +216,8 @@ foreach ([['2.6', '3.0-unbound', 2], ['3.0-host-only', '3.0-bound', 3]] as [$bas
 }
 fwrite(STDOUT, json_encode([
     'passed' => $failures === [],
-    'candidate_revision' => array_key_first($revisions['3.0-unbound']),
-    'budget_policy' => 'omnibus-3.0-scoped-runwire-2026-10-08',
+    'candidate_revision' => array_key_first($revisions['candidate-unbound']),
+    'budget_policy' => 'omnibus-3.1-scoped-runwire-2026-11-02',
     'certification_scope' => $mode === 'hosted' ? 'github-hosted-matched' : 'isolated-dedicated',
     'environment_stable' => $mode === 'dedicated',
     'runner_environment' => $runnerEnvironment,

@@ -161,7 +161,7 @@ The remaining local scripts are intentionally package-specific:
   lifetime of an arbitrary long-running worker command.
 
 CI runs supported PHP versions with lowest and stable dependency resolution,
-including UID 6, CacheLayer 4, DBLayer 6, and Runwire 2.1.1; clean production
+including UID 6, CacheLayer 4, DBLayer 6, and Runwire 3.0; clean production
 installation; static analysis; architecture checks; live database/Redis
 services; strict integration discovery; representative benchmark artifact
 validation; and strict Sphinx documentation. The package-level portable-core

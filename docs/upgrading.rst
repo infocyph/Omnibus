@@ -1,6 +1,24 @@
 Upgrading
 =========
 
+3.1.0
+-----
+
+The tested dependency floors are UID ``^6.0.1``, CacheLayer ``^4.0.2``,
+DBLayer ``^6.1.4``, and Runwire ``^3.0``. Runwire integration now targets 3.x;
+applications using the optional integration should upgrade Runwire together
+with Omnibus. CacheLayer, DBLayer, and Runwire remain optional for consumers.
+
+.. code-block:: console
+
+   composer require infocyph/omnibus:^3.1 infocyph/uid:^6.0.1
+   composer require infocyph/cachelayer:^4.0.2 infocyph/dblayer:^6.1.4 infocyph/runwire:^3.0
+
+Install only the optional packages used by the application. Public Omnibus
+entry points, host ownership, cancellation checks, and synchronous fallback
+remain unchanged. This update introduces no durable schema or payload change.
+The 3.0 notes below describe that release's historical dependency generation.
+
 3.0.0
 -----
 

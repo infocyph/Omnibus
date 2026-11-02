@@ -97,6 +97,8 @@ for ($cycle = 0; $cycle < $cycles; $cycle++) {
         $reconciliationAttempts++;
 
         try {
+            // An attempted send remains ambiguous until its dispatch lease expires.
+            $clock->advance('+31 seconds');
             $coordinator->dispatchPending($id, 100);
         } catch (Throwable) {
             $reconciliationErrors++;
@@ -145,7 +147,12 @@ for ($cycle = 0; $cycle < $cycles; $cycle++) {
 }
 $elapsed = (hrtime(true) - $started) / 1_000_000_000;
 if ($reconciliationErrors > 0 || $duplicateHandlerExecutions > 0 || $terminalRegressions > 0) {
-    throw new RuntimeException('Workflow reconciliation soak observed an invariant violation.');
+    throw new RuntimeException(sprintf(
+        'Workflow soak failed: reconciliation errors=%d, duplicate executions=%d, terminal regressions=%d.',
+        $reconciliationErrors,
+        $duplicateHandlerExecutions,
+        $terminalRegressions,
+    ));
 }
 
 fwrite(STDOUT, json_encode([

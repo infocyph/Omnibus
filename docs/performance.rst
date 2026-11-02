@@ -130,6 +130,13 @@ microbenchmark improvement.
 Release performance comparison
 ------------------------------
 
+For 3.1, the matched workflow compares the released 3.0.2 baseline, the same
+source with the new dependency floors, and unbound, host-context-only and
+Runwire-bound candidate variants. Artifacts use version-independent
+``baseline``, ``dependency-only`` and ``candidate-*`` labels and retain source
+revisions and dependency-lock hashes. The workflow runs on current pull
+requests and main pushes, and remains manually dispatchable.
+
 The 3.0 release audit records same-runner 2.6, dependency-only 2.6,
 unbound 3.0, host-context-only 3.0 and Runwire-bound 3.0 trials in
 ``docs/evidence/batch-6-review.md``. Those diagnostic medians are not a
