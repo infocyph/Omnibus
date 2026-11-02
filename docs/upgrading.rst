@@ -19,6 +19,12 @@ entry points, host ownership, cancellation checks, and synchronous fallback
 remain unchanged. This update introduces no durable schema or payload change.
 The 3.0 notes below describe that release's historical dependency generation.
 
+DBLayer 6.1.4 resets failed SQLite prepared statements before retry or rollback,
+including when exception traces retain their arguments. This preserves fresh
+affected-row counts for stale-receipt rejection and prevents retry commits
+from retaining failed statements. Omnibus keeps that cleanup in DBLayer's
+execution owner; it does not alter PDO configuration to hide the failure.
+
 3.0.0
 -----
 

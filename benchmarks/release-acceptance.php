@@ -196,7 +196,7 @@ if (array_keys($revisions['baseline']) !== array_keys($revisions['dependency-onl
 $comparisons = [];
 // The owner accepted the profiled Runwire guard cost on 2026-10-08.
 // Scope the trade-off to binding overhead; ordinary dispatch retains 2%.
-// Evidence and review conditions: docs/evidence/runwire-binding-overhead.md.
+// Policy rationale and review conditions: docs/performance.rst.
 foreach ([['baseline', 'candidate-unbound', 2], ['candidate-host-only', 'candidate-bound', 3]] as [$baseline, $candidate, $rpmLimit]) {
     $a = $results[$baseline];
     $b = $results[$candidate];
